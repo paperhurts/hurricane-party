@@ -19,6 +19,8 @@ pub struct MediaRow {
     pub uploader: Option<String>,
     pub duration_s: Option<f64>,
     pub filesize: Option<i64>,
+    /// "audio" | "video" — the frontend routes video to its own window (D13).
+    pub kind: String,
     /// Absolute path, rebuilt from (root_id, relpath) at read time. The DB never
     /// stores it (D28) — this is derived for the player, not persisted.
     pub path: String,
@@ -27,7 +29,7 @@ pub struct MediaRow {
 }
 
 const MEDIA_SELECT: &str = "
-    SELECT m.id, m.title, m.uploader, m.duration_s, m.filesize,
+    SELECT m.id, m.title, m.uploader, m.duration_s, m.filesize, m.kind,
            r.path AS root_path, m.relpath";
 
 fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<MediaRow> {
@@ -39,6 +41,7 @@ fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<Me
         uploader: r.get("uploader")?,
         duration_s: r.get("duration_s")?,
         filesize: r.get("filesize")?,
+        kind: r.get("kind")?,
         path: std::path::Path::new(&root).join(&rel).to_string_lossy().to_string(),
         position,
     })

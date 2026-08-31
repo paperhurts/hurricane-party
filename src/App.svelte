@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
 
   type Job = {
@@ -23,9 +24,12 @@
     uploader: string | null;
     duration_s: number | null;
     filesize: number | null;
+    kind: string;
     path: string;
     position: number | null;
   };
+
+  type Root = { id: number; label: string; path: string; count: number; present: boolean };
 
   type Playlist = { id: number; name: string; count: number };
 
@@ -39,6 +43,10 @@
   let playing = $state<MediaRow | null>(null);
   let libraryPath = $state("");
   let concurrency = $state(2);
+  let wantVideo = $state(false);
+  let roots = $state<Root[]>([]);
+  let scanning = $state(false);
+  let notice = $state<string | null>(null);
   let audio: HTMLAudioElement;
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
@@ -61,6 +69,7 @@
   async function refreshLibrary() {
     tracks = await invoke<MediaRow[]>("list_tracks");
     playlists = await invoke<Playlist[]>("list_playlists");
+    roots = await invoke<Root[]>("list_roots");
     if (selectedList != null) await openList(selectedList);
   }
 
@@ -74,6 +83,21 @@
     const subs = [
       listen("jobs-changed", refreshJobs),
       listen("library-changed", refreshLibrary),
+      // Transport arriving from the control pipe. Rust relays rather than
+      // executes, because the audio is here.
+      listen<{ cmd: string; arg: unknown }>("control-command", (e) => {
+        const { cmd, arg } = e.payload;
+        if (!audio) return;
+        if (cmd === "play") audio.play();
+        else if (cmd === "pause") audio.pause();
+        else if (cmd === "toggle") audio.paused ? audio.play() : audio.pause();
+        else if (cmd === "stop") { audio.pause(); audio.currentTime = 0; playing = null; }
+        else if (cmd === "next") step(1);
+        else if (cmd === "prev") step(-1);
+        else if (cmd === "seek") audio.currentTime = Number(arg) || 0;
+        else if (cmd === "volume") audio.volume = Math.min(1, Math.max(0, Number(arg)));
+        pushState();
+      }),
     ];
     // The DB is the source of truth for progress, and it's written throttled
     // to ~4Hz. Polling it while work is in flight beats trying to reconcile a
@@ -94,7 +118,7 @@
     if (!u) return;
     error = null;
     try {
-      await invoke<number>("enqueue_url", { url: u });
+      await invoke<number>("enqueue_url", { url: u, wantVideo });
       url = "";
       refreshJobs();
     } catch (e) {
@@ -132,9 +156,57 @@
   }
 
   function play(t: MediaRow) {
+    // Video gets its own decorated OS window (D13) — it is deliberately not
+    // part of the bond group, and the audio element here can't show it.
+    if (t.kind === "video") {
+      invoke("open_video", { id: t.id });
+      return;
+    }
     playing = t;
     audio.src = convertFileSrc(t.path);
     audio.play();
+    pushState();
+  }
+
+  /// Mirror playback state into Rust so the control channel can answer
+  /// `status` truthfully — the audio graph lives here, not there (D5).
+  function pushState() {
+    invoke("report_state", {
+      state: {
+        state: !playing ? "stopped" : audio?.paused ? "paused" : "playing",
+        media_id: playing?.id ?? null,
+        title: playing?.title ?? null,
+        uploader: playing?.uploader ?? null,
+        duration_s: playing?.duration_s ?? null,
+        pos_s: audio?.currentTime ?? null,
+        volume: audio?.volume ?? 1,
+      },
+    }).catch(() => {});
+  }
+
+  function step(delta: number) {
+    if (!playing) return;
+    const i = shown.findIndex((t) => t.id === playing!.id);
+    const next = shown[i + delta];
+    if (next) play(next);
+  }
+
+  async function addFolder() {
+    const picked = await openDialog({ directory: true, multiple: false, title: "Add a music folder" });
+    if (typeof picked !== "string") return;
+    scanning = true;
+    notice = null;
+    try {
+      const r = await invoke<{ found: number; added: number; updated: number }>(
+        "add_local_folder", { path: picked }
+      );
+      notice = `Scanned ${r.found} file${r.found === 1 ? "" : "s"} — ${r.added} added, ${r.updated} updated.`;
+      await refreshLibrary();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      scanning = false;
+    }
   }
 
   async function setConc(n: number) {
@@ -146,7 +218,7 @@
 <main>
   <header>
     <h1>hurricane-party</h1>
-    <span class="ver">v0.2 — persistent queue, library, playlists</span>
+    <span class="ver">v0.3 — video window, local folders, control API</span>
     <label class="conc">
       concurrent
       <select value={concurrency} onchange={(e) => setConc(+e.currentTarget.value)}>
@@ -157,8 +229,14 @@
 
   <form onsubmit={(e) => { e.preventDefault(); add(); }}>
     <input bind:value={url} placeholder="Paste a URL — it queues, and survives a restart" />
+    <label class="vid"><input type="checkbox" bind:checked={wantVideo} /> video</label>
     <button type="submit" disabled={!url.trim()}>Queue</button>
+    <button type="button" onclick={addFolder} disabled={scanning}>
+      {scanning ? "Scanning…" : "Add folder"}
+    </button>
   </form>
+
+  {#if notice}<p class="notice">{notice}</p>{/if}
 
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -204,12 +282,23 @@
         </button>
       {/each}
       <button class="new" onclick={newList}>+ New playlist</button>
+      {#if roots.length > 1}
+        <div class="roots">
+          <span class="rootlabel">Roots</span>
+          {#each roots as r (r.id)}
+            <!-- A missing root is an unplugged drive, not a broken library (D28) -->
+            <span class="root" class:gone={!r.present} title={r.path}>
+              {r.label} <span class="n">{r.count}</span>
+            </span>
+          {/each}
+        </div>
+      {/if}
     </nav>
 
     <ul class="tracks">
       {#each shown as t, i (t.id + ":" + (t.position ?? "l"))}
         <li class:current={playing?.id === t.id}>
-          <button class="play" onclick={() => play(t)}>▶</button>
+          <button class="play" onclick={() => play(t)}>{t.kind === "video" ? "▣" : "▶"}</button>
           <span class="title">{t.title}</span>
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
           {#if selectedList == null}
@@ -236,7 +325,9 @@
   </section>
 
   <!-- svelte-ignore a11y_media_has_caption -->
-  <audio bind:this={audio} controls></audio>
+  <audio bind:this={audio} controls
+         onplay={pushState} onpause={pushState} onended={() => step(1)}
+         onvolumechange={pushState}></audio>
 
   <footer><span>Library</span><code>{libraryPath}</code></footer>
 </main>
@@ -249,6 +340,16 @@
   h2 { margin: 0 0 6px; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
        color: color-mix(in srgb, var(--filament) 45%, transparent); font-weight: 400; }
   .ver { font-size: 12px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
+  .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
+         color: color-mix(in srgb, var(--filament) 55%, transparent); white-space: nowrap; }
+  .notice { margin: 0; font-size: 12px; color: var(--arc); }
+  .roots { display: flex; flex-direction: column; gap: 2px; margin-top: 10px;
+           padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--arc) 12%, transparent); }
+  .rootlabel { font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
+               color: color-mix(in srgb, var(--filament) 30%, transparent); }
+  .root { font-size: 11px; padding: 2px 8px; display: flex; justify-content: space-between;
+          color: color-mix(in srgb, var(--filament) 70%, transparent); }
+  .root.gone { color: var(--ember); text-decoration: line-through; }
   .conc { margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
   select { font: inherit; font-size: 11px; background: var(--well); color: var(--filament);
            border: 1px solid color-mix(in srgb, var(--arc) 30%, transparent); padding: 2px 4px; }
