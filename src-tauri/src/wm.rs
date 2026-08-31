@@ -78,6 +78,18 @@ fn entry_of(id: WindowId) -> &'static str {
     }
 }
 
+/// Edge names as they cross IPC. Kept as strings rather than a serialised enum
+/// so the frontend can name an edge without importing a Rust type.
+pub fn edge_from_str(name: &str) -> Option<Edge> {
+    match name {
+        "top" => Some(Edge::Top),
+        "right" => Some(Edge::Right),
+        "bottom" => Some(Edge::Bottom),
+        "left" => Some(Edge::Left),
+        _ => None,
+    }
+}
+
 /// D35 / D30: only the playlist can actually change size, so only seams that
 /// touch it are live splitters. Everywhere else the seam is a move handle.
 pub fn is_resizable(id: WindowId) -> bool {
@@ -197,6 +209,11 @@ pub struct WmState {
     pub monitors: Vec<MonitorInfo>,
     /// Set for the duration of a title-bar drag.
     pub drag: Option<DragState>,
+    /// Set for the duration of a splitter drag on a seam.
+    pub splitter: Option<SplitterState>,
+    /// Which window last took focus, so a window that mounts late can be told
+    /// whether its group is active.
+    pub focused: Option<WindowId>,
 }
 
 /// A title-bar drag in flight.
@@ -228,6 +245,53 @@ pub struct Wm(pub Mutex<WmState>);
 
 // ---- window creation --------------------------------------------------------
 
+/// The stack the app opens with: main on top, eq under it, playlist under that,
+/// all three flush and bonded.
+///
+/// Pure, and computed **before** any window exists. That ordering is the whole
+/// point — see `seed_state`.
+pub fn initial_layout(scale: f64) -> (Layout, WindowGraph) {
+    let w = bond::d40::physical(CHROME_W, scale);
+    let h = bond::d40::physical(CHROME_H, scale);
+    let x0 = bond::d40::physical(120.0, scale);
+    let y0 = bond::d40::physical(120.0, scale);
+
+    let mut layout = Layout::new();
+    for (i, id) in CLASSIC.iter().enumerate() {
+        layout.insert(*id, Rect::new(x0, y0 + h * i as Px, w, h));
+    }
+
+    let mut graph = WindowGraph::new();
+    for (a, b) in [(MAIN, EQ), (EQ, PLAYLIST)] {
+        graph.insert(Bond::new(a, b, Edge::Bottom, (x0, x0 + w)));
+    }
+    (layout, graph)
+}
+
+/// Put the intended layout and bond graph into state **before** the windows
+/// exist.
+///
+/// Not premature: it is the fix for a real race. A webview begins loading the
+/// moment its window is constructed, and it calls `wm_hello` as soon as it
+/// mounts — which lands before `register()` has run, and before the `listen`
+/// subscriptions it would have raced are even live. Windows then come up
+/// believing they have no bonds, so no seam is drawn, and every click on a seam
+/// falls through to the title bar underneath and moves the group instead of
+/// resizing it. Seeding first removes the race rather than narrowing it.
+///
+/// D58 still holds: this is *intent*, and `register` reconciles it against what
+/// the OS actually did.
+pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
+    let scale = app.primary_monitor()?.map(|m| m.scale_factor()).unwrap_or(1.0);
+    let (layout, graph) = initial_layout(scale);
+    let state = app.state::<Wm>();
+    let mut s = state.0.lock().unwrap();
+    s.scale = scale;
+    s.layout = layout;
+    s.graph = graph;
+    Ok(())
+}
+
 /// Build the three classic windows plus their hidden roots.
 ///
 /// Sizes are declared in `PhysicalSize`, never the logical config keys (D38):
@@ -236,18 +300,15 @@ pub struct Wm(pub Mutex<WmState>);
 /// premise is two windows sitting flush with a hairline seam, that would make
 /// "flush" a property of tao's rounding mode.
 pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
-    let scale = app.primary_monitor()?.map(|m| m.scale_factor()).unwrap_or(1.0);
+    // Placed from the layout seeded before any window existed, so the model and
+    // the screen start out saying the same thing.
+    let seeded = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        s.layout.clone()
+    };
 
-    let w = bond::d40::physical(CHROME_W, scale);
-    let h = bond::d40::physical(CHROME_H, scale);
-
-    // Start where Winamp does: main on top, EQ under it, playlist under that,
-    // all three flush. The bonds are inserted in register() so the group is real
-    // from the first frame rather than something the user has to assemble.
-    let x0 = bond::d40::physical(120.0, scale);
-    let y0 = bond::d40::physical(120.0, scale);
-
-    for (i, id) in CLASSIC.iter().enumerate() {
+    for id in CLASSIC.iter() {
         let win =
             WebviewWindowBuilder::new(app, label_of(*id), WebviewUrl::App(entry_of(*id).into()))
                 .title(format!("hurricane-party — {}", label_of(*id)))
@@ -275,9 +336,12 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
         // D52: position, THEN size. Crossing a DPI boundary is not a pure move
         // — Windows sends WM_DPICHANGED and tao rescales to preserve logical
         // size, so size-then-position leaves the window 1.5x too big.
-        win.set_position(PhysicalPosition::new(x0, y0 + h * i as Px))?;
-        win.set_size(PhysicalSize::new(w as u32, h as u32))?;
-        win.show()?;
+        let r = seeded[id];
+        win.set_position(PhysicalPosition::new(r.x, r.y))?;
+        win.set_size(PhysicalSize::new(r.w as u32, r.h as u32))?;
+        // Deliberately NOT shown here. See show_classic_windows: the webviews
+        // start loading the moment a window exists, and they reach wm_hello
+        // before setup has finished registering the graph.
     }
 
     // D41: the hidden roots. Never shown, never in the taskbar, never focusable
@@ -299,6 +363,24 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
             .build()?;
     }
 
+    Ok(())
+}
+
+/// Reveal the windows, once the graph behind them is real.
+///
+/// Splitting this out is not tidiness. The webviews begin loading as soon as
+/// their window exists, and they call `wm_hello` as soon as they mount — which
+/// lands **before** `register()` finishes. The windows then come up believing
+/// they have no bonds, so no seam is drawn, and every click on a seam falls
+/// through to the title bar underneath and moves the group instead of resizing
+/// it. Building hidden and showing afterwards removes the race rather than
+/// narrowing it, and it also avoids a frame of unbonded windows on screen.
+pub fn show_classic_windows(app: &AppHandle) -> tauri::Result<()> {
+    for id in CLASSIC {
+        if let Some(win) = app.get_webview_window(label_of(id)) {
+            win.show()?;
+        }
+    }
     Ok(())
 }
 
@@ -346,20 +428,11 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
         .map(|w| platform::handle_of(&w))
         .collect();
 
-    let mut graph = WindowGraph::new();
-    for (a, b) in [(MAIN, EQ), (EQ, PLAYLIST)] {
-        let (Some(ra), Some(rb)) = (layout.get(&a), layout.get(&b)) else {
-            continue;
-        };
-        // Only bond what is genuinely flush. If the OS put a window somewhere
-        // other than where we asked, the honest answer is no bond — asserting a
-        // bond that is not geometrically true is exactly the D58 failure.
-        if ra.bottom() == rb.y {
-            let span = (ra.x.max(rb.x), ra.right().min(rb.right()));
-            graph.insert(Bond::new(a, b, Edge::Bottom, span));
-        }
-    }
-
+    // D58: the seeded graph is intent, and intent is not evidence. Drop any
+    // seeded bond the OS does not actually agree with — a graph that stays
+    // perfectly self-consistent while describing a layout existing nowhere is
+    // the exact failure that decision is about, and internal agreement would
+    // never catch it.
     let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
@@ -368,11 +441,24 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
         s.handles = handles;
         s.roots = roots;
         s.layout = layout;
-        s.graph = graph;
+        let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
+            .into_iter()
+            .map(|(b, why)| {
+                eprintln!(
+                    "wm: dropping bond {:?}-{:?}, the OS disagrees: {why}",
+                    b.a, b.b
+                );
+                b.pair()
+            })
+            .collect();
+        for (a, b) in stale {
+            s.graph.break_bond(a, b);
+        }
         plan_ownership(&s, Some(MAIN))
     }; // D54: lock dropped here, before a single OS call.
 
     apply_ownership(&plan);
+    emit_edges(app);
     Ok(())
 }
 
@@ -654,6 +740,216 @@ pub fn drag_end(app: &AppHandle) {
         plan_ownership(&s, active)
     };
     apply_ownership(&plan);
+    emit_edges(app);
+}
+
+// ---- seams ------------------------------------------------------------------
+
+/// Which of a window's four edges carry a bond, and whether each one is a live
+/// splitter.
+///
+/// `None` means no bond on that edge. `Some(false)` means bonded but inert as a
+/// splitter, which per D35 makes it a move handle rather than something that
+/// offers a resize and then refuses to perform one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Edges {
+    pub top: Option<bool>,
+    pub right: Option<bool>,
+    pub bottom: Option<bool>,
+    pub left: Option<bool>,
+}
+
+/// D35: the cursor tells the truth.
+///
+/// Bonds are stored canonically — `a` is always the left or top window — so a
+/// bond's edge is read from whichever end of it this window sits on.
+pub fn edges_for(state: &WmState, id: WindowId) -> Edges {
+    let mut e = Edges::default();
+    for b in &state.graph.bonds {
+        if !b.touches(id) {
+            continue;
+        }
+        let live = Some(bond::splitter_is_live(is_resizable(b.a), is_resizable(b.b)));
+        match (b.edge, b.a == id) {
+            (Edge::Right, true) => e.right = live,
+            (Edge::Right, false) => e.left = live,
+            (Edge::Bottom, true) => e.bottom = live,
+            (Edge::Bottom, false) => e.top = live,
+            // A non-canonical bond cannot reach here: Bond::new normalises
+            // every Left/Top into its mirror image on construction.
+            _ => {}
+        }
+    }
+    e
+}
+
+/// Tell every classic window which of its edges are seams. Call after anything
+/// that changes the graph.
+pub fn emit_edges(app: &AppHandle) {
+    let all: Vec<(WindowId, Edges)> = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        CLASSIC.iter().map(|id| (*id, edges_for(&s, *id))).collect()
+    };
+    for (id, e) in all {
+        let _ = app.emit_to(label_of(id), "wm:edges", e);
+    }
+}
+
+/// D30: quantise a seam position so the resizable neighbour lands on a legal
+/// size.
+///
+/// Every valid playlist size is `275 + 25n` wide by `116 + 29m` tall, so the
+/// seam cannot stop wherever the cursor happens to be — it has to jump. The
+/// step count is derived from the raw position and the size is then recomputed
+/// **from the logical base** (D40), never by adding a rounded physical step to
+/// a previous physical value: stepping by a rounded increment drifts 5 px after
+/// ten steps and 20 px after forty, which walks the bonded neighbour out of
+/// flush a little more every time.
+pub fn quantize_seam(layout: &Layout, b: &Bond, raw: Px, scale: f64) -> Px {
+    let vertical = b.edge.is_vertical_seam();
+    let (base, step) = if vertical {
+        (CHROME_W, PLAYLIST_STEP_W)
+    } else {
+        (CHROME_H, PLAYLIST_STEP_H)
+    };
+    let (Some(ra), Some(rb)) = (layout.get(&b.a).copied(), layout.get(&b.b).copied()) else {
+        return raw;
+    };
+
+    // Quantise against whichever side actually resizes. The fixed side keeps
+    // its size and slides, so it constrains nothing.
+    // The resizable side's size is measured from its own far edge, which does
+    // not move. `sign` carries which direction that measurement runs in, so the
+    // two cases share one expression instead of duplicating the rounding.
+    let (fixed_edge, sign) = if is_resizable(b.b) {
+        // b grows leftward/upward from its far edge: size = fixed_edge - pos.
+        (if vertical { rb.right() } else { rb.bottom() }, 1)
+    } else if is_resizable(b.a) {
+        // a grows rightward/downward from its near edge: size = pos - fixed_edge.
+        (if vertical { ra.x } else { ra.y }, -1)
+    } else {
+        return raw;
+    };
+
+    // Steps of the resizable side implied by where the cursor is, rounded to
+    // the nearest legal size and never below the base.
+    let span = ((fixed_edge - raw) * sign) as f64;
+    let n = (((span / scale) - base) / step).round().max(0.0) as i32;
+    fixed_edge - sign * bond::d40::stepped(base, step, n, scale)
+}
+
+/// A splitter drag in flight.
+#[derive(Clone, Debug)]
+pub struct SplitterState {
+    pub bond: Bond,
+    pub origin_layout: Layout,
+}
+
+/// Begin a splitter drag on one of `id`'s edges.
+///
+/// Returns false when that edge is not a live splitter, which is the caller's
+/// signal to treat the gesture as a group move instead (D35).
+pub fn splitter_start(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
+    let state = app.state::<Wm>();
+    let mut s = state.0.lock().unwrap();
+    let Some(b) = seam_on(&s, id, edge) else {
+        return false;
+    };
+    if !bond::splitter_is_live(is_resizable(b.a), is_resizable(b.b)) {
+        return false;
+    }
+    s.splitter = Some(SplitterState {
+        bond: b,
+        origin_layout: s.layout.clone(),
+    });
+    true
+}
+
+/// The bond sitting on a given edge of a window, in canonical form.
+fn seam_on(state: &WmState, id: WindowId, edge: Edge) -> Option<Bond> {
+    state
+        .graph
+        .bonds
+        .iter()
+        .find(|b| match (b.edge, b.a == id, edge) {
+            (Edge::Right, true, Edge::Right) => true,
+            (Edge::Right, false, Edge::Left) => b.b == id,
+            (Edge::Bottom, true, Edge::Bottom) => true,
+            (Edge::Bottom, false, Edge::Top) => b.b == id,
+            _ => false,
+        })
+        .copied()
+}
+
+/// One splitter frame.
+pub fn splitter_move(app: &AppHandle) {
+    let cursor = platform::platform().cursor_pos();
+
+    let (layout, touched) = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        let Some(sp) = s.splitter.clone() else {
+            return;
+        };
+
+        let scale = scale_at(&s.monitors, cursor.0, cursor.1, s.scale);
+        let vertical = sp.bond.edge.is_vertical_seam();
+        let raw = if vertical { cursor.0 } else { cursor.1 };
+
+        // D40 again: recompute from the origin layout every frame. Applying the
+        // splitter to the *current* layout would compound its own rounding.
+        let mut layout = sp.origin_layout.clone();
+        let pos = quantize_seam(&layout, &sp.bond, raw, scale);
+        let min = if vertical {
+            bond::d40::physical(CHROME_W, scale)
+        } else {
+            bond::d40::physical(CHROME_H, scale)
+        };
+        bond::apply_splitter_in_graph(
+            &mut layout,
+            &s.graph,
+            &sp.bond,
+            pos,
+            &is_resizable,
+            min,
+        );
+        s.layout = layout.clone();
+        (layout, s.graph.component(sp.bond.a))
+    };
+
+    push_to_os(app, &layout, &touched);
+}
+
+pub fn splitter_end(app: &AppHandle) {
+    let state = app.state::<Wm>();
+    let mut s = state.0.lock().unwrap();
+    s.splitter = None;
+}
+
+/// Double-click on a seam: demagnetize.
+///
+/// Breaking one bond in the middle of a chain has to split one group into two,
+/// which is why the model is a real graph and not a flat list of groups — the
+/// components are recomputed, and each side gets its own hidden root (D41).
+/// The forcing raise afterwards is D42: ownership is applied lazily, so without
+/// it the z-order stays stale-but-plausible until the next click.
+pub fn demagnetize(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
+    let (broke, plan) = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        let Some(b) = seam_on(&s, id, edge) else {
+            return false;
+        };
+        let broke = s.graph.break_bond(b.a, b.b);
+        let plan = plan_ownership(&s, Some(id));
+        (broke, plan)
+    };
+    if broke {
+        apply_ownership(&plan);
+        emit_edges(app);
+    }
+    broke
 }
 
 // ---- focus ------------------------------------------------------------------
@@ -668,12 +964,40 @@ pub fn focus_plan(state: &WmState, focused: Option<WindowId>) -> Vec<(WindowId, 
     CLASSIC.iter().map(|id| (*id, group.contains(id))).collect()
 }
 
+/// What a window needs to know the moment it mounts.
+///
+/// Both of these are pushed as events when they change, but a window that is
+/// still loading cannot receive a push — and the first `emit_edges` happens
+/// during setup, before any webview has subscribed. That is not a race to be
+/// tightened; it is a missing pull. So every window asks once on mount and
+/// listens for changes after that.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct Hello {
+    pub edges: Edges,
+    pub active: bool,
+}
+
+pub fn hello(app: &AppHandle, id: WindowId) -> Hello {
+    let state = app.state::<Wm>();
+    let s = state.0.lock().unwrap();
+    let focused = s.focused;
+    Hello {
+        edges: edges_for(&s, id),
+        active: focus_plan(&s, focused)
+            .into_iter()
+            .find(|(w, _)| *w == id)
+            .map(|(_, a)| a)
+            .unwrap_or(false),
+    }
+}
+
 /// A window was clicked or focused: raise its whole group (D42) and tell every
 /// classic window whether it should render active.
 pub fn focus_group(app: &AppHandle, focused: Option<WindowId>) {
     let (plan, flags) = {
         let state = app.state::<Wm>();
-        let s = state.0.lock().unwrap();
+        let mut s = state.0.lock().unwrap();
+        s.focused = focused;
         (plan_ownership(&s, focused), focus_plan(&s, focused))
     };
     // Only a genuine focus gain reorders anything. On focus *loss* the app is
@@ -1043,6 +1367,204 @@ mod tests {
         let s = state_with(&[(MAIN, EQ), (EQ, PLAYLIST)]);
         let flags = focus_plan(&s, None);
         assert!(flags.iter().all(|(_, active)| !active));
+    }
+
+
+    // ---- seams --------------------------------------------------------------
+
+    /// The default stack: main on top, eq under it, playlist under that.
+    fn stacked() -> WmState {
+        state_with(&[(MAIN, EQ), (EQ, PLAYLIST)])
+    }
+
+    #[test]
+    fn each_window_knows_which_of_its_edges_are_seams() {
+        let s = stacked();
+        // Bonds are stored canonically, so the same bond is main's bottom edge
+        // and eq's top edge. Reading it from the wrong end is how a seam ends
+        // up drawn on the outside of a group.
+        assert_eq!(
+            edges_for(&s, MAIN),
+            Edges { bottom: Some(false), ..Default::default() }
+        );
+        assert_eq!(
+            edges_for(&s, EQ),
+            Edges { top: Some(false), bottom: Some(true), ..Default::default() }
+        );
+        assert_eq!(
+            edges_for(&s, PLAYLIST),
+            Edges { top: Some(true), ..Default::default() }
+        );
+    }
+
+    #[test]
+    fn a_seam_between_two_fixed_windows_is_not_a_splitter() {
+        // D35, from the window's point of view. main/eq is bonded but inert as
+        // a splitter, so it is offered as a move handle and never as a resize.
+        let s = stacked();
+        assert_eq!(edges_for(&s, MAIN).bottom, Some(false));
+        assert_eq!(edges_for(&s, EQ).bottom, Some(true));
+    }
+
+    #[test]
+    fn an_unbonded_window_has_no_seams() {
+        let mut s = stacked();
+        s.graph = WindowGraph::new();
+        assert_eq!(edges_for(&s, EQ), Edges::default());
+    }
+
+    #[test]
+    fn a_seam_is_found_from_either_side() {
+        let s = stacked();
+        let from_eq = seam_on(&s, EQ, Edge::Bottom).expect("eq has a bottom seam");
+        let from_playlist = seam_on(&s, PLAYLIST, Edge::Top).expect("playlist has a top seam");
+        assert_eq!(from_eq.pair(), from_playlist.pair());
+        assert_eq!(from_eq.pair(), (EQ, PLAYLIST));
+        // And an edge with nothing on it stays empty.
+        assert!(seam_on(&s, MAIN, Edge::Top).is_none());
+        assert!(seam_on(&s, EQ, Edge::Right).is_none());
+    }
+
+    // ---- D30 quantisation ---------------------------------------------------
+
+    fn eq_playlist_bond() -> Bond {
+        Bond::new(EQ, PLAYLIST, Edge::Bottom, (0, 275))
+    }
+
+    #[test]
+    fn the_seam_only_stops_on_a_legal_playlist_height() {
+        // D30: every valid playlist size is 116 + 29m tall. The seam jumps.
+        let s = stacked();
+        let b = eq_playlist_bond();
+        let bottom = s.layout[&PLAYLIST].bottom();
+        for raw in 150..260 {
+            let pos = quantize_seam(&s.layout, &b, raw, 1.0);
+            let height = bottom - pos;
+            assert_eq!(
+                (height - 116) % 29,
+                0,
+                "raw {raw} produced an illegal playlist height {height}"
+            );
+            assert!(height >= 116, "raw {raw} went under the base height");
+        }
+    }
+
+    #[test]
+    fn quantisation_never_drifts_however_far_the_seam_travels() {
+        // D40 at 150%, where 116 * 1.5 = 174 and 29 * 1.5 = 43.5 -- the step is
+        // not an integer, so anything that adds a rounded physical step to a
+        // previous physical value walks off. Recomputing from the logical base
+        // does not.
+        let s = stacked();
+        let b = eq_playlist_bond();
+        let bottom = s.layout[&PLAYLIST].bottom();
+        for m in 0..40 {
+            let want = bond::d40::stepped(CHROME_H, PLAYLIST_STEP_H, m, 1.5);
+            // Aim the cursor exactly at the seam position for m steps, plus a
+            // pixel of hand tremor in each direction.
+            for jitter in [-1, 0, 1] {
+                let pos = quantize_seam(&s.layout, &b, bottom - want + jitter, 1.5);
+                assert_eq!(bottom - pos, want, "step {m} jitter {jitter} drifted");
+            }
+        }
+    }
+
+    #[test]
+    fn a_seam_with_nothing_resizable_is_left_where_it_is() {
+        let s = stacked();
+        let b = Bond::new(MAIN, EQ, Edge::Bottom, (0, 275));
+        assert_eq!(quantize_seam(&s.layout, &b, 173, 1.0), 173);
+    }
+
+    // ---- demagnetize --------------------------------------------------------
+
+    #[test]
+    fn breaking_the_middle_of_a_chain_makes_two_groups() {
+        // This is the case a flat list of groups cannot represent: the break is
+        // in the middle, so one group has to become two and nothing in a flat
+        // list knows where the split is.
+        let mut s = stacked();
+        assert_eq!(s.graph.components(&CLASSIC).len(), 1);
+        assert!(s.graph.break_bond(EQ, PLAYLIST));
+        let comps = s.graph.components(&CLASSIC);
+        assert_eq!(comps.len(), 2);
+        assert_eq!(comps[0], vec![MAIN, EQ]);
+        assert_eq!(comps[1], vec![PLAYLIST]);
+
+        // D41: each side gets its own hidden root, and no real window becomes
+        // an owner.
+        let plan = plan_ownership(&s, Some(PLAYLIST));
+        let root_of = |id: WindowId| {
+            plan.owners.iter().find(|(w, _)| *w == s.handle(id)).unwrap().1
+        };
+        assert_eq!(root_of(MAIN), root_of(EQ));
+        assert_ne!(root_of(MAIN), root_of(PLAYLIST));
+        assert!(plan.owners.iter().all(|(_, o)| s.roots.contains(o)));
+    }
+
+    #[test]
+    fn a_break_leaves_the_other_seam_alone() {
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        assert_eq!(edges_for(&s, MAIN).bottom, Some(false));
+        assert_eq!(edges_for(&s, EQ).top, Some(false));
+        // The broken edge is gone from both sides, not just the one clicked.
+        assert_eq!(edges_for(&s, EQ).bottom, None);
+        assert_eq!(edges_for(&s, PLAYLIST).top, None);
+    }
+
+    #[test]
+    fn breaking_a_bond_that_is_not_there_changes_nothing() {
+        let mut s = stacked();
+        let before = s.graph.bonds.len();
+        assert!(!s.graph.break_bond(MAIN, PLAYLIST));
+        assert_eq!(s.graph.bonds.len(), before);
+    }
+
+    #[test]
+    fn a_broken_seam_can_be_re_formed_by_dragging_back() {
+        // Stage 5's "rebond carries no stale state", from the app's side: after
+        // a break the two windows are still flush, and dragging one back onto
+        // the other has to produce a clean single bond rather than a duplicate.
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        for b in bonds_after_drag(&s.layout, &[PLAYLIST], &[MAIN, EQ]) {
+            s.graph.insert(b);
+        }
+        assert_eq!(s.graph.bonds.len(), 2);
+        assert_eq!(s.graph.components(&CLASSIC).len(), 1);
+        assert!(bond::violations(&s.graph, &s.layout).is_empty());
+    }
+
+    #[test]
+    fn the_opening_stack_is_flush_and_bonded_at_any_scale() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let (layout, graph) = initial_layout(scale);
+            assert_eq!(graph.components(&CLASSIC).len(), 1, "scale {scale} came up split");
+            assert!(
+                bond::violations(&graph, &layout).is_empty(),
+                "scale {scale} opened with a gap in the seam"
+            );
+            // D38/D40: every dimension recomputed from the logical base, so
+            // 275 x 1.5 is 413 and not whatever the toolkit would have rounded.
+            let w = bond::d40::physical(CHROME_W, scale);
+            assert!(layout.values().all(|r| r.w == w));
+        }
+    }
+
+    #[test]
+    fn a_seeded_bond_the_os_disagrees_with_is_dropped() {
+        // D58 as register() applies it: the seeded graph is intent, and intent
+        // is not evidence. If the OS put a window somewhere else, the bond has
+        // to go -- a graph that stays self-consistent while describing a layout
+        // existing nowhere is exactly what that decision is about.
+        let (mut layout, graph) = initial_layout(1.0);
+        assert!(bond::violations(&graph, &layout).is_empty());
+        let moved = layout[&PLAYLIST].translated(0, 7);
+        layout.insert(PLAYLIST, moved);
+        let bad = bond::violations(&graph, &layout);
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0].0.pair(), (EQ, PLAYLIST));
     }
 
     #[test]

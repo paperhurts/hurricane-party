@@ -80,3 +80,64 @@ body {
   font-size: 11px;
   color: color-mix(in srgb, var(--filament) 55%, transparent);
 }
+
+/* ---- seams ----
+ *
+ * The grab band sits inside the window, along an edge that carries a bond.
+ * Two bonded windows are flush by construction, so there is no gap between
+ * them to put a handle in -- each side contributes half of an 8px band.
+ *
+ * 4px is deliberate. It has to be wide enough to hit and narrow enough not to
+ * swallow the controls that land along the window edge in v0.4b. */
+.chrome {
+  position: relative;
+}
+
+.seam {
+  position: absolute;
+  /* In the v0.0 spike an invisible resize overlay hit-tested ABOVE the webview
+   * and ate every click on exactly this band (D43) -- which is why all three
+   * windows are built resizable(false) and this element is the only thing
+   * claiming the seam. */
+  z-index: 2;
+}
+
+.seam.top,
+.seam.bottom {
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+.seam.top { top: 0; }
+.seam.bottom { bottom: 0; }
+
+.seam.left,
+.seam.right {
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+.seam.left { left: 0; }
+.seam.right { right: 0; }
+
+/* The one animated moment in the interface (v0.4-brief). Idle is a hairline,
+ * hover lifts it. Opacity on a pre-composited layer, never box-shadow -- and
+ * nothing else in the chrome moves. */
+.seam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--arc);
+  opacity: 0;
+  transition: opacity 90ms linear;
+  will-change: opacity;
+}
+.seam:hover::after {
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seam::after {
+    transition: none;
+  }
+}
