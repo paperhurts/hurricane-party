@@ -1,0 +1,32 @@
+/* v0.1 is deliberately ugly (milestone: "Ugly is fine"). What it is NOT is
+   wrong about the things that are expensive to change later: dark only, no
+   remote fonts (D29 forbids the origin anyway), and every color from a token. */
+:root {
+  color-scheme: dark;
+  font-family: Iosevka, "Iosevka Web", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 14px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--filament);
+}
+button {
+  font: inherit;
+  color: var(--arc);
+  background: transparent;
+  border: 1px solid var(--arc);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: color-mix(in srgb, var(--arc) 14%, transparent); }
+button:disabled { opacity: 0.35; cursor: default; }
+input {
+  font: inherit;
+  color: var(--filament);
+  background: var(--well);
+  border: 1px solid color-mix(in srgb, var(--arc) 35%, transparent);
+  padding: 7px 10px;
+}
+input:focus { outline: none; border-color: var(--arc); }
