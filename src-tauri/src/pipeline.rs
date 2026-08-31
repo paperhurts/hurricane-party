@@ -65,6 +65,8 @@ pub struct Track {
     /// Absolute path to the MP3. The frontend turns this into an asset: URL.
     pub path: String,
     pub filesize: u64,
+    /// "audio" | "video" — decides whether playback needs the video window (D13).
+    pub kind: String,
 }
 
 /// Progress for the UI. `stage` distinguishes the two sidecars, which matters
@@ -304,7 +306,7 @@ fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u
 }
 
 /// Phase 2 — fetch the best audio stream to a deterministic path.
-async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
+async fn download_media(app: &AppHandle, url: &str, probed: &Probed, job_id: Option<i64>, want_video: bool) -> Result<PathBuf> {
     let root = library_root(app)?;
     // Grouped by extractor, flat within it (D49).
     //
@@ -321,11 +323,16 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
         args.extend(["--ffmpeg-location".to_string(), ff.to_string_lossy().into_owned()]);
     }
     args.extend([
-        // Audio only. D3 forbids downloading twice; for an audio-only request
-        // architecture.md sanctions skipping video entirely rather than pulling
-        // a video stream we'd immediately discard.
         "-f".to_string(),
-        "bestaudio/best".into(),
+        if want_video {
+            // D3: one download. The MP3, if ever wanted, is derived from this
+            // file locally rather than fetched a second time.
+            "bv*+ba/b".to_string()
+        } else {
+            // Audio-only request: architecture.md sanctions skipping video
+            // entirely rather than pulling a stream we'd immediately discard.
+            "bestaudio/best".to_string()
+        },
         // Without these the MP3 has no tags at all and every media library on
         // the machine shows a blank Title/Artist. architecture.md asked for
         // them; the first cut dropped them.
@@ -344,6 +351,8 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
         "download:HPPROG|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|\
          %(progress.speed)s|%(progress.eta)s|%(progress.status)s"
             .into(),
+        "--merge-output-format".into(),
+        "mp4".into(),
         "-o".into(),
         outtmpl.to_string_lossy().to_string(),
         "--".into(),
@@ -609,7 +618,7 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
 /// | nothing | fetch from the start |
 ///
 /// The recorded `stage` still drives the UI; it just isn't the source of truth.
-pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track> {
+pub async fn import_job(app: &AppHandle, url: &str, job_id: i64, want_video: bool) -> Result<Track> {
     let job_id = Some(job_id);
     let url = &validate_url(url)?;
     let probed = probe(app, url, job_id).await?;
@@ -628,6 +637,27 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track
     // stage: a status column is written by a process that then died, possibly
     // between the write and its effect. The filesystem cannot disagree with
     // itself that way.
+    if want_video {
+        // A video is finished when it's downloaded — there is no transcode
+        // step, so `already_mp3` reasoning doesn't apply.
+        let file = match find_by_id(&root, &probed.id) {
+            Some(p) => p,
+            None => download_media(app, url, &probed, job_id, true).await?,
+        };
+        let filesize = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+        emit(app, job_id, Progress {
+            url: url.into(), stage: "done", bytes_done: filesize,
+            bytes_total: Some(filesize), speed_bps: None, eta_s: None,
+            note: Some(probed.title.clone()),
+        });
+        return Ok(Track {
+            id: probed.id, title: probed.title, uploader: probed.uploader,
+            duration_s: probed.duration_s,
+            path: file.to_string_lossy().to_string(),
+            filesize, kind: "video".into(),
+        });
+    }
+
     let existing = find_by_id(&root, &probed.id);
     let already_mp3 = existing
         .as_deref()
@@ -641,7 +671,7 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track
         Some(source) => extract_mp3(app, url, &source, &probed, job_id).await?,
         // Either a `.part` (which `--continue` picks up mid-file) or nothing.
         None => {
-            let source = download_audio(app, url, &probed, job_id).await?;
+            let source = download_media(app, url, &probed, job_id, false).await?;
             extract_mp3(app, url, &source, &probed, job_id).await?
         }
     };
@@ -673,6 +703,7 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track
         duration_s: probed.duration_s,
         path: mp3.to_string_lossy().to_string(),
         filesize,
+        kind: "audio".into(),
     })
 }
 

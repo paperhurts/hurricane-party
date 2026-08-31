@@ -33,6 +33,7 @@ pub struct Job {
     pub bytes_total: Option<i64>,
     pub error: Option<String>,
     pub attempts: i64,
+    pub want_video: bool,
     pub created_at: i64,
 }
 
@@ -49,6 +50,7 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
         bytes_total: r.get("bytes_total")?,
         error: r.get("error")?,
         attempts: r.get("attempts")?,
+        want_video: r.get::<_, i64>("want_video")? != 0,
         created_at: r.get("created_at")?,
     })
 }
@@ -69,15 +71,15 @@ impl Default for RunnerHandle {
     }
 }
 
-pub fn enqueue(app: &AppHandle, url: &str) -> Result<i64, DbError> {
+pub fn enqueue(app: &AppHandle, url: &str, want_video: bool) -> Result<i64, DbError> {
     let id = {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
         let t = db::now();
         conn.execute(
-            "INSERT INTO jobs (url, status, stage, created_at, updated_at)
-             VALUES (?1, 'queued', 'probe', ?2, ?2)",
-            params![url, t],
+            "INSERT INTO jobs (url, want_video, want_audio, status, stage, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'queued', 'probe', ?4, ?4)",
+            params![url, want_video as i64, !want_video as i64, t],
         )?;
         conn.last_insert_rowid()
     };
@@ -217,7 +219,7 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<(), DbError>
     conn.execute(
         "INSERT INTO media (root_id, relpath, kind, title, uploader, duration_s,
                             container, filesize, added_at)
-         VALUES (?1, ?2, 'audio', ?3, ?4, ?5, 'mp3', ?6, ?7)
+         VALUES (?1, ?2, ?8, ?3, ?4, ?5, ?9, ?6, ?7)
          ON CONFLICT(root_id, relpath) DO UPDATE SET
             title = excluded.title, uploader = excluded.uploader,
             duration_s = excluded.duration_s, filesize = excluded.filesize",
@@ -228,7 +230,10 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<(), DbError>
             track.uploader,
             track.duration_s,
             track.filesize as i64,
-            db::now()
+            db::now(),
+            track.kind,
+            std::path::Path::new(&track.path)
+                .extension().and_then(|e| e.to_str()).unwrap_or("mp3"),
         ],
     )?;
     Ok(())
@@ -239,7 +244,7 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<(), DbError>
 async fn run_one(app: AppHandle, job: Job) {
     let _ = app.emit("jobs-changed", ());
 
-    let result = pipeline::import_job(&app, &job.url, job.id).await;
+    let result = pipeline::import_job(&app, &job.url, job.id, job.want_video).await;
 
     let db = app.state::<Db>();
     match result {

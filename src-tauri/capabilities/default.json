@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The webview gets no shell access at all. Sidecars are spawned only from Rust, inside #[tauri::command] handlers, and tauri-plugin-shell's Rust API (Shell::sidecar -> Command::new_sidecar) does not consult this ACL - scope is enforced in the plugin's IPC command handlers, which nothing in this app calls. So granting shell:allow-spawn here would add attack surface without enabling any function: a compromised webview (a malicious track title, a bad frontend dependency) could then spawn yt-dlp with arbitrary argv, and yt-dlp has --exec.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "The webview gets no shell access at all. Sidecars are spawned only from Rust, inside #[tauri::command] handlers, and tauri-plugin-shell's Rust API (Shell::sidecar -> Command::new_sidecar) does not consult this ACL - scope is enforced in the plugin's IPC command handlers, which nothing in this app calls. So granting shell:allow-spawn here would add attack surface without enabling any function: a compromised webview (a malicious track title, a bad frontend dependency) could then spawn yt-dlp with arbitrary argv, and yt-dlp has --exec. dialog:allow-open is the folder picker for local import; the scan itself runs in Rust.",
+  "windows": [
+    "main",
+    "video"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open"
+  ]
 }

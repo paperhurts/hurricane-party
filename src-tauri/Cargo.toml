@@ -1,6 +1,6 @@
 [package]
 name = "hurricane-party"
-version = "0.2.0"
+version = "0.3.0"
 description = "Offline-first media library and player."
 authors = ["paperhurts"]
 edition = "2021"
@@ -25,5 +25,9 @@ tauri-plugin-shell = "2"
 thiserror = "2"
 url = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
-tokio = { version = "1", features = ["sync", "time", "macros"] }
+tokio = { version = "1", features = ["sync", "time", "macros", "net", "io-util"] }
+lofty = "0.25"
+walkdir = "2"
+tauri-plugin-dialog = "2"
+hp-control = { path = "../crates/hp-control" }
 
