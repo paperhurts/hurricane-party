@@ -35,9 +35,19 @@
         return;
       }
       track = found;
-      await getCurrentWindow().setTitle(found.title);
     } catch (e) {
       error = String(e);
+      return;
+    }
+
+    // Naming the window is cosmetic, so it gets its own catch. It used to sit
+    // inside the try above, which meant a missing `core:window:allow-set-title`
+    // permission set `error` — and the template renders the error INSTEAD of
+    // the video. A decorative failure took the whole feature down.
+    try {
+      await getCurrentWindow().setTitle(track.title);
+    } catch (e) {
+      console.warn("couldn't set the window title:", e);
     }
   });
 </script>
