@@ -64,7 +64,7 @@ Authoritative. When anything contradicts this file, the other thing is wrong or 
 | | Done means |
 |---|---|
 | v0.0 | **Stages 0–5 complete and passed (D45).** Stage 6 (two monitors at different DPI) blocked on hardware — O14. Brief: `spike-v0.0.md`; results: `hurricane-party-spike/spike-findings.md` |
-| v0.1 | Paste a URL, get an MP3, see it in a list, click it, hear it. Ugly is fine. Proves the sidecar plumbing, including the deno JS-runtime sidecar (D46) |
+| v0.1 | **Done 2026-08-30.** Paste a URL, get an MP3, see it in a list, click it, hear it. Runtime-verified: the three bundled sidecars spawn and complete (D46/D47/D48), `--js-runtimes deno` satisfies yt-dlp's EJS challenge, D29's CSP permits `asset:` playback while forbidding every remote origin, and stripping the webview's shell permissions did **not** break Rust-side sidecar spawning — confirming the ACL applies only to the IPC path |
 | v0.2 | Kill the app mid-download, relaunch, it **resumes the bytes** (D26). Playlists persist. Library schema and multi-root paths land here (D28) |
 | v0.3 | Video in its own window. Local folder import. Control API: handshake + transport, undocumented and unstable |
 | v0.4 | Multi-window bonding, shade modes, Eyewall skin from sprites, EQ audibly works, analyser reacts. Viz stream lands |
