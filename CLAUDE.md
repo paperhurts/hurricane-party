@@ -25,6 +25,7 @@ If a decision genuinely hasn't been made, **stop and ask.** Don't infer one and 
 | Path | Read it when |
 |---|---|
 | `docs/decisions.md` | **Always.** Short. Start here |
+| `docs/v0.4-brief.md` | Before starting v0.4. What ports from the spike, which findings are now requirements, and why stage 6 runs first |
 | `docs/spike-v0.0.md` | Before starting the window engine spike. Stage order, pass/fail criteria, what the findings doc must answer |
 | `docs/architecture.md` | Data model, import pipeline, yt-dlp/ffmpeg invocation, EQ audio graph |
 | `docs/windows.md` | Window bonding, snapping, splitter resize, skin formats. Read before touching anything window-related |
@@ -53,9 +54,19 @@ These have burned into the design. Don't quietly relax them.
 
 **The canonical table lives in `docs/decisions.md` (D27).** It used to be duplicated here and in two other docs; all three drifted, so there is now exactly one.
 
-Work one at a time. Don't build ahead. Currently at **v0.0** — the window engine spike, briefed in `docs/spike-v0.0.md`.
+Work one at a time. Don't build ahead.
+
+**v0.0 through v0.3 are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` and 34 tests are the one artifact that ports, and the spike repo must not be deleted until they do. Currently starting **v0.4** — briefed in `docs/v0.4-brief.md`.
 
 ---
+
+## Working agreements
+
+- **Branch per unit of work, merged with `--no-ff`.** Never commit straight to `main`. The merge bubble is the record of what changed together
+- **Nothing lives only in a conversation.** Decisions go in `decisions.md`, findings go in a doc, working agreements go here. A session should be disposable
+- **Test the interaction the way a user performs it, at least once per stage.** The v0.0 spike's scripted sweeps passed at 0 px error while the real interaction was dead, because an invisible window was eating the clicks (D43). Scripted paths and real input are not the same test
+- **Verify against the real binary before believing a flag.** `--embed-thumbnail` looked right and hard-errors on webm; the fix only surfaced by running it
+- `.sid/` is a scratch folder for screenshots. Gitignored, never referenced by code
 
 ## Conventions
 
