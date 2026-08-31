@@ -80,7 +80,21 @@ pub struct Progress {
     pub note: Option<String>,
 }
 
-fn emit(app: &AppHandle, p: Progress) {
+/// Briefly borrow the connection. The guard is bound before use so it isn't a
+/// temporary in scrutinee position, and it is always dropped before any await.
+fn with_db<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> T) -> Option<T> {
+    let state = app.state::<crate::db::Db>();
+    let guard = state.0.lock().ok()?;
+    Some(f(&guard))
+}
+
+/// Emit to the UI and, when this belongs to a queued job, persist to the row.
+/// The DB write is what survives a kill; the event is just what makes the
+/// window move.
+fn emit(app: &AppHandle, job_id: Option<i64>, p: Progress) {
+    if let Some(id) = job_id {
+        with_db(app, |conn| crate::jobs::set_progress(conn, id, &p).ok());
+    }
     let _ = app.emit("job-progress", p);
 }
 
@@ -151,7 +165,7 @@ fn ytdlp_base() -> Vec<String> {
 ///
 /// Belt and braces: this check, plus a `--` terminator at every call site so
 /// yt-dlp stops option parsing before the URL regardless.
-fn validate_url(raw: &str) -> Result<String> {
+pub(crate) fn validate_url(raw: &str) -> Result<String> {
     let s = raw.trim();
     if s.is_empty() {
         return Err(PipelineError::BadUrl("no URL given".into()));
@@ -182,10 +196,11 @@ fn safe_stem(id: &str) -> String {
 }
 
 /// Phase 1 — probe. No download. Cheap enough to run on paste.
-pub async fn probe(app: &AppHandle, url: &str) -> Result<Probed> {
+pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Probed> {
     let url = &validate_url(url)?;
     emit(
         app,
+        job_id,
         Progress {
             url: url.into(),
             stage: "probe",
@@ -287,7 +302,7 @@ fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u
 }
 
 /// Phase 2 — fetch the best audio stream to a deterministic path.
-async fn download_audio(app: &AppHandle, url: &str, probed: &Probed) -> Result<PathBuf> {
+async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
     let root = library_root(app)?;
     let stem = safe_stem(&probed.id);
     let outtmpl = root.join(format!("{stem}.%(ext)s"));
@@ -321,6 +336,10 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed) -> Result<P
 
     let mut tail = Tail::new();
     let mut code = 0;
+    // yt-dlp emits progress many times per second. The UI can absorb that, but
+    // persisting each one is a SQLite write per tick for every concurrent job.
+    // Throttle to ~4Hz; the final state is always written on completion below.
+    let mut last_persist = std::time::Instant::now() - std::time::Duration::from_secs(1);
 
     while let Some(ev) = rx.recv().await {
         match ev {
@@ -328,8 +347,14 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed) -> Result<P
                 let chunk = String::from_utf8_lossy(&b);
                 for line in chunk.lines() {
                     if let Some((done, total, speed, eta, _status)) = parse_progress(line) {
+                        let persist = last_persist.elapsed()
+                            >= std::time::Duration::from_millis(250);
+                        if persist {
+                            last_persist = std::time::Instant::now();
+                        }
                         emit(
                             app,
+                            if persist { job_id } else { None },
                             Progress {
                                 url: url.into(),
                                 stage: "download",
@@ -368,7 +393,7 @@ fn find_by_stem(dir: &Path, stem: &str) -> Option<PathBuf> {
 }
 
 /// Phase 3 — derive the MP3 locally (D3).
-async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed) -> Result<PathBuf> {
+async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
     let dest = src.with_file_name(format!("{}.mp3", safe_stem(&probed.id)));
     if dest == src {
         return Ok(dest); // already an mp3
@@ -376,6 +401,7 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed) ->
 
     emit(
         app,
+        job_id,
         Progress {
             url: url.into(),
             stage: "extract",
@@ -424,17 +450,57 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed) ->
     Ok(dest)
 }
 
-/// The whole v0.1 job: probe, fetch, extract, hand back something playable.
-pub async fn import(app: &AppHandle, url: &str) -> Result<Track> {
+/// The whole job: probe, fetch, extract, hand back something playable.
+///
+/// **Resume, not restart (D26).** After a kill, the recovery that's correct
+/// depends on where it died — and rather than trust the recorded stage, this
+/// derives it from what's actually on disk, which cannot drift out of sync
+/// with reality the way a status column can:
+///
+/// | on disk | recovery |
+/// |---|---|
+/// | the finished `.mp3` | nothing to do |
+/// | the source audio, whole | skip the download, re-extract |
+/// | a `.part` | `--continue` picks up mid-file |
+/// | nothing | fetch from the start |
+///
+/// The recorded `stage` still drives the UI; it just isn't the source of truth.
+pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track> {
+    let job_id = Some(job_id);
     let url = &validate_url(url)?;
-    let probed = probe(app, url).await?;
-    let downloaded = download_audio(app, url, &probed).await?;
-    let mp3 = extract_mp3(app, url, &downloaded, &probed).await?;
+    let probed = probe(app, url, job_id).await?;
+
+    // Give the queue row a human name as soon as we have one, so a resumed job
+    // isn't an anonymous URL in the UI.
+    if let Some(id) = job_id {
+        with_db(app, |conn| {
+            crate::jobs::set_identity(conn, id, &probed.title, &probed.id).ok()
+        });
+    }
+
+    let root = library_root(app)?;
+    let stem = safe_stem(&probed.id);
+    let finished = root.join(format!("{stem}.mp3"));
+
+    let mp3 = if finished.exists() {
+        // Already converted on a previous run; the kill happened after this.
+        finished
+    } else {
+        let source = match find_by_stem(&root, &stem) {
+            // A complete source stream survived the kill — the download is
+            // done, only the extract needs redoing.
+            Some(existing) => existing,
+            // Either a `.part` (yt-dlp resumes it with --continue) or nothing.
+            None => download_audio(app, url, &probed, job_id).await?,
+        };
+        extract_mp3(app, url, &source, &probed, job_id).await?
+    };
 
     let filesize = std::fs::metadata(&mp3).map(|m| m.len()).unwrap_or(0);
 
     emit(
         app,
+        job_id,
         Progress {
             url: url.into(),
             stage: "done",
@@ -456,36 +522,6 @@ pub async fn import(app: &AppHandle, url: &str) -> Result<Track> {
     })
 }
 
-/// Scan the library folder so restarting the app doesn't lose what's on disk.
-/// Not persistence — that's v0.2 and SQLite. This is just reading the directory.
-pub fn scan(app: &AppHandle) -> Result<Vec<Track>> {
-    let root = library_root(app)?;
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(&root)
-        .map_err(|e| PipelineError::Io(e.to_string()))?
-        .filter_map(|e| e.ok())
-    {
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) != Some("mp3") {
-            continue;
-        }
-        let id = p
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("?")
-            .to_string();
-        out.push(Track {
-            title: id.clone(),
-            id,
-            uploader: None,
-            duration_s: None,
-            filesize: entry.metadata().map(|m| m.len()).unwrap_or(0),
-            path: p.to_string_lossy().to_string(),
-        });
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,7 +531,7 @@ mod tests {
         for u in [
             "https://www.youtube.com/watch?v=jNQXAC9IVRw",
             "http://example.com/a.mp3",
-            "  https://bandcamp.com/track/x  ", // trimmed
+            "  https://bandcamp.com/track/x  ",
         ] {
             assert!(validate_url(u).is_ok(), "should accept {u:?}");
         }
@@ -512,10 +548,7 @@ mod tests {
             "-o/tmp/pwn",
             "--version",
         ] {
-            assert!(
-                validate_url(evil).is_err(),
-                "should reject flag-shaped input {evil:?}"
-            );
+            assert!(validate_url(evil).is_err(), "should reject {evil:?}");
         }
     }
 
@@ -558,9 +591,40 @@ mod tests {
 
     /// Every yt-dlp invocation must terminate option parsing before the URL.
     #[test]
-    fn base_args_have_no_positional_before_terminator() {
-        let base = ytdlp_base();
-        assert!(base.iter().all(|a| a.starts_with('-') || base.contains(a)));
-        assert!(!base.contains(&"--".to_string()), "terminator is added per call site");
+    fn terminator_is_added_per_call_site_not_in_base() {
+        assert!(!ytdlp_base().contains(&"--".to_string()));
+    }
+
+    /// The progress template is pipe-delimited and parsed positionally — never
+    /// scrape the human-readable bar (D4).
+    #[test]
+    fn parses_a_progress_line() {
+        let (done, total, speed, eta, status) =
+            parse_progress("HPPROG|1024|223779|52318.4|3|downloading").unwrap();
+        assert_eq!(done, 1024);
+        assert_eq!(total, Some(223779));
+        assert!(speed.unwrap() > 52318.0);
+        assert_eq!(eta, Some(3));
+        assert_eq!(status, "downloading");
+    }
+
+    /// yt-dlp emits "NA" for anything it doesn't know yet — most importantly
+    /// total_bytes, which is absent until the transfer is under way. That must
+    /// read as "unknown", not as zero, or the UI draws a false 0%.
+    #[test]
+    fn unknown_fields_stay_unknown() {
+        let (done, total, speed, eta, _) =
+            parse_progress("HPPROG|4096|NA|NA|NA|downloading").unwrap();
+        assert_eq!(done, 4096);
+        assert_eq!(total, None, "unknown total must not become 0");
+        assert_eq!(speed, None);
+        assert_eq!(eta, None);
+    }
+
+    #[test]
+    fn ignores_non_progress_output() {
+        assert!(parse_progress("[download] Destination: t.webm").is_none());
+        assert!(parse_progress("").is_none());
+        assert!(parse_progress("HPPROG|too|few").is_none());
     }
 }
