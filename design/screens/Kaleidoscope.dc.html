@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="position:relative;width:100%;aspect-ratio:1;overflow:hidden">
+  <canvas ref="{{ canvasRef }}" style="display:block;width:100%;aspect-ratio:1"></canvas>
+  <sc-if value="{{ showBadge }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:4px;bottom:3px;font:400 9px/1 'Comic Sans MS','Comic Neue',cursive;letter-spacing:0.4px;color: {{ badgeInk }};text-shadow:0 1px 0 rgba(255,255,255,0.85)">{{ badge }}</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:320,&quot;height&quot;:320},&quot;segments&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;6&quot;,&quot;8&quot;],&quot;default&quot;:&quot;8&quot;,&quot;tsType&quot;:&quot;number&quot;},&quot;calm&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;label&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const HUES = [325, 250, 160, 50, 325];
+class Component extends DCLogic {
+  t0 = performance.now();
+  lastBloom = -9999;
+  bloom = 0;
+  componentDidMount() {
+    this.reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.loop = this.loop.bind(this);
+    this.raf = requestAnimationFrame(this.loop);
+  }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+  bands(t) {
+    const out = [];
+    for (let i = 0; i < 24; i++) {
+      const f = i / 23;
+      const slow = 0.55 + 0.45 * Math.sin(t * 0.0011 + i * 0.7);
+      const fast = 0.5 + 0.5 * Math.sin(t * 0.006 + i * 1.9);
+      const tilt = Math.pow(1 - f, 1.5) * 0.9 + 0.1;
+      out.push(Math.max(0, Math.min(1, tilt * (0.45 * slow + 0.55 * fast * (0.4 + 0.6 * slow)))));
+    }
+    return out;
+  }
+  loop(now) {
+    const c = this.canvas;
+    if (c) {
+      const calm = !!this.props.calm || this.reduced;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = c.clientWidth, h = c.clientHeight;
+      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+        c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+      }
+      const ctx = c.getContext('2d');
+      if (!Number.isFinite(this.t0)) this.t0 = now;
+      let t = now - this.t0;
+      if (!Number.isFinite(t) || t < 0) t = 0;
+      const b = this.bands(calm ? 0 : t);
+      const bass = (b[0] + b[1] + b[2] + b[3]) / 4;
+      const treble = (b[17] + b[19] + b[21] + b[23]) / 4;
+      const beat = !calm && bass > 0.72 && (t - this.lastBloom) > 340;
+      if (beat) { this.lastBloom = t; this.bloom = 1; }
+      this.bloom = Math.max(0, this.bloom - 0.055);
+      const segs = this.props.segments === 6 ? 6 : (this.props.segments === 8 ? 8 : 8);
+      const hp = ((calm ? 0.25 : (t / 95000) % 1) * (HUES.length - 1));
+      const hi = Math.max(0, Math.min(HUES.length - 2, Math.floor(hp)));
+      const hf = Math.max(0, Math.min(1, hp - hi));
+      let hue = HUES[hi] + (HUES[hi + 1] - HUES[hi]) * hf;
+      if (!Number.isFinite(hue)) hue = HUES[0];
+      const rot = calm ? 0 : t * 0.000055 * Math.PI * 2;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2;
+      const scale = 1 + (calm ? 0 : this.bloom * 0.11);
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.rotate(rot);
+      for (let s = 0; s < segs; s++) {
+        ctx.save();
+        ctx.rotate((s / segs) * Math.PI * 2);
+        if (s % 2) ctx.scale(1, -1);
+        const petal = R * (0.34 + bass * 0.58);
+        const wid = R * (0.09 + b[6] * 0.16);
+        const hs = hue + s * (180 / segs);
+        ctx.shadowBlur = R * 0.22;
+        ctx.shadowColor = 'hsla(' + hs + ',95%,72%,' + (0.5 + this.bloom * 0.4) + ')';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(wid, petal * 0.45, 0, petal);
+        ctx.quadraticCurveTo(-wid * 0.6, petal * 0.4, 0, 0);
+        ctx.fillStyle = 'hsla(' + hs + ',92%,' + (72 - bass * 8) + '%,0.62)';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'hsla(' + hs + ',95%,52%,0.85)';
+        ctx.stroke();
+
+        const inner = R * (0.16 + b[10] * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(wid * 1.5, inner * 0.5, 0, inner);
+        ctx.quadraticCurveTo(-wid * 1.1, inner * 0.45, 0, 0);
+        ctx.fillStyle = 'hsla(' + (hs + 40) + ',95%,80%,0.7)';
+        ctx.fill();
+
+        const dots = Math.round(4 + treble * 14);
+        for (let d = 0; d < dots; d++) {
+          const a = (-0.30 + 0.60 * (d / Math.max(1, dots - 1))) * (Math.PI / segs) * 2;
+          const rr = R * (0.80 + 0.16 * ((d % 3) / 2));
+          const rad = Math.max(0.7, R * (0.012 + treble * 0.016));
+          ctx.beginPath();
+          ctx.arc(Math.sin(a) * rr, Math.cos(a) * rr, rad, 0, Math.PI * 2);
+          ctx.fillStyle = d % 2 ? 'hsla(' + (hs + 80) + ',95%,70%,0.9)' : 'hsla(' + (hs + 200) + ',90%,72%,0.9)';
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, R * (0.22 + bass * 0.12));
+      g.addColorStop(0, 'rgba(255,255,255,0.95)');
+      g.addColorStop(0.55, 'hsla(' + hue + ',95%,82%,0.75)');
+      g.addColorStop(1, 'hsla(' + hue + ',95%,75%,0)');
+      ctx.beginPath();
+      ctx.arc(0, 0, R * (0.22 + bass * 0.12), 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.restore();
+    }
+    this.raf = requestAnimationFrame(this.loop);
+  }
+  renderVals() {
+    const calm = !!this.props.calm;
+    return {
+      canvasRef: (el) => { this.canvas = el; },
+      showBadge: !!this.props.label,
+      badge: calm ? 'CALM · AMPLITUDE ONLY' : (this.props.segments === 6 ? '6 SEGMENTS' : '8 SEGMENTS'),
+      badgeInk: calm ? '#4A2A5C' : 'rgba(74,42,92,0.75)'
+    };
+  }
+}
+</script>
+</body>
+</html>

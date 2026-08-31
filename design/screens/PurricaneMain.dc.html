@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&display=swap" rel="stylesheet">
+</helmet>
+<sc-if value="{{ isShade }}" hint-placeholder-val="{{ false }}">
+  <div style="width:275px;height:14px;box-sizing:border-box;display:flex;align-items:center;gap:5px;padding:0 4px;background:linear-gradient(#FFF4FB,#FFE4F3);box-shadow:inset 0 0 0 1px #FF9FD6,0 0 12px rgba(255,159,214,0.55);font:400 9px/1 'Comic Sans MS','Comic Neue',cursive;color:#4A2A5C;overflow:hidden">
+    <div style="display:flex;gap:3px;align-items:center;flex:0 0 auto">
+      <div style="width:9px;height:9px;display:grid;place-items:center;font-size:6px;color:#8B5FA8">◀◀</div>
+      <div style="width:11px;height:9px;display:grid;place-items:center;font-size:7px;color:#4A2A5C">‖</div>
+      <div style="width:9px;height:9px;display:grid;place-items:center;font-size:6px;color:#8B5FA8">▶▶</div>
+    </div>
+    <div style="width:10px;height:10px;flex:0 0 auto;border-radius:10px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.9)">
+      <dc-import name="Kaleidoscope" segments="{{ segments }}" calm="{{ calm }}" hint-size="10px,10px"></dc-import>
+    </div>
+    <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Talk Talk — New Grass</div>
+    <div style="flex:0 0 auto;font-size:9px;color:#7A4A92">02:14</div>
+  </div>
+</sc-if>
+<sc-if value="{{ isFull }}" hint-placeholder-val="{{ true }}">
+<div style="width:275px;height:116px;box-sizing:border-box;background:#FFF4FB;box-shadow:inset 0 0 0 1px #FF9FD6,0 0 22px rgba(255,159,214,0.45);font:400 11px/1 'Comic Sans MS','Comic Neue',cursive;color:#4A2A5C;display:flex;flex-direction:column;overflow:hidden">
+  <div style="height:15px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 4px;background:linear-gradient(#FFE4F3,#FFF4FB);border-bottom:1px solid rgba(255,159,214,0.8)">
+    <div style="display:flex;align-items:center;gap:4px;font-size:8px;letter-spacing:0.2px;color:#7A4A92">
+      <div style="width:4px;height:4px;border-radius:4px;background:#FF9FD6;box-shadow:0 0 6px #FF9FD6"></div>
+      <span>Purricane — Main</span>
+    </div>
+    <div style="display:flex;gap:3px;align-items:center">
+      <div onClick="{{ toggleCalm }}" title="Calm mode — no rotation, no bloom" style="height:10px;display:flex;align-items:center;padding:0 4px;font-size:7px;border-radius:6px;cursor:pointer;background: {{ calmBg }};box-shadow: {{ calmRing }};color: {{ calmInk }}">{{ calmLabel }}</div>
+      <div style="width:10px;height:10px;display:grid;place-items:center;border-radius:10px;background:#FFE97F;box-shadow:0 0 6px rgba(255,233,127,0.9);font-size:6px;color:#4A2A5C;cursor:pointer">─</div>
+      <div style="width:10px;height:10px;display:grid;place-items:center;border-radius:10px;background:#FF9FD6;box-shadow:0 0 6px rgba(255,159,214,0.9);font-size:6px;color:#FFF4FB;cursor:pointer">×</div>
+    </div>
+  </div>
+
+  <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:4px;padding:5px 5px 4px;box-sizing:border-box">
+    <div style="display:flex;gap:6px;align-items:center;flex:1 1 auto;min-height:34px">
+      <div style="flex:0 0 auto;width:34px;height:34px;border-radius:34px;overflow:hidden;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.9),0 0 12px rgba(255,159,214,0.55)">
+        <dc-import name="Kaleidoscope" segments="{{ segments }}" calm="{{ calm }}" hint-size="34px,34px"></dc-import>
+      </div>
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:1px">
+        <div style="font-size:18px;line-height:18px;color:#4A2A5C;text-shadow:0 0 10px rgba(169,159,255,0.55)">02:14</div>
+        <div style="display:flex;gap:4px;font-size:7px;color:#8B5FA8"><span>192</span><span>44</span><span style="color:#3FBF9F">STEREO</span></div>
+      </div>
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+        <div style="display:flex;gap:2px">
+          <sc-for list="{{ segChoices }}" as="s" hint-placeholder-count="2">
+            <div onClick="{{ s.pick }}" style="height:12px;display:flex;align-items:center;padding:0 5px;border-radius:8px;font-size:7px;cursor:pointer;background: {{ s.bg }};box-shadow: {{ s.ring }};color: {{ s.ink }}">{{ s.label }}</div>
+          </sc-for>
+        </div>
+        <div style="font-size:7px;color:#8B5FA8">{{ hueNote }}</div>
+      </div>
+    </div>
+
+    <div style="height:16px;flex:0 0 auto;background:#FFFFFF;border-radius:8px;box-shadow:inset 0 0 0 1px rgba(169,159,255,0.75);display:flex;align-items:center;padding:0 6px;overflow:hidden">
+      <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#4A2A5C">Talk Talk — New Grass</div>
+    </div>
+
+    <div style="height:8px;flex:0 0 auto;background:#FFFFFF;border-radius:8px;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.7);position:relative">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:23%;border-radius:8px;background:linear-gradient(90deg,#FFE97F,#FF9FD6)"></div>
+      <div style="position:absolute;top:-2px;bottom:-2px;left:23%;width:6px;border-radius:6px;background:#7FFFD4;box-shadow:0 0 8px rgba(127,255,212,0.95)"></div>
+    </div>
+
+    <div style="height:17px;flex:0 0 auto;display:flex;align-items:stretch;gap:5px">
+      <div style="display:flex;gap:2px">
+        <div style="width:16px;height:15px;display:grid;place-items:center;border-radius:8px;background:#FFE4F3;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.8);color:#7A4A92;font-size:6px;cursor:pointer" style-hover="background:#FFD3EC">◀◀</div>
+        <div style="width:16px;height:15px;display:grid;place-items:center;border-radius:8px;background:#FF9FD6;box-shadow:0 0 10px rgba(255,159,214,0.85);color:#FFF4FB;font-size:7px;cursor:pointer">▶</div>
+        <div style="width:16px;height:15px;display:grid;place-items:center;border-radius:8px;background:#FFE4F3;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.8);color:#7A4A92;font-size:7px;cursor:pointer" style-hover="background:#FFD3EC">‖</div>
+        <div style="width:16px;height:15px;display:grid;place-items:center;border-radius:8px;background:#FFE4F3;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.8);color:#7A4A92;font-size:6px;cursor:pointer" style-hover="background:#FFD3EC">■</div>
+        <div style="width:16px;height:15px;display:grid;place-items:center;border-radius:8px;background:#FFE4F3;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.8);color:#7A4A92;font-size:6px;cursor:pointer" style-hover="background:#FFD3EC">▶▶</div>
+      </div>
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:2px;justify-content:center">
+        <div style="height:6px;background:#FFFFFF;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(127,255,212,0.8)">
+          <div style="width:78%;height:6px;border-radius:6px;background:#7FFFD4;box-shadow:0 0 8px rgba(127,255,212,0.8)"></div>
+        </div>
+        <div style="font-size:7px;color:#8B5FA8">VOL 78 · BAL C</div>
+      </div>
+      <div style="display:flex;gap:2px">
+        <div style="width:18px;height:15px;display:grid;place-items:center;border-radius:8px;background:#A99FFF;box-shadow:0 0 10px rgba(169,159,255,0.8);color:#FFF4FB;font-size:7px;cursor:pointer">EQ</div>
+        <div style="width:18px;height:15px;display:grid;place-items:center;border-radius:8px;background:#A99FFF;box-shadow:0 0 10px rgba(169,159,255,0.8);color:#FFF4FB;font-size:7px;cursor:pointer">PL</div>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:275,&quot;height&quot;:116},&quot;calm&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;segments&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;6&quot;,&quot;8&quot;],&quot;default&quot;:&quot;8&quot;,&quot;tsType&quot;:&quot;number&quot;},&quot;shade&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { calm: !!this.props.calm, segments: this.props.segments === 6 ? 6 : 8 };
+  renderVals() {
+    const s = this.state;
+    const calm = s.calm;
+    return {
+      isShade: !!this.props.shade, isFull: !this.props.shade,
+      calm, segments: s.segments,
+      calmLabel: calm ? 'CALM ON' : 'CALM',
+      calmBg: calm ? '#7FFFD4' : '#FFFFFF',
+      calmRing: calm ? '0 0 10px rgba(127,255,212,0.9)' : 'inset 0 0 0 1px rgba(127,255,212,0.9)',
+      calmInk: calm ? '#2A6E5A' : '#3FBF9F',
+      hueNote: calm ? 'STATIC MANDALA' : 'HUE DRIFT 95s',
+      segChoices: [6, 8].map(n => ({
+        label: n + ' SEG',
+        bg: s.segments === n ? '#A99FFF' : '#FFFFFF',
+        ring: s.segments === n ? '0 0 10px rgba(169,159,255,0.85)' : 'inset 0 0 0 1px rgba(169,159,255,0.7)',
+        ink: s.segments === n ? '#FFF4FB' : '#7A4A92',
+        pick: () => this.setState({ segments: n })
+      })),
+      toggleCalm: () => this.setState(p => ({ calm: !p.calm }))
+    };
+  }
+}
+</script>
+</body>
+</html>

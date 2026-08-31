@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<sc-if value="{{ isShade }}" hint-placeholder-val="{{ false }}">
+  <div style="width:275px;height:14px;display:flex;align-items:center;gap:4px;padding:0 3px;box-sizing:border-box;background:linear-gradient(#15112a,#0C0A14);border:1px solid rgba(111,227,255,0.30);color:#E8F4FF;font:400 8px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace;overflow:hidden">
+    <div style="display:flex;gap:2px;align-items:center;flex:0 0 auto">
+      <div onClick="{{ prev }}" style="width:9px;height:9px;display:grid;place-items:center;font-size:5px;color:#9fd8ef;cursor:pointer" style-hover="color:#6FE3FF">◀◀</div>
+      <div onClick="{{ togglePlay }}" style="width:11px;height:9px;display:grid;place-items:center;font-size:6px;color:#6FE3FF;text-shadow:0 0 4px rgba(111,227,255,0.8);cursor:pointer">{{ playGlyph }}</div>
+      <div onClick="{{ next }}" style="width:9px;height:9px;display:grid;place-items:center;font-size:5px;color:#9fd8ef;cursor:pointer" style-hover="color:#6FE3FF">▶▶</div>
+    </div>
+    <div style="width:1px;height:8px;background:rgba(111,227,255,0.18);flex:0 0 auto"></div>
+    <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.2px;color:#E8F4FF;text-shadow:0 0 5px rgba(111,227,255,0.35)">{{ title }}</div>
+    <div style="flex:0 0 auto;display:flex;align-items:center;gap:3px">
+      <div style="width:26px;height:2px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14)">
+        <div style="height:2px;background:#6FE3FF;box-shadow:0 0 4px rgba(111,227,255,0.9);width: {{ posPct }}%"></div>
+      </div>
+      <div style="font-size:8px;color:#6FE3FF;text-shadow:0 0 5px rgba(111,227,255,0.55);letter-spacing:-0.2px">{{ elapsed }}</div>
+      <div onClick="{{ unshade }}" title="Expand" style="width:9px;height:9px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.28);color:#9fd8ef;font-size:6px;cursor:pointer" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">▢</div>
+    </div>
+  </div>
+</sc-if>
+<sc-if value="{{ isFull }}" hint-placeholder-val="{{ true }}">
+<div style="width:275px;height:116px;box-sizing:border-box;background:#0C0A14;font:400 11px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace;color:#E8F4FF;display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(111,227,255,0.30)">
+  <div style="height:14px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 3px;background:linear-gradient(#15112a,#0C0A14);border-bottom:1px solid rgba(111,227,255,0.16)">
+    <div style="display:flex;align-items:center;gap:4px;font-size:6px;letter-spacing:1.4px;text-transform:uppercase;color: {{ chromeInk }}">
+      <div style="width:3px;height:3px;background: {{ lampColor }};box-shadow:0 0 4px {{ lampColor }}"></div>
+      <span>Radar — Main</span>
+    </div>
+    <div style="display:flex;gap:2px">
+      <div onClick="{{ shadeOn }}" title="Windowshade" style="width:9px;height:9px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.24);font-size:6px;color:#9fd8ef;cursor:pointer" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">─</div>
+      <div style="width:9px;height:9px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.24);font-size:6px;color:#9fd8ef;cursor:pointer" style-hover="color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8">×</div>
+    </div>
+  </div>
+
+  <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:5px;padding:4px 4px 3px 4px;box-sizing:border-box">
+    <div style="display:flex;gap:5px;align-items:center;flex:1 1 auto;min-height:32px">
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:2px;width:56px">
+        <div style="font-size:17px;line-height:17px;letter-spacing:-0.5px;color:#6FE3FF;text-shadow:0 0 7px rgba(111,227,255,0.65),0 0 18px rgba(111,227,255,0.25)">{{ elapsed }}</div>
+        <div style="display:flex;gap:3px;font-size:6px;letter-spacing:0.6px;color:rgba(232,244,255,0.45)"><span>192</span><span>44</span><span style="color:#6FE3FF">STEREO</span></div>
+      </div>
+      <div style="flex:0 0 auto;width:100px;height:26px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);padding:2px 3px;box-sizing:border-box;display:flex;align-items:flex-end;gap:1px">
+        <div style="width:4px;height:5px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:11px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:17px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat;border-top:1px solid #FF4FD8"></div>
+        <div style="width:4px;height:14px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:20px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat;border-top:1px solid #FFE9FB"></div>
+        <div style="width:4px;height:12px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:8px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:15px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:10px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:6px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:9px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:4px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:7px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:3px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:5px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:2px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+      </div>
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:6px;letter-spacing:0.6px;color:rgba(232,244,255,0.4)">
+        <div style="color: {{ shuffleInk }}">SHUF</div>
+        <div>REP</div>
+        <div style="color:#FFB347;text-shadow:0 0 5px rgba(255,179,71,0.5)">OFFLINE</div>
+      </div>
+    </div>
+
+    <div style="height:17px;flex:0 0 auto;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);display:flex;align-items:center;padding:0 4px;overflow:hidden;position:relative">
+      <sc-if value="{{ titleScrolls }}" hint-placeholder-val="{{ false }}">
+        <div style="white-space:nowrap;font-size:11px;color:#E8F4FF;text-shadow:0 0 6px rgba(111,227,255,0.45);animation:radar-marquee 14s linear infinite">{{ titleLoop }}</div>
+      </sc-if>
+      <sc-if value="{{ titleStatic }}" hint-placeholder-val="{{ true }}">
+        <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#E8F4FF;text-shadow:0 0 6px rgba(111,227,255,0.45)">{{ title }}</div>
+      </sc-if>
+    </div>
+
+    <div onClick="{{ seek }}" style="height:9px;flex:0 0 auto;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);position:relative;cursor:pointer">
+      <div style="position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,rgba(111,227,255,0.25),rgba(111,227,255,0.75));width: {{ posPct }}%"></div>
+      <div style="position:absolute;top:-1px;bottom:-1px;width:3px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.95),0 0 14px rgba(111,227,255,0.4);left: {{ posPct }}%"></div>
+    </div>
+
+    <div style="flex:0 0 auto;height:16px;display:flex;align-items:stretch;gap:4px">
+      <div style="display:flex;gap:1px">
+        <div onClick="{{ prev }}" style="width:17px;height:14px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);color:#cfe9f6;font-size:6px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF;color:#6FE3FF" style-active="background:#16253d">◀◀</div>
+        <div onClick="{{ play }}" style="width:17px;height:14px;display:grid;place-items:center;background: {{ playBg }};box-shadow: {{ playRing }};color: {{ playInk }};font-size:7px;cursor:pointer">▶</div>
+        <div onClick="{{ pause }}" style="width:17px;height:14px;display:grid;place-items:center;background: {{ pauseBg }};box-shadow: {{ pauseRing }};color: {{ pauseInk }};font-size:7px;cursor:pointer">‖</div>
+        <div onClick="{{ stop }}" style="width:17px;height:14px;display:grid;place-items:center;background: {{ stopBg }};box-shadow: {{ stopRing }};color: {{ stopInk }};font-size:6px;cursor:pointer">■</div>
+        <div onClick="{{ next }}" style="width:17px;height:14px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);color:#cfe9f6;font-size:6px;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF;color:#6FE3FF">▶▶</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;flex:1 1 auto">
+        <div onClick="{{ setVol }}" style="height:5px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);position:relative;cursor:pointer">
+          <div style="position:absolute;left:0;top:0;bottom:0;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.7);width: {{ volPct }}%"></div>
+        </div>
+        <div style="display:flex;gap:3px;align-items:center">
+          <div style="font-size:6px;color:rgba(232,244,255,0.4);letter-spacing:0.4px">VOL {{ volLabel }}</div>
+          <div style="flex:1 1 auto;height:3px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);position:relative">
+            <div style="position:absolute;top:-1px;bottom:-1px;width:2px;background:#9fd8ef;box-shadow:0 0 4px rgba(111,227,255,0.6);left: {{ balPct }}%"></div>
+          </div>
+          <div style="font-size:6px;color:rgba(232,244,255,0.4)">BAL C</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:2px">
+        <div onClick="{{ toggleEq }}" style="width:19px;height:14px;display:grid;place-items:center;background: {{ eqBg }};box-shadow: {{ eqRing }};color: {{ eqInk }};font-size:6px;letter-spacing:0.5px;cursor:pointer">EQ</div>
+        <div onClick="{{ togglePl }}" style="width:19px;height:14px;display:grid;place-items:center;background: {{ plBg }};box-shadow: {{ plRing }};color: {{ plInk }};font-size:6px;letter-spacing:0.5px;cursor:pointer">PL</div>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:275,&quot;height&quot;:116},&quot;focused&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;shade&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;eqOn&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;plOn&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;title&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Godspeed You! Black Emperor — Storm (Levez Vos Skinny Fists)&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;elapsed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;02:14&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onShade&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(v:boolean)=&gt;void&quot;},&quot;onToggleEq&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;()=&gt;void&quot;},&quot;onTogglePl&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;()=&gt;void&quot;}}">
+class Component extends DCLogic {
+  state = { playing: true, mode: 'play', pos: 23, vol: 78 };
+  renderVals() {
+    const p = this.props;
+    const shade = !!p.shade;
+    const focused = p.focused !== false;
+    const ring = (on, col) => on
+      ? 'inset 0 0 0 1px ' + col + ', 0 0 7px ' + col.replace(')', ',0.55)').replace('#', 'rgba(#')
+      : 'inset 0 0 0 1px rgba(111,227,255,0.22)';
+    const lit = (on) => on ? 'inset 0 0 0 1px #6FE3FF, 0 0 8px rgba(111,227,255,0.45)' : 'inset 0 0 0 1px rgba(111,227,255,0.22)';
+    const m = this.state.mode;
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const title = p.title || 'Godspeed You! Black Emperor — Storm (Levez Vos Skinny Fists)';
+    const scrolls = this.state.playing && !reduced && title.length > 30;
+    return {
+      isShade: shade, isFull: !shade,
+      title, titleLoop: title + '   ///   ' + title,
+      titleScrolls: scrolls, titleStatic: !scrolls,
+      elapsed: p.elapsed || '02:14',
+      posPct: this.state.pos, volPct: this.state.vol, volLabel: this.state.vol, balPct: 49,
+      playGlyph: this.state.playing ? '‖' : '▶',
+      chromeInk: focused ? 'rgba(232,244,255,0.62)' : 'rgba(232,244,255,0.22)',
+      lampColor: focused ? '#6FE3FF' : 'rgba(111,227,255,0.25)',
+      shuffleInk: 'rgba(232,244,255,0.4)',
+      playBg: m === 'play' ? '#132436' : '#100D1C', playRing: lit(m === 'play'), playInk: m === 'play' ? '#6FE3FF' : '#cfe9f6',
+      pauseBg: m === 'pause' ? '#132436' : '#100D1C', pauseRing: lit(m === 'pause'), pauseInk: m === 'pause' ? '#6FE3FF' : '#cfe9f6',
+      stopBg: m === 'stop' ? '#2a1030' : '#100D1C',
+      stopRing: m === 'stop' ? 'inset 0 0 0 1px #FF4FD8, 0 0 8px rgba(255,79,216,0.45)' : 'inset 0 0 0 1px rgba(111,227,255,0.22)',
+      stopInk: m === 'stop' ? '#FF4FD8' : '#cfe9f6',
+      eqBg: p.eqOn ? '#132436' : '#100D1C', eqRing: lit(!!p.eqOn), eqInk: p.eqOn ? '#6FE3FF' : 'rgba(232,244,255,0.55)',
+      plBg: p.plOn ? '#132436' : '#100D1C', plRing: lit(!!p.plOn), plInk: p.plOn ? '#6FE3FF' : 'rgba(232,244,255,0.55)',
+      play: () => this.setState({ mode: 'play', playing: true }),
+      pause: () => this.setState({ mode: 'pause', playing: false }),
+      stop: () => this.setState({ mode: 'stop', playing: false, pos: 0 }),
+      prev: () => this.setState({ pos: 0 }),
+      next: () => this.setState({ pos: 4 }),
+      togglePlay: () => this.setState(s => ({ playing: !s.playing, mode: s.playing ? 'pause' : 'play' })),
+      seek: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.setState({ pos: Math.max(0, Math.min(100, Math.round((e.clientX - r.left) / r.width * 100))) }); },
+      setVol: (e) => { const r = e.currentTarget.getBoundingClientRect(); this.setState({ vol: Math.max(0, Math.min(100, Math.round((e.clientX - r.left) / r.width * 100))) }); },
+      shadeOn: () => this.props.onShade && this.props.onShade(true),
+      unshade: () => this.props.onShade && this.props.onShade(false),
+      toggleEq: () => this.props.onToggleEq && this.props.onToggleEq(),
+      togglePl: () => this.props.onTogglePl && this.props.onTogglePl()
+    };
+  }
+}
+</script>
+</body>
+</html>

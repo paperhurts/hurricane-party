@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:620px;height:480px;box-sizing:border-box;background:#0C0A14;color:#E8F4FF;font:400 13px/1.45 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.22),0 24px 60px rgba(0,0,0,0.65)">
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#0A0812">
+    <div style="display:flex;align-items:center;gap:9px;padding-left:12px;font-size:12px;color:rgba(232,244,255,0.75)">
+      <div style="width:8px;height:8px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.8)"></div>
+      <span>Import — probe results</span>
+    </div>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;background:rgba(255,179,71,0.10);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:#FFB347">
+        <div style="width:5px;height:5px;background:#FFB347;box-shadow:0 0 6px rgba(255,179,71,0.8)"></div>
+        <span>OFFLINE · SHOWING LAST PROBE</span>
+      </div>
+    </sc-if>
+    <div style="display:flex">
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">─</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">▢</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(255,79,216,0.18);color:#FF4FD8">✕</div>
+    </div>
+  </div>
+  <div style="height:1px;flex:0 0 auto;background:linear-gradient(90deg,rgba(111,227,255,0.12),rgba(111,227,255,0.55) 18%,rgba(111,227,255,0.55) 82%,rgba(111,227,255,0.12));box-shadow:0 1px 10px rgba(111,227,255,0.22)"></div>
+
+  <div style="height:44px;flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid rgba(111,227,255,0.10)">
+    <div style="flex:1 1 auto;min-width:0">
+      <div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color: {{ headInk }}">{{ headTitle }}</div>
+      <div style="font:400 10px/1.3 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.9px;color: {{ headNoteInk }}">{{ headNote }}</div>
+    </div>
+    <sc-if value="{{ hasList }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;gap:6px;flex:0 0 auto">
+        <div onClick="{{ selectAll }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:#6FE3FF;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.35);cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF,0 0 14px rgba(111,227,255,0.25)">ALL</div>
+        <div onClick="{{ selectNone }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.6);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);cursor:pointer" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">NONE</div>
+      </div>
+    </sc-if>
+  </div>
+
+  <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:0 0 auto;margin:12px 16px 0;padding:12px 14px;background:rgba(255,179,71,0.06);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45)">
+      <div style="font-size:13px;color:#E8F4FF">Sizes unavailable for 12 items. Save anyway, or retry the estimate.</div>
+      <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:#FFB347;margin-top:6px">THOSE 12 ARE MARKED — · TOTAL BELOW IS A FLOOR, NOT A CEILING</div>
+    </div>
+  </sc-if>
+
+  <div style="flex:1 1 auto;min-height:0;margin:12px 16px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);overflow:hidden;opacity: {{ listOpacity }}">
+    <sc-if value="{{ hasList }}" hint-placeholder-val="{{ true }}">
+      <sc-for list="{{ items }}" as="it" hint-placeholder-count="8">
+        <div onClick="{{ it.toggle }}" style="height:34px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(111,227,255,0.05);cursor:pointer;background: {{ it.bg }}">
+          <div style="width:12px;height:12px;flex:0 0 auto;display:grid;place-items:center;font-size:9px;box-shadow: {{ it.boxRing }};color:#05040A;background: {{ it.boxBg }}">{{ it.check }}</div>
+          <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color: {{ it.ink }}">{{ it.title }}</div>
+          <div style="flex:0 0 auto;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color:rgba(232,244,255,0.35)">{{ it.dur }}</div>
+          <div style="flex:0 0 auto;width:58px;text-align:right;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color: {{ it.sizeInk }}">{{ it.size }}</div>
+          <div onClick="{{ it.toggleKind }}" style="flex:0 0 auto;width:44px;height:20px;display:grid;place-items:center;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;cursor:pointer;box-shadow: {{ it.kindRing }};color: {{ it.kindInk }}">{{ it.kind }}</div>
+        </div>
+      </sc-for>
+    </sc-if>
+
+    <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+      <div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 48px;text-align:center">
+        <div style="font-size:16px;color:#E8F4FF">That link has nothing to download.</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.5);text-wrap:pretty">The playlist is empty or private. Try a single video, or check the URL and probe again.</div>
+        <div style="margin-top:8px;height:30px;display:flex;align-items:center;padding:0 14px;font-size:12px;color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF,0 0 16px rgba(111,227,255,0.22);cursor:default">Back to paste</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:8px 12px;display:flex;flex-direction:column;gap:0">
+        <div style="display:flex;align-items:center;gap:10px;height:24px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;color:#6FE3FF">
+          <span>ESTIMATING SIZES · 34 OF 112</span>
+          <div style="flex:1 1 auto;height:2px;background:rgba(111,227,255,0.10)"><div style="width:31%;height:2px;background:#6FE3FF;box-shadow:0 0 8px rgba(111,227,255,0.7)"></div></div>
+        </div>
+        <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="8">
+          <div style="height:34px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(111,227,255,0.05)">
+            <div style="width:12px;height:12px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14)"></div>
+            <div style="height:8px;background:#14111f;width: {{ k.w }}%"></div>
+            <div style="margin-left:auto;height:8px;width:42px;background:#12101c"></div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="flex:0 0 auto;padding:0 16px 14px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="flex:1 1 auto;height:6px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);display:flex">
+        <div style="height:6px;background:rgba(111,227,255,0.35);width: {{ usedPct }}%"></div>
+        <div style="height:6px;background:#6FE3FF;box-shadow:0 0 10px rgba(111,227,255,0.7);width: {{ addPct }}%"></div>
+      </div>
+      <div style="flex:0 0 auto;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.45)">41 GB FREE</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="flex:1 1 auto;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color: {{ totalInk }}">{{ totalLine }}</div>
+      <div style="height:34px;display:flex;align-items:center;padding:0 13px;font-size:13px;color:rgba(232,244,255,0.6);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);cursor:default" style-hover="color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8">Cancel</div>
+      <div style="height:34px;display:flex;align-items:center;padding:0 18px;font-size:13px;letter-spacing:0.4px;background: {{ saveBg }};box-shadow: {{ saveRing }};color: {{ saveInk }};cursor:default">{{ saveLabel }}</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:620,&quot;height&quot;:480},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;loading&quot;,&quot;populated&quot;,&quot;error&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const FOUND = [
+  ['Storm (Levez Vos Skinny Fists)', '22:32', 412, 42],
+  ['KEC50 Gainesville — NOAA Weather Radio', '41:07', 190, 38],
+  ['Hurricane Prep Checklist 2026', '18:02', 284, 26],
+  ['Cat 5 — full documentary', '52:40', 1430, 74],
+  ['Generator repair — Honda EU2200i', '27:14', 498, 31],
+  ['Alachua County EOC briefing — Sep 26', '1:04:18', 892, 58],
+  ['Boil water notice — how to', '3:12', 54, 6],
+  ['Dayvan Cowboy', '5:00', 96, 11]
+];
+class Component extends DCLogic {
+  state = { sel: [0, 1, 2, 4, 6], audio: [1, 6] };
+  fmt(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB'; }
+  renderVals() {
+    const st = this.props.state || 'populated';
+    const offline = st === 'offline', loading = st === 'loading', empty = st === 'empty', error = st === 'error';
+    const s = this.state;
+    const items = FOUND.map((f, i) => {
+      const on = s.sel.indexOf(i) >= 0;
+      const audioOnly = s.audio.indexOf(i) >= 0;
+      const unknown = error && i >= 5;
+      return {
+        title: f[0], dur: f[1],
+        size: unknown ? '—' : this.fmt(audioOnly ? f[3] : f[2]),
+        sizeInk: unknown ? '#FFB347' : (offline ? 'rgba(232,244,255,0.35)' : 'rgba(232,244,255,0.7)'),
+        ink: offline ? 'rgba(232,244,255,0.5)' : (on ? '#E8F4FF' : 'rgba(232,244,255,0.6)'),
+        bg: on ? 'rgba(111,227,255,0.06)' : 'transparent',
+        check: on ? '✓' : '',
+        boxBg: on ? (offline ? 'rgba(111,227,255,0.45)' : '#6FE3FF') : 'transparent',
+        boxRing: on ? 'inset 0 0 0 1px #6FE3FF, 0 0 10px rgba(111,227,255,0.5)' : 'inset 0 0 0 1px rgba(111,227,255,0.25)',
+        kind: audioOnly ? 'A' : 'A+V',
+        kindInk: audioOnly ? '#FF4FD8' : 'rgba(232,244,255,0.55)',
+        kindRing: audioOnly ? 'inset 0 0 0 1px #FF4FD8, 0 0 10px rgba(255,79,216,0.3)' : 'inset 0 0 0 1px rgba(111,227,255,0.2)',
+        toggle: () => this.setState(p => ({ sel: p.sel.indexOf(i) >= 0 ? p.sel.filter(x => x !== i) : p.sel.concat([i]) })),
+        toggleKind: (e) => { e.stopPropagation(); this.setState(p => ({ audio: p.audio.indexOf(i) >= 0 ? p.audio.filter(x => x !== i) : p.audio.concat([i]) })); }
+      };
+    });
+    const totalMb = s.sel.reduce((a, i) => a + (s.audio.indexOf(i) >= 0 ? FOUND[i][3] : FOUND[i][2]), 0);
+    const addPct = Math.min(28, totalMb / 1024 / 102 * 100 * 2.4);
+    const save = offline ? ['Save when online', 'transparent', 'inset 0 0 0 1px #FFB347, 0 0 16px rgba(255,179,71,0.22)', '#FFB347']
+      : empty || loading ? ['Save', 'transparent', 'inset 0 0 0 1px rgba(111,227,255,0.18)', 'rgba(232,244,255,0.3)']
+      : ['Save ' + s.sel.length + ' items', 'rgba(111,227,255,0.08)', 'inset 0 0 0 1px #6FE3FF, 0 0 22px rgba(111,227,255,0.28)', '#6FE3FF'];
+    return {
+      isOffline: offline, isLoading: loading, isError: error, isEmpty: empty,
+      hasList: !empty && !loading, items,
+      listOpacity: offline ? 0.8 : 1,
+      skeleton: [66, 54, 78, 44, 61, 72, 50, 68].map(w => ({ w })),
+      headTitle: empty ? 'No items found' : loading ? 'Probing playlist…' : 'Storm Prep 2026 — 112 items found',
+      headInk: empty ? 'rgba(232,244,255,0.6)' : '#E8F4FF',
+      headNote: empty ? 'PROBED 02:44 · NOTHING TO SAVE'
+        : loading ? 'READING METADATA'
+        : offline ? 'PROBED 02:11 · STALE, SIZES MAY HAVE CHANGED'
+        : error ? '100 SIZED · 12 UNKNOWN'
+        : '8 SHOWN OF 112 · SORTED AS FOUND',
+      headNoteInk: offline || error ? '#FFB347' : 'rgba(232,244,255,0.35)',
+      usedPct: 60, addPct: addPct,
+      totalLine: empty ? 'SELECTED 0 · 0 MB'
+        : loading ? 'ESTIMATING…'
+        : 'SELECTED ' + s.sel.length + ' OF 112 · ' + this.fmt(totalMb) + (error ? ' + 12 UNKNOWN' : ''),
+      totalInk: error ? '#FFB347' : '#E8F4FF',
+      saveLabel: save[0], saveBg: save[1], saveRing: save[2], saveInk: save[3],
+      selectAll: () => this.setState({ sel: FOUND.map((f, i) => i) }),
+      selectNone: () => this.setState({ sel: [] })
+    };
+  }
+}
+</script>
+</body>
+</html>

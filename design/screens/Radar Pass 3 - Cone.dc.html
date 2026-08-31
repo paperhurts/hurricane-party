@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    @font-face { font-family: 'Iosevka Web'; src: local('Iosevka'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.0.8/files/iosevka-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Aile Web'; src: local('Iosevka Aile'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka-aile@5.0.8/files/iosevka-aile-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Aile Web'; src: local('Iosevka Aile'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka-aile@5.0.8/files/iosevka-aile-latin-600-normal.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+    html, body { margin: 0; background: #08070E; }
+    a { color: #6FE3FF; text-decoration: none; }
+    a:hover { color: #FF4FD8; }
+  </style>
+</helmet>
+
+<section style="background:#08070E;color:#E8F4FF;font:400 13px/1.5 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;padding:56px 64px 110px;display:flex;flex-direction:column;gap:72px;min-width:1320px">
+
+  <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:56px;border-bottom:1px solid rgba(111,227,255,0.16);padding-bottom:28px">
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:700px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF;padding:4px 8px;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.45),0 0 12px rgba(111,227,255,0.18)">3a</span>
+        <span style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:rgba(232,244,255,0.4)">PASS 3 · CONE</span>
+      </div>
+      <h1 style="margin:0;font-size:26px;font-weight:600;letter-spacing:-0.3px;color:#E8F4FF;text-shadow:0 0 14px rgba(111,227,255,0.26)">Cached weather must never look current.</h1>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:rgba(232,244,255,0.55);text-wrap:pretty">Cone is a skin: the radar loop sits behind the chrome, cached to disk so it keeps looping after the network dies. The window fill drops to 55% so the return reads through it; wells stay opaque, because a track title over a squall line is unreadable. Age lives in the chrome, not in a tooltip.</p>
+      <p style="margin:6px 0 0;font:400 11px/1.6 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.35)">PASS 1 <a href="Radar Player.dc.html">MAIN / EQ / PLAYLIST</a> · PASS 2 <a href="Radar Pass 2.dc.html">MODERN WINDOWS</a> · BOTH UNCHANGED</p>
+    </div>
+    <div style="flex:0 0 auto;padding:14px 16px;box-shadow:inset 0 0 0 1px rgba(255,179,71,0.32);display:flex;flex-direction:column;gap:7px;font:400 10px/1.5 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:rgba(232,244,255,0.45);max-width:300px">
+      <div style="color:#FFB347;letter-spacing:1.6px">THE STALE RULE</div>
+      <div>DESATURATE THE BACKDROP. PUT THE AGE IN EMBER, IN THE CHROME, ALWAYS VISIBLE.</div>
+      <div style="color:rgba(232,244,255,0.3);letter-spacing:0.6px">A GLANCE MUST ANSWER "IS THIS NOW?" WITHOUT A CLICK.</div>
+    </div>
+  </header>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:32px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">CONE ON THE DESKTOP · 2×</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:680px">Main takes the Cone fill. Playlist keeps pass 1's opaque well unchanged — rows have to stay readable over a reflectivity field. Switch the state to see what the same desktop looks like four hours later.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="3">
+          <div onClick="{{ c.pick }}" style="height:28px;display:flex;align-items:center;padding:0 12px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="position:relative;width:1000px;height:560px;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.18)">
+      <dc-import name="ConeBackdrop" mode="{{ mode }}" hint-size="100%,100%"></dc-import>
+      <div style="position:absolute;left:52px;top:44px">
+        <div style="zoom:2;display:flex;flex-direction:column;align-items:flex-start">
+          <dc-import name="ConeMain" mode="{{ mode }}" hint-size="275px,116px"></dc-import>
+          <div style="width:275px;height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)"></div>
+          <dc-import name="PlaylistWindow" focused="{{ true }}" h="{{ 116 }}" hint-size="275px,116px"></dc-import>
+        </div>
+      </div>
+      <div style="position:absolute;right:20px;bottom:18px;padding:8px 11px;background:rgba(5,4,10,0.78);box-shadow:inset 0 0 0 1px {{ noteRing }};font:400 10px/1.6 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ noteInk }};max-width:260px">{{ note }}</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">THREE STATES, SIDE BY SIDE</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.45)">Live at full saturation. Stale desaturated with an ember age band. No data falls back to plain Eyewall — flat void fill, nothing dimmed, nothing broken.</div>
+    </div>
+    <div style="display:flex;gap:28px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="position:relative;width:610px;height:300px;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.16)">
+          <dc-import name="ConeBackdrop" mode="live" hint-size="100%,100%"></dc-import>
+          <div style="position:absolute;left:30px;top:34px"><div style="zoom:2"><dc-import name="ConeMain" mode="live" hint-size="275px,116px"></dc-import></div></div>
+        </div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px;color:#6FE3FF">LIVE · 2m OLD · FULL SATURATION</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="position:relative;width:610px;height:300px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,179,71,0.35)">
+          <dc-import name="ConeBackdrop" mode="stale" hint-size="100%,100%"></dc-import>
+          <div style="position:absolute;left:30px;top:34px"><div style="zoom:2"><dc-import name="ConeMain" mode="stale" hint-size="275px,116px"></dc-import></div></div>
+        </div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px;color:#FFB347">STALE · 4h 12m OLD · DESATURATED, AGE IN EMBER</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="position:relative;width:610px;height:300px;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.16)">
+          <dc-import name="ConeBackdrop" mode="nodata" hint-size="100%,100%"></dc-import>
+          <div style="position:absolute;left:30px;top:34px"><div style="zoom:2"><dc-import name="ConeMain" mode="nodata" hint-size="275px,116px"></dc-import></div></div>
+        </div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px;color:rgba(232,244,255,0.45)">NO DATA · PLAIN EYEWALL · NEVER FETCHED</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:56px;flex-wrap:wrap;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">THE AGE READOUT · 4×</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:560px">Eleven logical pixels under the title bar, always present. The band itself changes colour, not just the text — peripheral vision reads the ember before it reads the words.</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="zoom:4;width:275px"><dc-import name="ConeReadout" mode="live" hint-size="275px,11px"></dc-import></div>
+        <div style="zoom:4;width:275px"><dc-import name="ConeReadout" mode="stale" hint-size="275px,11px"></dc-import></div>
+        <div style="zoom:4;width:275px"><dc-import name="ConeReadout" mode="nodata" hint-size="275px,11px"></dc-import></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">WINDOWSHADE OVER CONE · 275 × 14</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:520px">The state the owner lives in. Age collapses to four characters and keeps its colour.</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="position:relative;width:610px;height:92px;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.16)">
+          <dc-import name="ConeBackdrop" mode="live" hint-size="100%,100%"></dc-import>
+          <div style="position:absolute;left:30px;top:32px"><div style="zoom:2"><dc-import name="ConeMain" mode="live" shade="{{ true }}" hint-size="275px,14px"></dc-import></div></div>
+        </div>
+        <div style="position:relative;width:610px;height:92px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,179,71,0.35)">
+          <dc-import name="ConeBackdrop" mode="stale" hint-size="100%,100%"></dc-import>
+          <div style="position:absolute;left:30px;top:32px"><div style="zoom:2"><dc-import name="ConeMain" mode="stale" shade="{{ true }}" hint-size="275px,14px"></dc-import></div></div>
+        </div>
+        <div style="position:relative;width:610px;height:92px;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.16)">
+          <dc-import name="ConeBackdrop" mode="nodata" hint-size="100%,100%"></dc-import>
+          <div style="position:absolute;left:30px;top:32px"><div style="zoom:2"><dc-import name="ConeMain" mode="nodata" shade="{{ true }}" hint-size="275px,14px"></dc-import></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:22px;flex-wrap:wrap;border-top:1px solid rgba(111,227,255,0.16);padding-top:28px">
+    <div style="width:330px;padding:14px 16px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22)">
+      <div style="font:400 9px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF;margin-bottom:7px">CACHE</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.7)">Eight frames on disk, oldest dropped. The loop keeps running with no network — it just stops being now.</div>
+    </div>
+    <div style="width:330px;padding:14px 16px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(255,179,71,0.32)">
+      <div style="font:400 9px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#FFB347;margin-bottom:7px">STALE</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.7)">Colour is the signal. A desaturated field can't be mistaken for a live return, even at a glance across a dark room.</div>
+    </div>
+    <div style="width:330px;padding:14px 16px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22)">
+      <div style="font:400 9px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF;margin-bottom:7px">NO DATA</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.7)">Plain Eyewall, full opacity, no placeholder art and no apology. Cone is absent, not failed.</div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const MODES = [['live', 'LIVE'], ['stale', 'STALE'], ['nodata', 'NO DATA']];
+class Component extends DCLogic {
+  state = { mode: 'stale' };
+  renderVals() {
+    const m = this.state.mode;
+    const stale = m === 'stale', none = m === 'nodata';
+    return {
+      mode: m,
+      chips: MODES.map(([val, label]) => {
+        const on = m === val;
+        const warn = val === 'stale';
+        return {
+          label,
+          ink: on ? (warn ? '#FFB347' : '#6FE3FF') : 'rgba(232,244,255,0.42)',
+          bg: on ? (warn ? 'rgba(255,179,71,0.10)' : 'rgba(111,227,255,0.08)') : 'transparent',
+          ring: on
+            ? (warn ? 'inset 0 0 0 1px #FFB347, 0 0 16px rgba(255,179,71,0.25)' : 'inset 0 0 0 1px #6FE3FF, 0 0 16px rgba(111,227,255,0.25)')
+            : 'inset 0 0 0 1px rgba(111,227,255,0.16)',
+          pick: () => this.setState({ mode: val })
+        };
+      }),
+      note: stale ? 'CACHED LOOP STILL RUNNING · 8 FRAMES ON DISK · NOTHING HERE IS CURRENT'
+        : none ? 'NO RADAR CACHE · CONE IS OFF AND THE SKIN IS PLAIN EYEWALL'
+        : 'LIVE · 8 FRAMES · REFRESHED EVERY 4 MIN WHILE ONLINE',
+      noteInk: stale ? '#FFB347' : (none ? 'rgba(232,244,255,0.45)' : '#6FE3FF'),
+      noteRing: stale ? 'rgba(255,179,71,0.45)' : (none ? 'rgba(111,227,255,0.16)' : 'rgba(111,227,255,0.3)')
+    };
+  }
+}
+</script>
+</body>
+</html>

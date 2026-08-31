@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    @font-face { font-family: 'Iosevka Web'; src: local('Iosevka'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.0.8/files/iosevka-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Aile Web'; src: local('Iosevka Aile'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka-aile@5.0.8/files/iosevka-aile-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Aile Web'; src: local('Iosevka Aile'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka-aile@5.0.8/files/iosevka-aile-latin-600-normal.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+    html, body { margin: 0; background: #08070E; }
+    a { color: #6FE3FF; text-decoration: none; }
+    a:hover { color: #FF4FD8; }
+  </style>
+</helmet>
+
+<section style="background:#08070E;color:#E8F4FF;font:400 13px/1.5 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;padding:56px 64px 110px;display:flex;flex-direction:column;gap:72px;min-width:1320px">
+
+  <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:56px;border-bottom:1px solid rgba(111,227,255,0.16);padding-bottom:28px">
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:700px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF;padding:4px 8px;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.45),0 0 12px rgba(111,227,255,0.18)">2a</span>
+        <span style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:rgba(232,244,255,0.4)">PASS 2 · THE MODERN WINDOWS</span>
+      </div>
+      <h1 style="margin:0;font-size:26px;font-weight:600;letter-spacing:-0.3px;color:#E8F4FF;text-shadow:0 0 14px rgba(111,227,255,0.26)">Decorated, resizable, and honest about not being sprites.</h1>
+      <p style="margin:0;font-size:13px;line-height:1.7;color:rgba(232,244,255,0.55);text-wrap:pretty">Native title bar, then a thin arc line where the app's content begins — the one place these windows quote the bond seam. Body text is Iosevka Aile; numbers, paths and status lines stay on Iosevka mono. Same palette, same glow rule: crisp core, halo underneath.</p>
+      <p style="margin:6px 0 0;font:400 11px/1.6 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.35)">PASS 1 IS LOCKED AND UNCHANGED → <a href="Radar Player.dc.html">MAIN / EQ / PLAYLIST</a></p>
+    </div>
+    <div style="flex:0 0 auto;padding:14px 16px;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);display:flex;flex-direction:column;gap:7px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:rgba(232,244,255,0.45)">
+      <div style="color:#6FE3FF;letter-spacing:1.6px">FIVE STATES EACH</div>
+      <div>EMPTY · LOADING · POPULATED · ERROR · OFFLINE</div>
+      <div style="color:rgba(232,244,255,0.3);letter-spacing:0.6px">CLICK A STATE TO SWITCH THE WINDOW IN PLACE</div>
+      <div style="margin-top:4px;color:#FFB347;letter-spacing:0.6px">OFFLINE IS NEVER A SPINNER. IT IS ALWAYS AN EXPLANATION.</div>
+    </div>
+  </header>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:32px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">LIBRARY · 1120 × 720</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:620px">Flat sortable table, not a tree. Filter box drives the whole window. Offline is nearly a no-op here — the library is local — so it says so instead of dimming everything.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ libraryChips }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.pick }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+    <dc-import name="LibraryWindow" state="{{ library }}" hint-size="1120px,720px"></dc-import>
+  </div>
+
+  <div style="display:flex;gap:64px;flex-wrap:wrap;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">IMPORT · PASTE · 620 × 480</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:560px">One field, one action. Offline swaps Probe for Queue for later and lists what still works.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ pasteChips }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.pick }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+      <dc-import name="ImportPasteWindow" state="{{ paste }}" hint-size="620px,480px"></dc-import>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">IMPORT · PROBE RESULTS · 620 × 480</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:560px">Checkboxes and the A / A+V toggle are live — the running total and the disk bar move with them.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ probeChips }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.pick }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+      <dc-import name="ImportProbeWindow" state="{{ probe }}" hint-size="620px,480px"></dc-import>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:64px;flex-wrap:wrap;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">DOWNLOADS · 720 × 560</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:640px">Active, queued, failed in one column. Offline holds jobs at their exact percentage instead of failing them.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ downloadsChips }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.pick }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+      <dc-import name="DownloadsWindow" state="{{ downloads }}" hint-size="720px,560px"></dc-import>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">PREP · 640 × 420</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:560px">Bulk paste, total against free space, one large button. No steps, no wizard — it gets used with a storm two hours out.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ prepChips }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.pick }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+      <dc-import name="PrepWindow" state="{{ prep }}" hint-size="640px,420px"></dc-import>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:32px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">SETTINGS · 880 × 620</div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45);max-width:640px">Roots, budget, concurrency, chrome scale, skin, and helper-tool health in one pane. Concurrency, scale and skin are clickable.</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <sc-for list="{{ settingsChips }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.pick }}" style="height:26px;display:flex;align-items:center;padding:0 10px;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.1px;cursor:pointer;color: {{ c.ink }};box-shadow: {{ c.ring }};background: {{ c.bg }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+    <dc-import name="SettingsWindow" state="{{ settings }}" hint-size="880px,620px"></dc-import>
+  </div>
+
+  <div style="display:flex;gap:22px;flex-wrap:wrap;border-top:1px solid rgba(111,227,255,0.16);padding-top:28px">
+    <div style="width:320px;padding:14px 16px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22)">
+      <div style="font:400 9px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF;margin-bottom:7px">RULE</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.7)">Offline is a state with an explanation and an action, never a spinner that can't resolve.</div>
+    </div>
+    <div style="width:320px;padding:14px 16px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22)">
+      <div style="font:400 9px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF;margin-bottom:7px">RULE</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.7)">Stale data stays visible and says when it was true. Hiding it is worse than dating it.</div>
+    </div>
+    <div style="width:320px;padding:14px 16px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(255,179,71,0.32)">
+      <div style="font:400 9px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#FFB347;margin-bottom:7px">RULE</div>
+      <div style="font-size:12px;color:rgba(232,244,255,0.7)">Errors name what happened, what still works, and the next move. No apology.</div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const STATES = ['empty', 'loading', 'populated', 'error', 'offline'];
+class Component extends DCLogic {
+  state = { library: 'populated', paste: 'populated', probe: 'populated', downloads: 'populated', prep: 'populated', settings: 'populated' };
+  chips(key) {
+    return STATES.map(s => {
+      const on = this.state[key] === s;
+      const warn = s === 'offline';
+      return {
+        label: s.toUpperCase(),
+        ink: on ? (warn ? '#FFB347' : '#6FE3FF') : 'rgba(232,244,255,0.42)',
+        bg: on ? (warn ? 'rgba(255,179,71,0.10)' : 'rgba(111,227,255,0.08)') : 'transparent',
+        ring: on
+          ? (warn ? 'inset 0 0 0 1px #FFB347, 0 0 16px rgba(255,179,71,0.25)' : 'inset 0 0 0 1px #6FE3FF, 0 0 16px rgba(111,227,255,0.25)')
+          : 'inset 0 0 0 1px rgba(111,227,255,0.16)',
+        pick: () => this.setState({ [key]: s })
+      };
+    });
+  }
+  renderVals() {
+    const s = this.state;
+    return {
+      library: s.library, paste: s.paste, probe: s.probe, downloads: s.downloads, prep: s.prep, settings: s.settings,
+      libraryChips: this.chips('library'),
+      pasteChips: this.chips('paste'),
+      probeChips: this.chips('probe'),
+      downloadsChips: this.chips('downloads'),
+      prepChips: this.chips('prep'),
+      settingsChips: this.chips('settings')
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:880px;height:620px;box-sizing:border-box;background:#0C0A14;color:#E8F4FF;font:400 13px/1.45 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.22),0 24px 60px rgba(0,0,0,0.65)">
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#0A0812">
+    <div style="display:flex;align-items:center;gap:9px;padding-left:12px;font-size:12px;color:rgba(232,244,255,0.75)">
+      <div style="width:8px;height:8px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.8)"></div>
+      <span>Settings — Radar</span>
+    </div>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;background:rgba(255,179,71,0.10);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:#FFB347">
+        <div style="width:5px;height:5px;background:#FFB347;box-shadow:0 0 6px rgba(255,179,71,0.8)"></div>
+        <span>OFFLINE · UPDATE CHECKS PAUSED</span>
+      </div>
+    </sc-if>
+    <div style="display:flex">
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">─</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">▢</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(255,79,216,0.18);color:#FF4FD8">✕</div>
+    </div>
+  </div>
+  <div style="height:1px;flex:0 0 auto;background:linear-gradient(90deg,rgba(111,227,255,0.12),rgba(111,227,255,0.55) 18%,rgba(111,227,255,0.55) 82%,rgba(111,227,255,0.12));box-shadow:0 1px 10px rgba(111,227,255,0.22)"></div>
+
+  <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:0 0 auto;margin:16px 18px 0;padding:16px 18px;background:rgba(111,227,255,0.05);box-shadow:inset 0 0 0 1px #6FE3FF">
+      <div style="font-size:16px;color:#E8F4FF;margin-bottom:5px">Pick where Radar keeps files.</div>
+      <div style="font-size:13px;color:rgba(232,244,255,0.55);margin-bottom:12px">One folder is enough. Put it on the drive you'd grab on the way out.</div>
+      <div style="height:32px;display:inline-flex;align-items:center;padding:0 14px;font-size:13px;color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF,0 0 18px rgba(111,227,255,0.25);cursor:default">Choose folder</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:0 0 auto;margin:16px 18px 0;padding:14px 16px;background:rgba(255,179,71,0.06);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);display:flex;align-items:center;gap:16px">
+      <div style="flex:1 1 auto">
+        <div style="font-size:14px;color:#E8F4FF">ffmpeg not found. Audio-only saves and MP3 conversion are off until it's there.</div>
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:#FFB347;margin-top:6px">DOWNLOADS STILL WORK · VIDEO IS SAVED AS-IS</div>
+      </div>
+      <div style="flex:0 0 auto;display:flex;gap:8px">
+        <div style="height:30px;display:flex;align-items:center;padding:0 13px;font-size:12px;color:#FFB347;box-shadow:inset 0 0 0 1px #FFB347,0 0 14px rgba(255,179,71,0.2);cursor:default">Install it</div>
+        <div style="height:30px;display:flex;align-items:center;padding:0 13px;font-size:12px;color:rgba(232,244,255,0.65);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.2);cursor:default" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">Point to binary</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <div style="flex:1 1 auto;min-height:0;display:grid;grid-template-columns:1fr 360px;gap:22px;padding:18px;overflow:hidden;opacity: {{ bodyOpacity }}">
+    <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF">LIBRARY ROOTS</div>
+        <div style="background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14)">
+          <sc-for list="{{ roots }}" as="p" hint-placeholder-count="2">
+            <div style="height:34px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(111,227,255,0.05);font:400 12px/1 'Iosevka Web',ui-monospace,monospace">
+              <div style="width:5px;height:5px;flex:0 0 auto;background: {{ p.lamp }};box-shadow:0 0 6px {{ p.lamp }}"></div>
+              <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color: {{ p.ink }}">{{ p.path }}</div>
+              <div style="flex:0 0 auto;color:rgba(232,244,255,0.35)">{{ p.detail }}</div>
+              <div style="flex:0 0 auto;width:20px;height:20px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.4);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);cursor:default" style-hover="color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8">✕</div>
+            </div>
+          </sc-for>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;font-size:12px;color:#6FE3FF;cursor:default" style-hover="background:rgba(111,227,255,0.06)">+ Add folder</div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF">STORAGE BUDGET</div>
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color: {{ budgetInk }}">{{ budgetLine }}</div>
+        </div>
+        <div style="height:10px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);display:flex">
+          <div style="height:10px;background:rgba(111,227,255,0.35);width:51%"></div>
+          <div style="height:10px;background:rgba(255,179,71,0.5);width:9%"></div>
+        </div>
+        <div style="font-size:12px;color:rgba(232,244,255,0.45)">Radar stops saving at the budget instead of filling the drive.</div>
+      </div>
+
+      <div style="display:flex;gap:26px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF">CONCURRENCY</div>
+          <div style="display:flex;gap:4px">
+            <sc-for list="{{ conc }}" as="c" hint-placeholder-count="4">
+              <div onClick="{{ c.pick }}" style="width:34px;height:30px;display:grid;place-items:center;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;cursor:pointer;box-shadow: {{ c.ring }};color: {{ c.ink }};background: {{ c.bg }}">{{ c.n }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF">CHROME SCALE</div>
+          <div style="display:flex;gap:4px">
+            <sc-for list="{{ scales }}" as="c" hint-placeholder-count="2">
+              <div onClick="{{ c.pick }}" style="width:46px;height:30px;display:grid;place-items:center;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;cursor:pointer;box-shadow: {{ c.ring }};color: {{ c.ink }};background: {{ c.bg }}">{{ c.n }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF">SKIN</div>
+        <div style="display:flex;gap:8px">
+          <sc-for list="{{ skins }}" as="s" hint-placeholder-count="3">
+            <div onClick="{{ s.pick }}" style="flex:1 1 0;height:46px;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:0 10px;cursor:pointer;box-shadow: {{ s.ring }};background:#05040A">
+              <div style="display:flex;gap:3px">
+                <div style="width:14px;height:5px;background: {{ s.c1 }};box-shadow:0 0 6px {{ s.c1 }}"></div>
+                <div style="width:14px;height:5px;background: {{ s.c2 }};box-shadow:0 0 6px {{ s.c2 }}"></div>
+                <div style="width:14px;height:5px;background: {{ s.c3 }}"></div>
+              </div>
+              <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color: {{ s.ink }}">{{ s.name }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color: {{ diagHeadInk }}">DIAGNOSTICS</div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ diagNoteInk }}">{{ diagNote }}</div>
+      </div>
+      <div style="flex:1 1 auto;min-height:0;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);display:flex;flex-direction:column">
+        <sc-for list="{{ diags }}" as="d" hint-placeholder-count="6">
+          <div style="height:52px;flex:0 0 auto;display:flex;align-items:center;gap:11px;padding:0 12px;border-bottom:1px solid rgba(111,227,255,0.05)">
+            <div style="width:7px;height:7px;flex:0 0 auto;background: {{ d.lamp }};box-shadow:0 0 8px {{ d.lamp }}"></div>
+            <div style="flex:1 1 auto;min-width:0">
+              <div style="font-size:13px;color: {{ d.ink }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.name }}</div>
+              <div style="font:400 10px/1.4 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color: {{ d.detailInk }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.detail }}</div>
+            </div>
+            <div style="flex:0 0 auto;width:56px;height:24px;display:grid;place-items:center;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ d.btnInk }};box-shadow: {{ d.btnRing }};cursor:default">{{ d.btn }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0A0812;border-top:1px solid rgba(111,227,255,0.10);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.42)">
+    <span style="color: {{ statusInk }}">{{ statusLeft }}</span>
+    <span>RADAR 0.4.2 · TAURI 2 · WINDOWS 11</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:880,&quot;height&quot;:620},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;loading&quot;,&quot;populated&quot;,&quot;error&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { conc: 2, scale: '2×', skin: 'VOID' };
+  renderVals() {
+    const st = this.props.state || 'populated';
+    const offline = st === 'offline', loading = st === 'loading', empty = st === 'empty', error = st === 'error';
+    const s = this.state;
+    const pick = (on, key, val) => ({
+      ring: on ? 'inset 0 0 0 1px #6FE3FF, 0 0 16px rgba(111,227,255,0.28)' : 'inset 0 0 0 1px rgba(111,227,255,0.18)',
+      ink: on ? '#6FE3FF' : 'rgba(232,244,255,0.55)',
+      bg: on ? 'rgba(111,227,255,0.08)' : 'transparent',
+      pick: () => this.setState({ [key]: val })
+    });
+    const roots = empty ? [{ path: 'No folder set', detail: '', lamp: 'rgba(255,179,71,0.8)', ink: 'rgba(232,244,255,0.45)' }]
+      : [
+        { path: 'D:\\Radar', detail: error ? 'UNREADABLE' : '142 items · 61.4 GB', lamp: error ? '#FFB347' : '#6FE3FF', ink: '#E8F4FF' },
+        { path: 'C:\\Users\\jt\\Music\\mp3', detail: '318 items · 4.1 GB', lamp: '#6FE3FF', ink: '#E8F4FF' }
+      ];
+    const diagRows = [
+      ['yt-dlp', loading ? 'CHECKING…' : '2026.07.11 · UP TO DATE', 'ok'],
+      ['ffmpeg', error ? 'NOT FOUND ON PATH' : (loading ? 'CHECKING…' : '7.1.1 · UP TO DATE'), error ? 'bad' : 'ok'],
+      ['Network', offline ? 'NO ROUTE · LAST SEEN 02:11' : (loading ? 'CHECKING…' : 'ONLINE · 92 MS TO YOUTUBE'), offline ? 'warn' : 'ok'],
+      ['Disk D:', error ? 'DRIVE NOT PRESENT' : (loading ? 'CHECKING…' : '41 GB FREE OF 102 GB'), error ? 'bad' : 'ok'],
+      ['Update check', offline ? 'PAUSED WHILE OFFLINE' : (loading ? 'CHECKING…' : 'RAN 02:44 · NOTHING NEW'), offline ? 'warn' : 'ok'],
+      ['Helper logs', 'D:\\Radar\\logs · 4 FILES', 'ok']
+    ];
+    const lampFor = { ok: '#6FE3FF', warn: '#FFB347', bad: '#FF4FD8', idle: 'rgba(232,244,255,0.2)' };
+    const diags = diagRows.map(d => {
+      const kind = loading ? 'idle' : d[2];
+      return {
+        name: d[0], detail: d[1],
+        lamp: lampFor[kind],
+        ink: kind === 'bad' ? '#FF4FD8' : '#E8F4FF',
+        detailInk: kind === 'bad' ? 'rgba(255,79,216,0.8)' : (kind === 'warn' ? '#FFB347' : 'rgba(232,244,255,0.4)'),
+        btn: kind === 'bad' ? 'FIX' : 'CHECK',
+        btnInk: loading ? 'rgba(232,244,255,0.25)' : (kind === 'bad' ? '#FF4FD8' : (offline && d[0] !== 'Helper logs' ? 'rgba(232,244,255,0.3)' : '#6FE3FF')),
+        btnRing: kind === 'bad' ? 'inset 0 0 0 1px #FF4FD8' : 'inset 0 0 0 1px rgba(111,227,255,0.2)'
+      };
+    });
+    return {
+      isOffline: offline, isEmpty: empty, isError: error, isLoading: loading,
+      bodyOpacity: empty ? 0.45 : 1,
+      roots, diags,
+      conc: [1, 2, 3, 4].map(n => Object.assign({ n }, pick(s.conc === n, 'conc', n))),
+      scales: ['1×', '2×'].map(n => Object.assign({ n }, pick(s.scale === n, 'scale', n))),
+      skins: [
+        { name: 'VOID', c1: '#6FE3FF', c2: '#FF4FD8', c3: '#0C0A14' },
+        { name: 'EMBER', c1: '#FFB347', c2: '#FF4FD8', c3: '#0C0A14' },
+        { name: 'PHOSPHOR', c1: '#57C22B', c2: '#A8D62B', c3: '#05040A' }
+      ].map(k => Object.assign({}, k, {
+        ring: s.skin === k.name ? 'inset 0 0 0 1px #6FE3FF, 0 0 16px rgba(111,227,255,0.25)' : 'inset 0 0 0 1px rgba(111,227,255,0.16)',
+        ink: s.skin === k.name ? '#6FE3FF' : 'rgba(232,244,255,0.5)',
+        pick: () => this.setState({ skin: k.name })
+      })),
+      budgetLine: empty ? 'NOT SET' : '60 GB OF 102 GB · 51 GB USED',
+      budgetInk: empty ? 'rgba(232,244,255,0.35)' : 'rgba(232,244,255,0.5)',
+      diagHeadInk: error ? '#FF4FD8' : '#6FE3FF',
+      diagNote: loading ? 'RUNNING CHECKS…' : (offline ? 'NETWORK CHECK HELD' : (error ? '1 PROBLEM' : 'ALL CLEAR 02:44')),
+      diagNoteInk: error ? '#FF4FD8' : (offline ? '#FFB347' : 'rgba(232,244,255,0.35)'),
+      statusLeft: empty ? 'FIRST RUN · CHOOSE A LIBRARY FOLDER TO FINISH SETUP'
+        : loading ? 'CHECKING HELPER TOOLS…'
+        : offline ? 'EVERYTHING HERE IS LOCAL · NOTHING NEEDS THE NETWORK'
+        : error ? 'ONE HELPER MISSING · AUDIO-ONLY SAVES DISABLED'
+        : 'SAVED',
+      statusInk: error ? '#FF4FD8' : (offline ? '#FFB347' : 'rgba(232,244,255,0.42)')
+    };
+  }
+}
+</script>
+</body>
+</html>

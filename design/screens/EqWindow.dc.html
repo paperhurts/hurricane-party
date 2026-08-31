@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<sc-if value="{{ isShade }}" hint-placeholder-val="{{ false }}">
+  <div style="width:275px;height:14px;box-sizing:border-box;display:flex;align-items:center;gap:5px;padding:0 3px;background:linear-gradient(#15112a,#0C0A14);border:1px solid rgba(111,227,255,0.30);font:400 8px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace;color:#E8F4FF;overflow:hidden">
+    <span style="font-size:6px;letter-spacing:1.2px;color:rgba(232,244,255,0.5)">EQ</span>
+    <span style="font-size:6px;letter-spacing:0.6px;color: {{ onInk }}">{{ onLabel }}</span>
+    <div style="flex:1 1 auto;display:flex;align-items:flex-end;gap:1px;height:9px">
+      <sc-for list="{{ bands }}" as="b" hint-placeholder-count="11">
+        <div style="width:3px;background:#6FE3FF;opacity:0.85;box-shadow:0 0 3px rgba(111,227,255,0.7);height: {{ b.shadeH }}px"></div>
+      </sc-for>
+    </div>
+    <span style="font-size:6px;color:rgba(232,244,255,0.45);letter-spacing:0.4px">{{ preset }}</span>
+    <div onClick="{{ unshade }}" style="width:9px;height:9px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.28);color:#9fd8ef;font-size:6px;cursor:pointer" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">▢</div>
+  </div>
+</sc-if>
+<sc-if value="{{ isFull }}" hint-placeholder-val="{{ true }}">
+<div style="width:275px;height:116px;box-sizing:border-box;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);font:400 11px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace;color:#E8F4FF;display:flex;flex-direction:column;overflow:hidden">
+  <div style="height:14px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 3px;background:linear-gradient(#15112a,#0C0A14);border-bottom:1px solid rgba(111,227,255,0.16)">
+    <div style="display:flex;align-items:center;gap:4px;font-size:6px;letter-spacing:1.4px;text-transform:uppercase;color: {{ chromeInk }}">
+      <div style="width:3px;height:3px;background: {{ lampColor }};box-shadow:0 0 4px {{ lampColor }}"></div>
+      <span>Equalizer</span>
+    </div>
+    <div style="display:flex;gap:2px">
+      <div onClick="{{ shadeOn }}" style="width:9px;height:9px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.24);font-size:6px;color:#9fd8ef;cursor:pointer" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">─</div>
+      <div style="width:9px;height:9px;display:grid;place-items:center;background:#100D1C;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.24);font-size:6px;color:#9fd8ef;cursor:pointer" style-hover="color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8">×</div>
+    </div>
+  </div>
+
+  <div style="flex:1 1 auto;display:flex;gap:5px;padding:4px;box-sizing:border-box">
+    <div style="flex:0 0 auto;width:52px;display:flex;flex-direction:column;gap:3px">
+      <div onClick="{{ toggleOn }}" style="height:11px;display:flex;align-items:center;justify-content:center;font-size:6px;letter-spacing:0.8px;cursor:pointer;background: {{ onBg }};box-shadow: {{ onRing }};color: {{ onInk }}">{{ onLabel }}</div>
+      <div onClick="{{ toggleAuto }}" style="height:11px;display:flex;align-items:center;justify-content:center;gap:3px;font-size:6px;letter-spacing:0.8px;cursor:pointer;background: {{ autoBg }};box-shadow: {{ autoRing }};color: {{ autoInk }}">
+        <div style="width:3px;height:3px;border-radius:3px;background: {{ autoLamp }};box-shadow:0 0 4px {{ autoLamp }}"></div>
+        <span>AUTO</span>
+      </div>
+      <div style="font-size:5px;line-height:6px;letter-spacing:0.3px;color: {{ autoNoteInk }}">{{ autoNote }}</div>
+      <div style="flex:1 1 auto;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);position:relative;min-height:26px">
+        <div style="position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(111,227,255,0.16)"></div>
+        <svg viewBox="0 0 52 30" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+          <polyline points="{{ curvePts }}" fill="none" stroke="#6FE3FF" stroke-width="1" vector-effect="non-scaling-stroke" style="filter:drop-shadow(0 0 3px rgba(111,227,255,0.8))"></polyline>
+        </svg>
+      </div>
+    </div>
+
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:2px;min-width:0">
+      <div style="flex:1 1 auto;display:flex;gap:1px;align-items:stretch">
+        <sc-for list="{{ bands }}" as="b" hint-placeholder-count="11">
+          <div onClick="{{ b.nudge }}" style="flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;min-width:0">
+            <div style="flex:1 1 auto;width:100%;display:flex;justify-content:center;position:relative;min-height:44px">
+              <div style="width:3px;height:100%;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.12)"></div>
+              <div style="position:absolute;left:50%;transform:translateX(-50%);width:13px;height:3px;background: {{ b.thumbColor }};box-shadow:0 0 6px {{ b.thumbGlow }};top: {{ b.top }}%"></div>
+            </div>
+            <div style="font-size:5px;letter-spacing:-0.1px;color: {{ b.labelInk }};white-space:nowrap">{{ b.label }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="height:13px;flex:0 0 auto;display:flex;align-items:center;gap:3px">
+        <div onClick="{{ cyclePreset }}" style="flex:1 1 auto;min-width:0;height:13px;display:flex;align-items:center;justify-content:space-between;padding:0 3px;box-sizing:border-box;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.2);font-size:6px;letter-spacing:0.6px;color:#E8F4FF;cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF">
+          <span>{{ preset }}</span><span style="color:#6FE3FF;font-size:5px">▼</span>
+        </div>
+        <div onClick="{{ toggleClip }}" style="flex:0 0 auto;height:13px;display:flex;align-items:center;padding:0 4px;font-size:6px;letter-spacing:0.8px;cursor:pointer;background: {{ clipBg }};box-shadow: {{ clipRing }};color: {{ clipInk }}">CLIP</div>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:275,&quot;height&quot;:116},&quot;focused&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;shade&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;preset&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;FLAT&quot;,&quot;STORM WATCH&quot;,&quot;VOICE / NOAA&quot;,&quot;FULL LOUD&quot;],&quot;default&quot;:&quot;FLAT&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;clip&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;auto&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;eqEnabled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;onShade&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(v:boolean)=&gt;void&quot;}}">
+const PRESETS = {
+  'FLAT': [0,0,0,0,0,0,0,0,0,0,0],
+  'STORM WATCH': [4,9,7,3,-1,-3,-2,2,5,7,8],
+  'VOICE / NOAA': [-2,-6,-4,2,7,8,6,1,-3,-5,-6],
+  'FULL LOUD': [11,12,10,7,4,3,5,8,11,12,12]
+};
+class Component extends DCLogic {
+  state = {
+    preset: this.props.preset || 'FLAT',
+    vals: (PRESETS[this.props.preset] || PRESETS['FLAT']).slice(),
+    on: this.props.eqEnabled !== false,
+    auto: this.props.auto !== false,
+    clip: !!this.props.clip
+  };
+  renderVals() {
+    const p = this.props, s = this.state;
+    const focused = p.focused !== false;
+    const labels = ['PRE','60','170','310','600','1k','3k','6k','12k','14k','16k'];
+    const ring = on => on ? 'inset 0 0 0 1px #6FE3FF, 0 0 8px rgba(111,227,255,0.45)' : 'inset 0 0 0 1px rgba(111,227,255,0.2)';
+    const bands = s.vals.map((v, i) => {
+      const hot = Math.abs(v) > 8;
+      return {
+        label: labels[i], val: v,
+        top: Math.round((1 - (v + 12) / 24) * 100 - 3),
+        shadeH: Math.max(1, Math.round((v + 12) / 24 * 9)),
+        thumbColor: hot ? '#FF4FD8' : (v === 0 ? '#9fd8ef' : '#6FE3FF'),
+        thumbGlow: hot ? 'rgba(255,79,216,0.8)' : 'rgba(111,227,255,0.7)',
+        labelInk: i === 0 ? 'rgba(232,244,255,0.65)' : 'rgba(232,244,255,0.4)',
+        nudge: () => this.setState(st => {
+          const vals = st.vals.slice();
+          vals[i] = vals[i] >= 12 ? -12 : vals[i] + 3;
+          return { vals, preset: 'CUSTOM', clip: vals.some(x => x > 9) };
+        })
+      };
+    });
+    const pts = s.vals.slice(1).map((v, i) => (2 + i * 5.3).toFixed(1) + ',' + (15 - v / 12 * 13).toFixed(1)).join(' ');
+    const names = Object.keys(PRESETS).concat(['CUSTOM']);
+    return {
+      isShade: !!p.shade, isFull: !p.shade, bands, preset: s.preset, curvePts: pts,
+      chromeInk: focused ? 'rgba(232,244,255,0.62)' : 'rgba(232,244,255,0.22)',
+      lampColor: focused ? '#6FE3FF' : 'rgba(111,227,255,0.25)',
+      onLabel: s.on ? 'EQ ON' : 'EQ OFF',
+      onBg: s.on ? '#132436' : '#100D1C', onRing: ring(s.on), onInk: s.on ? '#6FE3FF' : 'rgba(232,244,255,0.45)',
+      autoBg: s.auto ? '#2a1030' : '#100D1C',
+      autoRing: s.auto ? 'inset 0 0 0 1px #FF4FD8, 0 0 8px rgba(255,79,216,0.4)' : 'inset 0 0 0 1px rgba(111,227,255,0.2)',
+      autoInk: s.auto ? '#FF4FD8' : 'rgba(232,244,255,0.45)',
+      autoLamp: s.auto ? '#FF4FD8' : 'rgba(232,244,255,0.2)',
+      autoNote: s.auto ? 'BOUND TO THIS TRACK' : 'NO TRACK BINDING',
+      autoNoteInk: s.auto ? 'rgba(255,79,216,0.7)' : 'rgba(232,244,255,0.25)',
+      clipBg: s.clip ? '#2a1a08' : '#100D1C',
+      clipRing: s.clip ? 'inset 0 0 0 1px #FFB347, 0 0 8px rgba(255,179,71,0.5)' : 'inset 0 0 0 1px rgba(111,227,255,0.16)',
+      clipInk: s.clip ? '#FFB347' : 'rgba(232,244,255,0.22)',
+      toggleOn: () => this.setState(st => ({ on: !st.on })),
+      toggleAuto: () => this.setState(st => ({ auto: !st.auto })),
+      toggleClip: () => this.setState(st => ({ clip: !st.clip })),
+      cyclePreset: () => this.setState(st => {
+        const i = names.indexOf(st.preset);
+        const nx = names[(i + 1) % names.length];
+        const vals = (PRESETS[nx] || st.vals).slice();
+        return { preset: nx, vals, clip: vals.some(x => x > 9) };
+      }),
+      shadeOn: () => p.onShade && p.onShade(true),
+      unshade: () => p.onShade && p.onShade(false)
+    };
+  }
+}
+</script>
+</body>
+</html>

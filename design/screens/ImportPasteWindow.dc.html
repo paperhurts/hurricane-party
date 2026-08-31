@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:620px;height:480px;box-sizing:border-box;background:#0C0A14;color:#E8F4FF;font:400 13px/1.45 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.22),0 24px 60px rgba(0,0,0,0.65)">
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#0A0812">
+    <div style="display:flex;align-items:center;gap:9px;padding-left:12px;font-size:12px;color:rgba(232,244,255,0.75)">
+      <div style="width:8px;height:8px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.8)"></div>
+      <span>Import — Radar</span>
+    </div>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;background:rgba(255,179,71,0.10);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:#FFB347">
+        <div style="width:5px;height:5px;background:#FFB347;box-shadow:0 0 6px rgba(255,179,71,0.8)"></div>
+        <span>OFFLINE · NO NETWORK</span>
+      </div>
+    </sc-if>
+    <div style="display:flex">
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">─</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">▢</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(255,79,216,0.18);color:#FF4FD8">✕</div>
+    </div>
+  </div>
+  <div style="height:1px;flex:0 0 auto;background:linear-gradient(90deg,rgba(111,227,255,0.12),rgba(111,227,255,0.55) 18%,rgba(111,227,255,0.55) 82%,rgba(111,227,255,0.12));box-shadow:0 1px 10px rgba(111,227,255,0.22)"></div>
+
+  <div style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:14px;padding:18px 20px">
+    <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color: {{ labelInk }}">PASTE A LINK</div>
+    <div style="display:flex;gap:10px;align-items:stretch">
+      <div style="flex:1 1 auto;min-width:0;height:38px;display:flex;align-items:center;padding:0 12px;box-sizing:border-box;background:#05040A;box-shadow: {{ fieldRing }};font:400 12px/1 'Iosevka Web',ui-monospace,monospace;color: {{ fieldInk }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fieldText }}</div>
+      <div style="flex:0 0 auto;height:38px;display:flex;align-items:center;gap:8px;padding:0 16px;font-size:13px;letter-spacing:0.4px;background: {{ actionBg }};box-shadow: {{ actionRing }};color: {{ actionInk }};cursor:default">{{ actionLabel }}</div>
+      <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:0 0 auto;height:38px;display:flex;align-items:center;padding:0 12px;font-size:13px;color:rgba(232,244,255,0.6);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.2);cursor:default" style-hover="color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8">Cancel</div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="height:3px;background:rgba(111,227,255,0.10)">
+          <div style="width:31%;height:3px;background:#6FE3FF;box-shadow:0 0 10px rgba(111,227,255,0.75)"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.5)">
+          <span>READING PLAYLIST · 34 OF 112 ITEMS</span><span style="color:#6FE3FF">4.1 S ELAPSED</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:14px 16px;background:rgba(255,179,71,0.06);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45)">
+        <div style="display:flex;align-items:center;gap:9px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.3px;color:#FFB347;margin-bottom:8px">
+          <div style="width:6px;height:6px;background:#FFB347;box-shadow:0 0 8px rgba(255,179,71,0.8)"></div><span>PROBE FAILED</span>
+        </div>
+        <div style="font-size:14px;color:#E8F4FF">Couldn't reach YouTube. Check your connection, or try again later.</div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <div style="height:30px;display:flex;align-items:center;padding:0 13px;font-size:13px;color:#FFB347;box-shadow:inset 0 0 0 1px #FFB347,0 0 14px rgba(255,179,71,0.2);cursor:default" style-hover="box-shadow:inset 0 0 0 1px #FFD9A0,0 0 22px rgba(255,179,71,0.34)">Retry</div>
+          <div style="height:30px;display:flex;align-items:center;padding:0 13px;font-size:13px;color:rgba(232,244,255,0.65);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);cursor:default" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">Queue for later</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:14px 16px;background:rgba(255,179,71,0.05);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.35);display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:14px;color:#E8F4FF">No network. Probing needs YouTube.</div>
+        <div style="font-size:13px;color:rgba(232,244,255,0.55);text-wrap:pretty">Queue the link and Radar fetches it the moment you're back online. No spinner, no waiting.</div>
+        <div style="display:flex;flex-direction:column;gap:5px;font:400 11px/1.5 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color:rgba(232,244,255,0.45)">
+          <div style="color:#6FE3FF;letter-spacing:1.2px">STILL WORKS OFFLINE</div>
+          <div>· Play everything already on disk</div>
+          <div>· Browse and filter the library</div>
+          <div>· Edit playlists and EQ presets</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:rgba(232,244,255,0.4)">RECENT IMPORTS</div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ recentNoteInk }}">{{ recentNote }}</div>
+      </div>
+      <div style="flex:1 1 auto;min-height:0;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(111,227,255,0.35) #05040A">
+        <sc-if value="{{ hasRecent }}" hint-placeholder-val="{{ true }}">
+          <sc-for list="{{ recent }}" as="r" hint-placeholder-count="5">
+            <div style="height:32px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(111,227,255,0.05);font-size:12px;color: {{ r.ink }}">
+              <div style="width:5px;height:5px;flex:0 0 auto;background: {{ r.lamp }};box-shadow:0 0 6px {{ r.lamp }}"></div>
+              <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</div>
+              <div style="flex:0 0 auto;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color:rgba(232,244,255,0.35)">{{ r.size }}</div>
+              <div style="flex:0 0 auto;width:66px;text-align:right;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color: {{ r.stateInk }}">{{ r.state }}</div>
+            </div>
+          </sc-for>
+        </sc-if>
+        <sc-if value="{{ noRecent }}" hint-placeholder-val="{{ false }}">
+          <div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:0 40px;text-align:center">
+            <div style="font-size:14px;color:#E8F4FF">Nothing imported yet.</div>
+            <div style="font-size:12px;color:rgba(232,244,255,0.45);text-wrap:pretty">Paste a playlist or a single video above. Radar probes it first so you can see the size before it lands.</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="5">
+            <div style="height:32px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(111,227,255,0.05)">
+              <div style="width:5px;height:5px;background:#14111f"></div>
+              <div style="height:8px;background:#14111f;width: {{ k.w }}%"></div>
+            </div>
+          </sc-for>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0A0812;border-top:1px solid rgba(111,227,255,0.10);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.42)">
+    <span>{{ statusLeft }}</span>
+    <span style="color: {{ statusRightInk }}">{{ statusRight }}</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:620,&quot;height&quot;:480},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;loading&quot;,&quot;populated&quot;,&quot;error&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const RECENT = [
+  ['Storm Prep 2026 — 112 items', '4.2 GB', 'SAVED', '#6FE3FF'],
+  ['KEC50 Gainesville — NOAA', '38 MB', 'SAVED', '#6FE3FF'],
+  ['Cat 5 — full documentary', '1.4 GB', 'SAVED', '#6FE3FF'],
+  ['Generator repair — EU2200i', '498 MB', 'QUEUED', '#FFB347'],
+  ['Alachua County EOC briefing', '892 MB', 'FAILED', '#FF4FD8']
+];
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.props.state || 'populated';
+    const offline = st === 'offline', loading = st === 'loading', empty = st === 'empty', error = st === 'error';
+    const url = 'https://www.youtube.com/playlist?list=PL7x9m2Storm2026';
+    const recent = RECENT.map(r => ({
+      title: r[0], size: r[1], state: r[2],
+      lamp: offline ? 'rgba(232,244,255,0.2)' : r[3],
+      ink: offline ? 'rgba(232,244,255,0.45)' : '#E8F4FF',
+      stateInk: offline ? 'rgba(232,244,255,0.3)' : r[3]
+    }));
+    const action = loading ? ['PROBING…', 'rgba(111,227,255,0.06)', 'inset 0 0 0 1px rgba(111,227,255,0.35)', '#6FE3FF']
+      : offline ? ['Queue for later', 'transparent', 'inset 0 0 0 1px #FFB347, 0 0 16px rgba(255,179,71,0.2)', '#FFB347']
+      : empty ? ['Probe', 'transparent', 'inset 0 0 0 1px rgba(111,227,255,0.22)', 'rgba(232,244,255,0.35)']
+      : ['Probe', 'transparent', 'inset 0 0 0 1px #6FE3FF, 0 0 18px rgba(111,227,255,0.25)', '#6FE3FF'];
+    return {
+      isOffline: offline, isLoading: loading, isError: error, isEmpty: empty,
+      recent, hasRecent: !empty && !loading, noRecent: empty,
+      skeleton: [64, 52, 71, 46, 58].map(w => ({ w })),
+      labelInk: empty ? 'rgba(232,244,255,0.4)' : '#6FE3FF',
+      fieldText: empty ? 'https://youtube.com/…  —  playlist, video, or channel' : url,
+      fieldInk: empty ? 'rgba(232,244,255,0.3)' : (offline ? 'rgba(232,244,255,0.4)' : '#E8F4FF'),
+      fieldRing: offline ? 'inset 0 0 0 1px rgba(111,227,255,0.10)'
+        : error ? 'inset 0 0 0 1px rgba(255,179,71,0.5)'
+        : empty ? 'inset 0 0 0 1px rgba(111,227,255,0.22)'
+        : 'inset 0 0 0 1px #6FE3FF, 0 0 20px rgba(111,227,255,0.18)',
+      actionLabel: action[0], actionBg: action[1], actionRing: action[2], actionInk: action[3],
+      recentNote: offline ? 'LAST SYNCED 02:11 · STALE' : (empty ? '' : '5 SHOWN'),
+      recentNoteInk: offline ? '#FFB347' : 'rgba(232,244,255,0.3)',
+      statusLeft: empty ? 'READY' : offline ? '1 LINK WAITING TO PROBE' : loading ? 'PROBE RUNNING' : error ? 'PROBE FAILED · NOTHING CHANGED' : 'LAST PROBE 112 ITEMS · 4.2 GB',
+      statusRight: offline ? 'PROBE DISABLED UNTIL NETWORK RETURNS' : '41 GB FREE',
+      statusRightInk: offline ? '#FFB347' : 'rgba(232,244,255,0.42)'
+    };
+  }
+}
+</script>
+</body>
+</html>

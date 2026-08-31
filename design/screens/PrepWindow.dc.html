@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:640px;height:420px;box-sizing:border-box;background:#0C0A14;color:#E8F4FF;font:400 13px/1.45 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.22),0 24px 60px rgba(0,0,0,0.65)">
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#0A0812">
+    <div style="display:flex;align-items:center;gap:9px;padding-left:12px;font-size:12px;color:rgba(232,244,255,0.75)">
+      <div style="width:8px;height:8px;background:#FF4FD8;box-shadow:0 0 6px rgba(255,79,216,0.8)"></div>
+      <span>Prep — storm mode</span>
+    </div>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;background:rgba(255,179,71,0.10);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:#FFB347">
+        <div style="width:5px;height:5px;background:#FFB347;box-shadow:0 0 6px rgba(255,179,71,0.8)"></div>
+        <span>OFFLINE · QUEUEING ONLY</span>
+      </div>
+    </sc-if>
+    <div style="display:flex">
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">─</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">▢</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(255,79,216,0.18);color:#FF4FD8">✕</div>
+    </div>
+  </div>
+  <div style="height:1px;flex:0 0 auto;background:linear-gradient(90deg,rgba(255,79,216,0.12),rgba(111,227,255,0.55) 18%,rgba(111,227,255,0.55) 82%,rgba(255,79,216,0.12));box-shadow:0 1px 10px rgba(111,227,255,0.22)"></div>
+
+  <div style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:10px;padding:14px 16px 0">
+    <div style="display:flex;align-items:baseline;justify-content:space-between">
+      <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:#6FE3FF">{{ headline }}</div>
+      <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.35)">ENTER ADDS · CTRL+ENTER STARTS</div>
+    </div>
+
+    <div style="flex:1 1 auto;min-height:0;background:#05040A;box-shadow: {{ padRing }};padding:10px 12px;box-sizing:border-box;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(111,227,255,0.35) #05040A;font:400 12px/1.7 'Iosevka Web',ui-monospace,monospace;color: {{ padInk }}">
+      <sc-if value="{{ hasLinks }}" hint-placeholder-val="{{ true }}">
+        <sc-for list="{{ links }}" as="l" hint-placeholder-count="8">
+          <div style="display:flex;gap:10px;align-items:center;white-space:nowrap;overflow:hidden">
+            <span style="flex:0 0 auto;width:16px;text-align:right;color:rgba(232,244,255,0.25)">{{ l.n }}</span>
+            <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color: {{ l.ink }}">{{ l.url }}</span>
+            <span style="flex:0 0 auto;color: {{ l.tagInk }}">{{ l.tag }}</span>
+          </div>
+        </sc-for>
+      </sc-if>
+      <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="color:rgba(232,244,255,0.28)">Paste links here, one per line.<br><br>https://youtube.com/playlist?list=…<br>https://youtu.be/…<br><br>Radar sizes them all at once, then writes them to disk in one pass.</div>
+      </sc-if>
+      <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:9px">
+          <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="7">
+            <div style="display:flex;gap:10px;align-items:center">
+              <div style="width:16px;height:8px;background:#14111f"></div>
+              <div style="height:8px;background:#14111f;width: {{ k.w }}%"></div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:0 0 auto;padding:11px 13px;background:rgba(255,79,216,0.06);box-shadow:inset 0 0 0 1px rgba(255,79,216,0.4)">
+        <div style="font-size:13px;color:#E8F4FF">10 of 12 saved. Two failed: one private video, one link Radar couldn't read.</div>
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:#FF4FD8;margin-top:5px">MARKED ABOVE · RETRY THOSE TWO OR DROP THEM</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:0 0 auto;padding:11px 13px;background:rgba(255,179,71,0.05);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.35)">
+        <div style="font-size:13px;color:#E8F4FF">No network. Radar can hold the list, not fetch it.</div>
+        <div style="font:400 11px/1.5 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.7px;color:rgba(232,244,255,0.45);margin-top:5px">SIZES BELOW ARE LAST-KNOWN-GOOD · 02:11 · STALE<br>PLAYBACK AND THE LIBRARY STILL WORK</div>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="flex:0 0 auto;padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="flex:1 1 auto;height:8px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);display:flex">
+        <div style="height:8px;background:rgba(111,227,255,0.3);width:60%"></div>
+        <div style="height:8px;background: {{ addColor }};box-shadow: {{ addGlow }};width: {{ addPct }}%"></div>
+      </div>
+      <div style="flex:0 0 auto;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color: {{ totalInk }}">{{ totalLine }}</div>
+    </div>
+    <div style="display:flex;align-items:stretch;gap:10px">
+      <div style="flex:1 1 auto;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background: {{ goBg }};box-shadow: {{ goRing }};color: {{ goInk }};cursor:default;letter-spacing:0.6px">
+        <div style="font-size:17px">{{ goLabel }}</div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;opacity:0.75">{{ goSub }}</div>
+      </div>
+      <div style="flex:0 0 auto;width:110px;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);color:rgba(232,244,255,0.55);cursor:default" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">
+        <div style="font-size:13px">Audio only</div>
+        <div style="font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;opacity:0.7">SAVES 11.8 GB</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:640,&quot;height&quot;:420},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;loading&quot;,&quot;populated&quot;,&quot;error&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const LINKS = [
+  'youtube.com/playlist?list=PL7x9m2Storm2026',
+  'youtu.be/Jk2Nn4pQ1cE',
+  'youtube.com/watch?v=EOC-briefing-0926',
+  'youtube.com/playlist?list=PLnoaaWX-KEC50',
+  'youtu.be/gen-repair-eu2200i',
+  'youtube.com/watch?v=boil-water-notice',
+  'youtube.com/playlist?list=PLkids-offline-movies',
+  'youtu.be/cat5-full-doc',
+  'youtube.com/watch?v=grid-restore-explainer',
+  'youtu.be/dayvan-cowboy',
+  'youtube.com/watch?v=private-family-vid',
+  'youtu.be/broken-link-xxxxx'
+];
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.props.state || 'populated';
+    const offline = st === 'offline', loading = st === 'loading', empty = st === 'empty', error = st === 'error';
+    const SIZES = ['4.2 GB', '96 MB', '892 MB', '38 MB', '498 MB', '54 MB', '5.1 GB', '1.4 GB', '212 MB', '96 MB', '—', '—'];
+    const order = error ? [10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9] : LINKS.map((u, i) => i);
+    const links = order.map(i => {
+      const failed = error && i >= 10;
+      return {
+        n: String(i + 1).padStart(2, '0'), url: LINKS[i],
+        ink: failed ? '#FF4FD8' : (offline ? 'rgba(232,244,255,0.55)' : 'rgba(232,244,255,0.85)'),
+        tag: failed ? (i === 10 ? 'PRIVATE' : 'UNREADABLE') : SIZES[i],
+        tagInk: failed ? '#FF4FD8' : (offline ? 'rgba(232,244,255,0.28)' : 'rgba(232,244,255,0.4)')
+      };
+    });
+    const go = loading ? ['Saving…', 'rgba(111,227,255,0.08)', 'inset 0 0 0 1px rgba(111,227,255,0.4)', '#6FE3FF', '3 OF 12 · 4.1 GB WRITTEN']
+      : offline ? ['Queue all 12', 'transparent', 'inset 0 0 0 1px #FFB347, 0 0 20px rgba(255,179,71,0.22)', '#FFB347', 'STARTS WHEN THE NETWORK RETURNS']
+      : empty ? ['Save all', 'transparent', 'inset 0 0 0 1px rgba(111,227,255,0.16)', 'rgba(232,244,255,0.3)', 'PASTE SOMETHING FIRST']
+      : error ? ['Retry 2 failed', 'transparent', 'inset 0 0 0 1px #FF4FD8, 0 0 20px rgba(255,79,216,0.25)', '#FF4FD8', '10 OF 12 ALREADY ON DISK']
+      : ['Save all 12', 'rgba(111,227,255,0.10)', 'inset 0 0 0 1px #6FE3FF, 0 0 28px rgba(111,227,255,0.3)', '#6FE3FF', 'CTRL+ENTER'];
+    return {
+      isOffline: offline, isLoading: loading, isEmpty: empty, isError: error,
+      hasLinks: !empty && !loading, links,
+      skeleton: [72, 58, 81, 46, 66, 53, 77].map(w => ({ w })),
+      headline: empty ? 'PASTE EVERYTHING YOU WANT BEFORE THE STORM'
+        : loading ? 'WRITING TO DISK · DO NOT CLOSE'
+        : offline ? '12 LINKS HELD'
+        : error ? '12 LINKS · 2 FAILED'
+        : '12 LINKS READY',
+      padRing: loading ? 'inset 0 0 0 1px rgba(111,227,255,0.3)' : 'inset 0 0 0 1px rgba(111,227,255,0.16)',
+      padInk: '#E8F4FF',
+      addPct: empty ? 0 : (loading ? 4 : 14),
+      addColor: offline ? 'rgba(255,179,71,0.6)' : (error ? '#FF4FD8' : '#6FE3FF'),
+      addGlow: offline ? 'none' : '0 0 12px rgba(111,227,255,0.6)',
+      totalLine: empty ? '0 LINKS · 41 GB FREE'
+        : loading ? '4.1 GB OF 14.2 GB WRITTEN · 37 GB FREE'
+        : error ? '12.6 GB SAVED · 1.6 GB LEFT TO RETRY'
+        : '14.2 GB OF 41 GB FREE',
+      totalInk: empty ? 'rgba(232,244,255,0.4)' : (offline ? '#FFB347' : '#E8F4FF'),
+      goLabel: go[0], goBg: go[1], goRing: go[2], goInk: go[3], goSub: go[4]
+    };
+  }
+}
+</script>
+</body>
+</html>
