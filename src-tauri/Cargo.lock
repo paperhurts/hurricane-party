@@ -1315,6 +1315,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "thiserror 2.0.20",
+ "url",
 ]
 
 [[package]]
