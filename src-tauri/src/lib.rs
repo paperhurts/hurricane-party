@@ -161,6 +161,54 @@ fn wm_drag_end(app: AppHandle) {
     wm::drag_end(&app);
 }
 
+/// What a classic window asks for on mount.
+///
+/// The push events fire when things change; a window still loading its bundle
+/// misses them. This is the pull half of that pair.
+#[tauri::command]
+fn wm_hello(app: AppHandle, label: String) -> Option<wm::Hello> {
+    wm::id_of(&label).map(|id| wm::hello(&app, id))
+}
+
+/// Pointerdown on a bonded edge.
+///
+/// Returns which gesture the caller actually got. D35: a seam whose neighbours
+/// cannot resize is a move handle, so rather than offering a splitter and then
+/// doing nothing, the gesture degrades to a group move and says so.
+#[tauri::command]
+fn wm_seam_down(app: AppHandle, label: String, edge: String) -> &'static str {
+    let (Some(id), Some(edge)) = (wm::id_of(&label), wm::edge_from_str(&edge)) else {
+        return "none";
+    };
+    if wm::splitter_start(&app, id, edge) {
+        "splitter"
+    } else {
+        wm::drag_start(&app, id);
+        "move"
+    }
+}
+
+#[tauri::command]
+fn wm_splitter_move(app: AppHandle) {
+    wm::splitter_move(&app);
+}
+
+#[tauri::command]
+fn wm_splitter_end(app: AppHandle) {
+    wm::splitter_end(&app);
+}
+
+/// Double-click on a seam. Breaking a bond in the middle of a chain splits one
+/// group into two, so the components are recomputed and each side gets its own
+/// hidden root (D41).
+#[tauri::command]
+fn wm_demagnetize(app: AppHandle, label: String, edge: String) -> bool {
+    let (Some(id), Some(edge)) = (wm::id_of(&label), wm::edge_from_str(&edge)) else {
+        return false;
+    };
+    wm::demagnetize(&app, id, edge)
+}
+
 /// Pointerdown anywhere in a classic window: raise the whole group (D42).
 #[tauri::command]
 fn wm_focus(app: AppHandle, label: String) {
@@ -319,9 +367,15 @@ pub fn run() {
             // The three classic windows, their hidden roots (D41), and the
             // ownership topology. Last in setup because it is the only part
             // that puts pixels on screen.
+            // Seed first: a webview starts loading the instant its window is
+            // constructed and asks for its bonds before setup has finished.
+            wm::seed_state(&handle)?;
             wm::build_classic_windows(&handle)?;
             wm::register(&handle)?;
             wire_focus_events(&handle);
+            // Last: the windows are only revealed once the bond graph and the
+            // ownership topology behind them are real.
+            wm::show_classic_windows(&handle)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -347,7 +401,12 @@ pub fn run() {
             wm_drag_start,
             wm_drag_move,
             wm_drag_end,
-            wm_focus
+            wm_focus,
+            wm_hello,
+            wm_seam_down,
+            wm_splitter_move,
+            wm_splitter_end,
+            wm_demagnetize
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
