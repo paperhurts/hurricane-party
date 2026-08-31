@@ -63,6 +63,18 @@ pub trait WindowPlatform: Send + Sync {
     /// activating is the point: a bond break must never steal focus.
     fn raise_no_activate(&self, w: NativeWindow);
 
+    /// The mouse cursor, in physical virtual-desktop coordinates.
+    ///
+    /// The drag loop asks the OS rather than converting the webview's
+    /// `screenX`/`screenY`, which arrive in CSS pixels and would need a scale
+    /// factor applied at exactly the boundary where mixing logical and physical
+    /// produces bugs that only appear on a second monitor. Reading the cursor
+    /// natively means the drag never converts anything.
+    ///
+    /// Unlike the calls above this takes no window handle, so it sends no
+    /// message and cannot deadlock under D54.
+    fn cursor_pos(&self) -> (i32, i32);
+
     /// D57: is this window minimized?
     ///
     /// Losing a display minimizes the group rather than relocating it. The

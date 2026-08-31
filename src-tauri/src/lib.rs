@@ -132,6 +132,43 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+// ---- window manager ---------------------------------------------------------
+//
+// These are synchronous on purpose. Tauri runs a non-async command on the main
+// thread, which is where our windows live — so every SetWindowPos in a drag
+// frame is same-thread, and D54's cross-thread deadlock is structurally out of
+// reach rather than merely avoided. It also keeps the drag off the async
+// runtime, where a scheduling hiccup would show up as a stutter.
+
+/// Title-bar pointerdown. Snapshots the group and the cursor; everything after
+/// this is derived from that origin (D40).
+#[tauri::command]
+fn wm_drag_start(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::drag_start(&app, id);
+    }
+}
+
+/// One drag frame. The webview coalesces pointermove to one per display frame,
+/// so this is called at roughly refresh rate and has to stay cheap.
+#[tauri::command]
+fn wm_drag_move(app: AppHandle) {
+    wm::drag_move(&app);
+}
+
+#[tauri::command]
+fn wm_drag_end(app: AppHandle) {
+    wm::drag_end(&app);
+}
+
+/// Pointerdown anywhere in a classic window: raise the whole group (D42).
+#[tauri::command]
+fn wm_focus(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::focus_group(&app, Some(id));
+    }
+}
+
 // ---- playlists --------------------------------------------------------------
 
 #[tauri::command]
@@ -193,6 +230,46 @@ fn set_concurrency(app: AppHandle, n: usize) -> Result<(), db::DbError> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Focus is a group property (v0.4-brief): when any bonded window has focus, all
+/// of them render active.
+///
+/// The deferred re-check on focus loss is not defensive, it is required.
+/// Windows sends `WM_KILLFOCUS` to the old window *before* `WM_SETFOCUS` to the
+/// new one, so clicking from main to eq passes through a moment where nothing
+/// in the group is focused. Deactivating on that intermediate state flickers
+/// the entire group on every click inside it — which is precisely the thing the
+/// brief says looks broken immediately.
+fn wire_focus_events(app: &AppHandle) {
+    for id in wm::CLASSIC {
+        let Some(win) = app.get_webview_window(wm::label_of(id)) else {
+            continue;
+        };
+        let handle = app.clone();
+        win.on_window_event(move |event| {
+            let tauri::WindowEvent::Focused(gained) = event else {
+                return;
+            };
+            if *gained {
+                wm::focus_group(&handle, Some(id));
+                return;
+            }
+            let handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                let still_ours = wm::CLASSIC.iter().any(|id| {
+                    handle
+                        .get_webview_window(wm::label_of(*id))
+                        .and_then(|w| w.is_focused().ok())
+                        .unwrap_or(false)
+                });
+                if !still_ours {
+                    wm::focus_group(&handle, None);
+                }
+            });
+        });
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -244,6 +321,7 @@ pub fn run() {
             // that puts pixels on screen.
             wm::build_classic_windows(&handle)?;
             wm::register(&handle)?;
+            wire_focus_events(&handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -265,7 +343,11 @@ pub fn run() {
             add_local_folder,
             list_roots,
             open_video,
-            report_state
+            report_state,
+            wm_drag_start,
+            wm_drag_move,
+            wm_drag_end,
+            wm_focus
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
