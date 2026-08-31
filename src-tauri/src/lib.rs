@@ -1,43 +1,165 @@
+mod db;
+mod jobs;
 mod pipeline;
+mod playlist;
 
-use pipeline::{Probed, Track};
-use tauri::AppHandle;
+use db::Db;
+use jobs::{Job, RunnerHandle};
+use tauri::{AppHandle, Manager};
 
-/// Phase 1 of the import pipeline — show the user what they're about to
-/// download before downloading it (architecture.md).
+// ---- import -----------------------------------------------------------------
+
+/// Phase 1 — show the user what they're about to download before downloading it.
 #[tauri::command]
-async fn probe_url(app: AppHandle, url: String) -> Result<Probed, pipeline::PipelineError> {
-    pipeline::probe(&app, url.trim()).await
+async fn probe_url(app: AppHandle, url: String) -> Result<pipeline::Probed, pipeline::PipelineError> {
+    pipeline::probe(&app, url.trim(), None).await
 }
 
-/// The whole job: probe, fetch audio, extract MP3.
+/// Queue a URL. Returns immediately; the runner picks it up.
 #[tauri::command]
-async fn import_url(app: AppHandle, url: String) -> Result<Track, pipeline::PipelineError> {
-    pipeline::import(&app, url.trim()).await
+fn enqueue_url(app: AppHandle, url: String) -> Result<i64, String> {
+    // Validate before it reaches the queue so a bad URL fails at the button,
+    // not three seconds later inside a worker.
+    pipeline::validate_url(&url).map_err(|e| e.to_string())?;
+    jobs::enqueue(&app, url.trim()).map_err(|e| e.to_string())
 }
 
-/// What's already on disk. v0.1 has no database (that's v0.2), so the library
-/// is whatever the folder contains.
+// ---- queue ------------------------------------------------------------------
+
 #[tauri::command]
-fn list_tracks(app: AppHandle) -> Result<Vec<Track>, pipeline::PipelineError> {
-    pipeline::scan(&app)
+fn list_jobs(app: AppHandle) -> Result<Vec<Job>, db::DbError> {
+    let conn = app.state::<Db>();
+    let conn = conn.0.lock().unwrap();
+    jobs::list(&conn)
 }
 
-/// Surfaced in the UI so "where does this write" is never a guess.
+#[tauri::command]
+fn retry_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    jobs::retry(&app, id)
+}
+
+#[tauri::command]
+fn cancel_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    jobs::cancel(&app, id)
+}
+
+// ---- library ----------------------------------------------------------------
+
+#[tauri::command]
+fn list_tracks(app: AppHandle) -> Result<Vec<playlist::MediaRow>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::list_media(&conn)
+}
+
 #[tauri::command]
 fn library_path(app: AppHandle) -> Result<String, pipeline::PipelineError> {
     Ok(pipeline::library_root(&app)?.to_string_lossy().to_string())
+}
+
+// ---- playlists --------------------------------------------------------------
+
+#[tauri::command]
+fn list_playlists(app: AppHandle) -> Result<Vec<playlist::Playlist>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::list(&conn)
+}
+
+#[tauri::command]
+fn create_playlist(app: AppHandle, name: String) -> Result<i64, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::create(&conn, name.trim())
+}
+
+#[tauri::command]
+fn playlist_items(app: AppHandle, id: i64) -> Result<Vec<playlist::MediaRow>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::items(&conn, id)
+}
+
+#[tauri::command]
+fn add_to_playlist(app: AppHandle, playlist_id: i64, media_id: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::add(&conn, playlist_id, media_id)
+}
+
+#[tauri::command]
+fn remove_from_playlist(app: AppHandle, playlist_id: i64, position: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let mut conn = state.0.lock().unwrap();
+    playlist::remove(&mut conn, playlist_id, position)
+}
+
+#[tauri::command]
+fn reorder_playlist(app: AppHandle, playlist_id: i64, from: i64, to: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let mut conn = state.0.lock().unwrap();
+    playlist::reorder(&mut conn, playlist_id, from, to)
+}
+
+// ---- settings ---------------------------------------------------------------
+
+#[tauri::command]
+fn get_concurrency(app: AppHandle) -> usize {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::concurrency(&conn)
+}
+
+#[tauri::command]
+fn set_concurrency(app: AppHandle, n: usize) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::set_setting(&conn, "download.concurrency", &n.clamp(1, 4).to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(RunnerHandle::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let path = handle
+                .path()
+                .app_data_dir()
+                .expect("no app data dir")
+                .join("hurricane-party.db");
+            let conn = db::open(&path).expect("couldn't open the database");
+
+            // D10: anything that was mid-flight when the process died goes back
+            // in the queue. This re-enters the runner; it does NOT start over,
+            // and it deliberately leaves .part files alone (D26).
+            match db::recover_interrupted(&conn) {
+                Ok(0) => {}
+                Ok(n) => eprintln!("recovered {n} interrupted job(s) from the last run"),
+                Err(e) => eprintln!("recovery failed: {e}"),
+            }
+
+            app.manage(Db(std::sync::Mutex::new(conn)));
+            jobs::spawn_runner(handle);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             probe_url,
-            import_url,
+            enqueue_url,
+            list_jobs,
+            retry_job,
+            cancel_job,
             list_tracks,
-            library_path
+            library_path,
+            list_playlists,
+            create_playlist,
+            playlist_items,
+            add_to_playlist,
+            remove_from_playlist,
+            reorder_playlist,
+            get_concurrency,
+            set_concurrency
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
