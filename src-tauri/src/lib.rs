@@ -1,5 +1,7 @@
+mod control;
 mod db;
 mod jobs;
+mod localimport;
 mod pipeline;
 mod playlist;
 
@@ -17,11 +19,11 @@ async fn probe_url(app: AppHandle, url: String) -> Result<pipeline::Probed, pipe
 
 /// Queue a URL. Returns immediately; the runner picks it up.
 #[tauri::command]
-fn enqueue_url(app: AppHandle, url: String) -> Result<i64, String> {
+fn enqueue_url(app: AppHandle, url: String, want_video: Option<bool>) -> Result<i64, String> {
     // Validate before it reaches the queue so a bad URL fails at the button,
     // not three seconds later inside a worker.
     pipeline::validate_url(&url).map_err(|e| e.to_string())?;
-    jobs::enqueue(&app, url.trim()).map_err(|e| e.to_string())
+    jobs::enqueue(&app, url.trim(), want_video.unwrap_or(false)).map_err(|e| e.to_string())
 }
 
 // ---- queue ------------------------------------------------------------------
@@ -55,6 +57,76 @@ fn list_tracks(app: AppHandle) -> Result<Vec<playlist::MediaRow>, db::DbError> {
 #[tauri::command]
 fn library_path(app: AppHandle) -> Result<String, pipeline::PipelineError> {
     Ok(pipeline::library_root(&app)?.to_string_lossy().to_string())
+}
+
+// ---- local folder import (D28 roots, D34 titles, D50 tags) -----------------
+
+#[tauri::command]
+async fn add_local_folder(app: AppHandle, path: String, label: Option<String>)
+    -> Result<localimport::ScanReport, db::DbError>
+{
+    let p = std::path::PathBuf::from(&path);
+    let label = label.unwrap_or_else(|| {
+        p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.clone())
+    });
+    // Scanning a big folder blocks on I/O and tag reads, so keep it off the
+    // main thread rather than freezing the window.
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || localimport::scan_root(&app2, &p, &label))
+        .await
+        .map_err(|e| db::DbError::Io(e.to_string()))?
+}
+
+#[tauri::command]
+fn list_roots(app: AppHandle) -> Result<Vec<localimport::Root>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    localimport::list_roots(&conn)
+}
+
+// ---- control API (D9/D15) ---------------------------------------------------
+
+/// The webview reporting playback state. Rust has no audio (D5), so this is
+/// the only way the control channel can answer `status` truthfully.
+#[tauri::command]
+fn report_state(app: AppHandle, state: hp_control::PlayerState) {
+    control::update_state(&app, state);
+}
+
+// ---- video window (D13) -----------------------------------------------------
+
+/// Open (or focus) the video window for a track.
+///
+/// A real OS window: decorated, resizable, and deliberately NOT part of the
+/// bond group — the three classic 275px windows are the only skinned,
+/// undecorated ones. It loads its own HTML entry point rather than a route, so
+/// the frontend stays plain Vite; v0.4 adds eq.html and playlist.html the same
+/// way.
+#[tauri::command]
+async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
+    const LABEL: &str = "video";
+
+    if let Some(w) = app.get_webview_window(LABEL) {
+        // Already open on a different track: point it at the new one rather
+        // than stacking up windows.
+        let _ = w.eval(&format!("location.search = '?id={id}'"));
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        LABEL,
+        tauri::WebviewUrl::App(format!("video.html?id={id}").into()),
+    )
+    .title("hurricane-party — video")
+    .inner_size(960.0, 560.0)
+    .min_inner_size(320.0, 200.0)
+    .resizable(true)
+    .decorations(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ---- playlists --------------------------------------------------------------
@@ -121,7 +193,10 @@ fn set_concurrency(app: AppHandle, n: usize) -> Result<(), db::DbError> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(RunnerHandle::default())
+        .manage(control::ControlState::default())
+        .manage(control::Broadcaster::default())
         .setup(|app| {
             let handle = app.handle().clone();
             let path = handle
@@ -141,7 +216,18 @@ pub fn run() {
             }
 
             app.manage(Db(std::sync::Mutex::new(conn)));
-            jobs::spawn_runner(handle);
+
+            // Asset-protocol scope is runtime state and doesn't survive a
+            // restart the way the library_roots rows do, so re-grant it or
+            // yesterday's imported folder stops playing today.
+            localimport::allow_known_roots(&handle);
+
+            jobs::spawn_runner(handle.clone());
+
+            // Undocumented and unstable until v1.0 (control-api.md). Shipping
+            // it now proves the pipe while nothing external depends on it.
+            let bc = app.state::<control::Broadcaster>().inner().clone();
+            control::spawn_server(handle, bc);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -159,7 +245,11 @@ pub fn run() {
             remove_from_playlist,
             reorder_playlist,
             get_concurrency,
-            set_concurrency
+            set_concurrency,
+            add_local_folder,
+            list_roots,
+            open_video,
+            report_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
