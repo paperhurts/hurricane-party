@@ -23,8 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# tauri
-src-tauri/target/
+# rust build artifacts, anywhere in the tree (not just src-tauri)
+target/
 
 # bundled sidecars (large, fetched by tools/fetch-sidecars.ps1)
 src-tauri/binaries/
