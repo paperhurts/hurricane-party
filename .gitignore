@@ -28,3 +28,6 @@ src-tauri/target/
 
 # bundled sidecars (large, fetched by tools/fetch-sidecars.ps1)
 src-tauri/binaries/
+
+# screenshots dropped in by hand
+.sid/
