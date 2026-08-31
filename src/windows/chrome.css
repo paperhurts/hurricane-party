@@ -58,6 +58,10 @@ body {
   text-transform: uppercase;
   color: var(--arc);
   background: color-mix(in srgb, var(--arc) 10%, transparent);
+  /* D35: the cursor tells the truth. The title bar is a move handle, and it is
+   * the only move handle -- the gesture table gives the shared edge to the
+   * splitter, so offering a move cursor there would be a lie. */
+  cursor: move;
 }
 
 /* Focus is a group property (v0.4-brief): when any bonded window has focus,

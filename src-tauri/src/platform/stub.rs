@@ -24,6 +24,10 @@ impl WindowPlatform for StubPlatform {
 
     fn raise_no_activate(&self, _w: NativeWindow) {}
 
+    fn cursor_pos(&self) -> (i32, i32) {
+        (0, 0)
+    }
+
     fn is_minimized(&self, _w: NativeWindow) -> bool {
         false
     }

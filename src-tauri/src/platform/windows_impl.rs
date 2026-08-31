@@ -9,9 +9,10 @@ use windows::Win32::UI::HiDpi::{
     GetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     DPI_AWARENESS_PER_MONITOR_AWARE, DPI_AWARENESS_SYSTEM_AWARE, DPI_AWARENESS_UNAWARE,
 };
+use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWLP_HWNDPARENT,
-    HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNOACTIVATE,
+    GetCursorPos, GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    GWLP_HWNDPARENT, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNOACTIVATE,
 };
 
 pub struct Win32Platform;
@@ -86,6 +87,17 @@ impl WindowPlatform for Win32Platform {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
+    }
+
+    fn cursor_pos(&self) -> (i32, i32) {
+        let mut p = POINT::default();
+        // SAFETY: writes into a stack POINT. Takes no handle, sends no message.
+        // Returns virtual-desktop physical pixels because the process is
+        // per-monitor-v2 aware, which D37 asserts at startup.
+        unsafe {
+            let _ = GetCursorPos(&mut p);
+        }
+        (p.x, p.y)
     }
 
     fn is_minimized(&self, w: NativeWindow) -> bool {

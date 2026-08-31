@@ -24,6 +24,7 @@ export default defineConfig({
         eq: resolve(__dirname, "eq.html"),
         playlist: resolve(__dirname, "playlist.html"),
         video: resolve(__dirname, "video.html"),
+        root: resolve(__dirname, "root.html"),
       },
     },
   },
