@@ -29,6 +29,8 @@ pub enum PipelineError {
     #[error("downloaded, but no file landed at {0}")]
     MissingOutput(String),
     #[error("{0}")]
+    BadUrl(String),
+    #[error("{0}")]
     Io(String),
 }
 
@@ -137,8 +139,51 @@ fn ytdlp_base() -> Vec<String> {
     ]
 }
 
+/// Reject anything that isn't a plain http(s) URL, before it reaches argv.
+///
+/// This is not paranoia about the user attacking themselves. yt-dlp's flag
+/// surface includes `--exec` (run an arbitrary command per download),
+/// `--config-location` (load a config file that may itself contain `--exec`)
+/// and `--batch-file`. "Paste this link to get the song" is an entirely
+/// ordinary thing for someone to be told, and a media downloader is precisely
+/// the app where people paste a string without reading it. A value beginning
+/// with `-` would be parsed as options, not as a URL.
+///
+/// Belt and braces: this check, plus a `--` terminator at every call site so
+/// yt-dlp stops option parsing before the URL regardless.
+fn validate_url(raw: &str) -> Result<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err(PipelineError::BadUrl("no URL given".into()));
+    }
+    let parsed = url::Url::parse(s)
+        .map_err(|_| PipelineError::BadUrl(format!("{s:?} isn't a URL")))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed.to_string()),
+        other => Err(PipelineError::BadUrl(format!(
+            "only http and https are supported, not {other:?}"
+        ))),
+    }
+}
+
+/// yt-dlp ids become filenames. Ids come from 1800+ extractors, so treat them
+/// as untrusted: a separator or `..` would escape the library directory.
+fn safe_stem(id: &str) -> String {
+    let cleaned: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(96)
+        .collect();
+    if cleaned.is_empty() {
+        "untitled".into()
+    } else {
+        cleaned
+    }
+}
+
 /// Phase 1 — probe. No download. Cheap enough to run on paste.
 pub async fn probe(app: &AppHandle, url: &str) -> Result<Probed> {
+    let url = &validate_url(url)?;
     emit(
         app,
         Progress {
@@ -153,7 +198,8 @@ pub async fn probe(app: &AppHandle, url: &str) -> Result<Probed> {
     );
 
     let mut args = ytdlp_base();
-    args.extend(["-J".to_string(), "--flat-playlist".into(), url.to_string()]);
+    // `--` ends option parsing: everything after it is a positional argument.
+    args.extend(["-J".to_string(), "--flat-playlist".into(), "--".into(), url.to_string()]);
 
     let (mut rx, _child) = app
         .shell()
@@ -243,7 +289,8 @@ fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u
 /// Phase 2 — fetch the best audio stream to a deterministic path.
 async fn download_audio(app: &AppHandle, url: &str, probed: &Probed) -> Result<PathBuf> {
     let root = library_root(app)?;
-    let outtmpl = root.join(format!("{}.%(ext)s", probed.id));
+    let stem = safe_stem(&probed.id);
+    let outtmpl = root.join(format!("{stem}.%(ext)s"));
 
     let mut args = ytdlp_base();
     args.extend([
@@ -260,6 +307,7 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed) -> Result<P
             .into(),
         "-o".into(),
         outtmpl.to_string_lossy().to_string(),
+        "--".into(),
         url.to_string(),
     ]);
 
@@ -306,8 +354,8 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed) -> Result<P
 
     // Deterministic path is why the probe ran first: scan for <id>.* rather
     // than parsing the filename back out of yt-dlp's chatter.
-    find_by_stem(&root, &probed.id)
-        .ok_or_else(|| PipelineError::MissingOutput(root.join(&probed.id).display().to_string()))
+    find_by_stem(&root, &stem)
+        .ok_or_else(|| PipelineError::MissingOutput(root.join(&stem).display().to_string()))
 }
 
 fn find_by_stem(dir: &Path, stem: &str) -> Option<PathBuf> {
@@ -321,7 +369,7 @@ fn find_by_stem(dir: &Path, stem: &str) -> Option<PathBuf> {
 
 /// Phase 3 — derive the MP3 locally (D3).
 async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed) -> Result<PathBuf> {
-    let dest = src.with_file_name(format!("{}.mp3", probed.id));
+    let dest = src.with_file_name(format!("{}.mp3", safe_stem(&probed.id)));
     if dest == src {
         return Ok(dest); // already an mp3
     }
@@ -378,6 +426,7 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed) ->
 
 /// The whole v0.1 job: probe, fetch, extract, hand back something playable.
 pub async fn import(app: &AppHandle, url: &str) -> Result<Track> {
+    let url = &validate_url(url)?;
     let probed = probe(app, url).await?;
     let downloaded = download_audio(app, url, &probed).await?;
     let mp3 = extract_mp3(app, url, &downloaded, &probed).await?;
@@ -435,4 +484,83 @@ pub fn scan(app: &AppHandle) -> Result<Vec<Track>> {
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_ordinary_urls() {
+        for u in [
+            "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "http://example.com/a.mp3",
+            "  https://bandcamp.com/track/x  ", // trimmed
+        ] {
+            assert!(validate_url(u).is_ok(), "should accept {u:?}");
+        }
+    }
+
+    /// The actual attack: a flag-shaped string pasted in place of a URL.
+    /// yt-dlp's --exec runs an arbitrary command per download.
+    #[test]
+    fn rejects_argv_flag_smuggling() {
+        for evil in [
+            "--exec=calc.exe",
+            r"--config-location=C:\evil.conf",
+            "--batch-file=urls.txt",
+            "-o/tmp/pwn",
+            "--version",
+        ] {
+            assert!(
+                validate_url(evil).is_err(),
+                "should reject flag-shaped input {evil:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_http_schemes() {
+        for u in ["file:///etc/passwd", "ftp://x/y", "javascript:alert(1)", "data:text/html,x"] {
+            assert!(validate_url(u).is_err(), "should reject {u:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_empty() {
+        assert!(validate_url("").is_err());
+        assert!(validate_url("   ").is_err());
+    }
+
+    /// Ids become filenames and come from 1800+ extractors, so a separator or
+    /// `..` must not survive into a path.
+    #[test]
+    fn stem_cannot_escape_the_library_dir() {
+        assert_eq!(safe_stem("../../etc/passwd"), "etcpasswd");
+        assert_eq!(safe_stem(r"a/b\c"), "abc");
+        assert_eq!(safe_stem(".."), "untitled");
+        assert_eq!(safe_stem(""), "untitled");
+    }
+
+    /// YouTube ids legitimately start with '-', which must still work as a
+    /// filename stem — it is only dangerous as an argv position.
+    #[test]
+    fn stem_keeps_legitimate_ids() {
+        assert_eq!(safe_stem("jNQXAC9IVRw"), "jNQXAC9IVRw");
+        assert_eq!(safe_stem("-wtf1234567"), "-wtf1234567");
+        assert_eq!(safe_stem("a_b-c123"), "a_b-c123");
+    }
+
+    #[test]
+    fn stem_is_length_capped() {
+        assert_eq!(safe_stem(&"a".repeat(500)).len(), 96);
+    }
+
+    /// Every yt-dlp invocation must terminate option parsing before the URL.
+    #[test]
+    fn base_args_have_no_positional_before_terminator() {
+        let base = ytdlp_base();
+        assert!(base.iter().all(|a| a.starts_with('-') || base.contains(a)));
+        assert!(!base.contains(&"--".to_string()), "terminator is added per call site");
+    }
 }
