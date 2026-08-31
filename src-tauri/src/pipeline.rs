@@ -463,16 +463,20 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
     is_within(root, &found).then_some(found)
 }
 
-/// Remove the intermediate download and the loose artwork once the MP3 exists.
+/// Remove the intermediate download and the loose artwork, keeping `keep`.
 ///
 /// Deliberately NOT inside `extract_mp3`: the resume path can arrive at a
-/// finished MP3 without extracting anything, and cleanup that only runs on one
-/// branch leaves a 64 MB `.webm` sitting next to every interrupted job.
-fn tidy_intermediates(mp3: &Path) {
+/// finished MP3 without extracting anything, and the video path never extracts
+/// at all. Cleanup that only runs on one branch leaves a 64 MB `.webm` next to
+/// every interrupted job, and a stray cover next to every video.
+fn tidy_intermediates(keep: &Path) {
     for ext in ["webm", "m4a", "opus", "ogg", "oga", "mp4", "mkv", "aac", "wav",
                 "jpg", "jpeg", "png", "webp", "info.json", "part.mp3"] {
-        let stray = mp3.with_extension(ext);
-        if stray != mp3 {
+        let stray = keep.with_extension(ext);
+        // The guard is what makes this safe to call with either an .mp3 or an
+        // .mp4 as the thing being kept: the result's own extension is in the
+        // list, and skipping self is the only reason it survives.
+        if stray != keep {
             let _ = std::fs::remove_file(stray);
         }
     }
@@ -644,6 +648,11 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64, want_video: boo
             Some(p) => p,
             None => download_media(app, url, &probed, job_id, true).await?,
         };
+        // Same cleanup the audio path gets. This branch returns early, so
+        // without an explicit call the cover art yt-dlp wrote is left behind —
+        // the identical shape of bug as the extract-path-only cleanup.
+        tidy_intermediates(&file);
+
         let filesize = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
         emit(app, job_id, Progress {
             url: url.into(), stage: "done", bytes_done: filesize,
@@ -789,9 +798,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// Cleanup has to run on every path to a finished MP3, not just the one
-    /// that did the extracting — the resume path can arrive at a converted
-    /// file without extracting anything.
+    /// Cleanup has to run on every path to a finished file, not just the one
+    /// that did the extracting: the resume path can arrive at a converted file
+    /// without extracting, and the video path never extracts at all.
     #[test]
     fn tidy_removes_intermediates_but_never_the_mp3() {
         let tmp = std::env::temp_dir().join("hp-tidy-test");
@@ -810,6 +819,27 @@ mod tests {
         for gone in ["Song [abc123].webm", "Song [abc123].jpg", "Song [abc123].part.mp3"] {
             assert!(!tmp.join(gone).exists(), "{gone} should have been cleaned up");
         }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The video path keeps an .mp4 rather than an .mp3, and calls the same
+    /// cleanup. The result's own extension is in the strip list, so "skip
+    /// self" is the only thing stopping it deleting what it just produced.
+    #[test]
+    fn tidy_keeps_a_video_result_and_strips_its_cover() {
+        let tmp = std::env::temp_dir().join("hp-tidy-video-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mp4 = tmp.join("Clip [abc123].mp4");
+        for f in ["Clip [abc123].mp4", "Clip [abc123].jpg", "Clip [abc123].webm"] {
+            std::fs::write(tmp.join(f), b"x").unwrap();
+        }
+
+        tidy_intermediates(&mp4);
+
+        assert!(mp4.exists(), "the video result must survive its own cleanup");
+        assert!(!tmp.join("Clip [abc123].jpg").exists());
+        assert!(!tmp.join("Clip [abc123].webm").exists());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
