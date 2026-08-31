@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&display=swap" rel="stylesheet">
+</helmet>
+<div style="width:275px;box-sizing:border-box;background:#FFF4FB;box-shadow:inset 0 0 0 1px #FF9FD6,0 0 22px rgba(255,159,214,0.4);font:400 11px/1 'Comic Sans MS','Comic Neue',cursive;color:#4A2A5C;display:flex;flex-direction:column;overflow:hidden;height: {{ h }}px">
+  <div style="height:15px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 4px;background:linear-gradient(#FFE4F3,#FFF4FB);border-bottom:1px solid rgba(255,159,214,0.8)">
+    <div style="display:flex;align-items:center;gap:4px;font-size:8px;color:#7A4A92">
+      <div style="width:4px;height:4px;border-radius:4px;background:#7FFFD4;box-shadow:0 0 6px #7FFFD4"></div>
+      <span>Purricane — Playlist</span>
+    </div>
+    <div style="display:flex;gap:3px">
+      <div style="width:10px;height:10px;display:grid;place-items:center;border-radius:10px;background:#FFE97F;box-shadow:0 0 6px rgba(255,233,127,0.9);font-size:6px;color:#4A2A5C;cursor:pointer">─</div>
+      <div style="width:10px;height:10px;display:grid;place-items:center;border-radius:10px;background:#FF9FD6;box-shadow:0 0 6px rgba(255,159,214,0.9);font-size:6px;color:#FFF4FB;cursor:pointer">×</div>
+    </div>
+  </div>
+
+  <div style="flex:1 1 auto;min-height:0;margin:3px;border-radius:8px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(169,159,255,0.6);overflow:hidden;display:flex">
+    <sc-if value="{{ hasRows }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1 1 auto;min-width:0;padding:2px 0">
+        <sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+          <div onClick="{{ r.select }}" style="height:11px;display:flex;align-items:center;gap:5px;padding:0 5px;font-size:9px;cursor:pointer;background: {{ r.bg }};color: {{ r.ink }};text-shadow: {{ r.glow }}">
+            <span style="flex:0 0 auto;width:11px;text-align:right;color: {{ r.numInk }}">{{ r.n }}</span>
+            <span style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</span>
+            <span style="flex:0 0 auto;color: {{ r.durInk }}">{{ r.dur }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:0 14px;text-align:center">
+        <div style="font-size:10px;color:#4A2A5C">Nothing here yet — fill it up!</div>
+        <div style="font-size:8px;color:#8B5FA8">Paste a link and the kittens get something to dance to.</div>
+      </div>
+    </sc-if>
+    <div style="flex:0 0 auto;width:6px;padding:2px 1px;box-sizing:border-box">
+      <div style="width:4px;border-radius:4px;background:#A99FFF;box-shadow:0 0 6px rgba(169,159,255,0.8);height: {{ thumbH }}px"></div>
+    </div>
+  </div>
+
+  <div style="height:15px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 4px;border-top:1px solid rgba(255,159,214,0.6)">
+    <div style="display:flex;gap:3px">
+      <div style="height:11px;display:flex;align-items:center;padding:0 5px;border-radius:7px;font-size:7px;background:#7FFFD4;box-shadow:0 0 8px rgba(127,255,212,0.7);color:#2A6E5A;cursor:pointer">ADD</div>
+      <div style="height:11px;display:flex;align-items:center;padding:0 5px;border-radius:7px;font-size:7px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.8);color:#7A4A92;cursor:pointer">REM</div>
+      <div style="height:11px;display:flex;align-items:center;padding:0 5px;border-radius:7px;font-size:7px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(255,159,214,0.8);color:#7A4A92;cursor:pointer">SORT</div>
+    </div>
+    <div style="display:flex;gap:5px;align-items:center;font-size:7px;color:#8B5FA8">
+      <span>15 ITEMS</span><span style="color:#4A2A5C">2:24:07</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:275,&quot;height&quot;:116},&quot;h&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:116,&quot;min&quot;:60,&quot;max&quot;:300,&quot;step&quot;:11,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;},&quot;empty&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;selected&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:0,&quot;max&quot;:11,&quot;tsType&quot;:&quot;number&quot;}}">
+const TRACKS = [
+  ['Storm (Levez Vos Skinny Fists)', '22:32'],
+  ['New Grass', '9:32'],
+  ['Dayvan Cowboy', '5:00'],
+  ['KEC50 Gainesville — NOAA', '41:07'],
+  ['An Ending (Ascent)', '4:24'],
+  ['Rhubarb', '7:41'],
+  ['In a Silent Way', '4:11'],
+  ['Windowlicker', '6:07'],
+  ['Avril 14th', '2:02'],
+  ['Teardrop', '5:29'],
+  ['Sunset', '4:04'],
+  ['Rainy Night in Georgia', '3:39']
+];
+class Component extends DCLogic {
+  state = { selected: this.props.selected == null ? 4 : this.props.selected, current: 1 };
+  renderVals() {
+    const h = this.props.h || 116;
+    const visible = Math.max(1, Math.floor((h - 36) / 11));
+    const rows = TRACKS.slice(0, visible).map((t, i) => {
+      const cur = i === this.state.current, sel = i === this.state.selected;
+      return {
+        n: String(i + 1).padStart(2, '0'), title: t[0], dur: t[1],
+        bg: sel ? 'rgba(169,159,255,0.22)' : 'transparent',
+        ink: cur ? '#E0489E' : '#4A2A5C',
+        glow: cur ? '0 0 8px rgba(255,159,214,0.8)' : 'none',
+        numInk: cur ? '#E0489E' : '#A18CB8',
+        durInk: cur ? '#E0489E' : '#8B5FA8',
+        select: () => this.setState({ selected: i })
+      };
+    });
+    return {
+      h, rows, hasRows: !this.props.empty, isEmpty: !!this.props.empty,
+      thumbH: Math.max(8, Math.round((h - 40) * visible / TRACKS.length))
+    };
+  }
+}
+</script>
+</body>
+</html>

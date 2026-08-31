@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<sc-if value="{{ isShade }}" hint-placeholder-val="{{ false }}">
+  <div style="width:275px;height:14px;box-sizing:border-box;display:flex;align-items:center;gap:5px;padding:0 3px;background: {{ fill }};box-shadow:inset 0 0 0 1px rgba(111,227,255,0.32);font:400 8px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace;color:#E8F4FF;overflow:hidden">
+    <div style="display:flex;gap:2px;align-items:center;flex:0 0 auto">
+      <div style="width:9px;height:9px;display:grid;place-items:center;font-size:5px;color:#9fd8ef">◀◀</div>
+      <div style="width:11px;height:9px;display:grid;place-items:center;font-size:6px;color:#6FE3FF;text-shadow:0 0 4px rgba(111,227,255,0.8)">‖</div>
+      <div style="width:9px;height:9px;display:grid;place-items:center;font-size:5px;color:#9fd8ef">▶▶</div>
+    </div>
+    <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 5px rgba(0,0,0,0.9),0 0 6px rgba(111,227,255,0.3)">New Grass</div>
+    <div style="flex:0 0 auto;font-size:6px;letter-spacing:0.3px;color: {{ readInk }};text-shadow:0 0 5px rgba(0,0,0,0.9)">{{ readShort }}</div>
+    <div style="flex:0 0 auto;font-size:8px;color:#6FE3FF;text-shadow:0 0 5px rgba(0,0,0,0.9)">02:14</div>
+  </div>
+</sc-if>
+<sc-if value="{{ isFull }}" hint-placeholder-val="{{ true }}">
+<div style="width:275px;height:116px;box-sizing:border-box;background: {{ fill }};box-shadow:inset 0 0 0 1px rgba(111,227,255,0.32);font:400 11px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace;color:#E8F4FF;display:flex;flex-direction:column;overflow:hidden">
+  <div style="height:14px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 3px;background: {{ barFill }};border-bottom:1px solid rgba(111,227,255,0.18)">
+    <div style="display:flex;align-items:center;gap:4px;font-size:6px;letter-spacing:1.2px;text-transform:uppercase;color:rgba(232,244,255,0.6);text-shadow:0 0 4px rgba(0,0,0,0.9)">
+      <div style="width:3px;height:3px;background:#6FE3FF;box-shadow:0 0 4px #6FE3FF"></div>
+      <span>Cone — Main</span>
+    </div>
+    <div style="display:flex;gap:2px">
+      <div style="width:9px;height:9px;display:grid;place-items:center;background:rgba(16,13,28,0.8);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.24);font-size:6px;color:#9fd8ef">─</div>
+      <div style="width:9px;height:9px;display:grid;place-items:center;background:rgba(16,13,28,0.8);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.24);font-size:6px;color:#9fd8ef">×</div>
+    </div>
+  </div>
+
+  <div style="height:11px;flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:0 4px;background: {{ readBg }};box-shadow: {{ readRing }}">
+    <div style="width:3px;height:3px;flex:0 0 auto;background: {{ readLamp }};box-shadow:0 0 5px {{ readLamp }}"></div>
+    <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:6px;letter-spacing:0.5px;color: {{ readInk }};text-shadow:0 0 5px rgba(0,0,0,0.95)">{{ readout }}</div>
+    <div style="flex:0 0 auto;display:flex;gap:1px;align-items:center">
+      <sc-for list="{{ frames }}" as="f" hint-placeholder-count="8">
+        <div style="width:2px;height:4px;background: {{ f.color }}"></div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:4px;padding:4px 4px 3px;box-sizing:border-box">
+    <div style="display:flex;gap:5px;align-items:center;flex:1 1 auto;min-height:26px">
+      <div style="flex:0 0 auto;width:56px;display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:17px;line-height:17px;letter-spacing:-0.5px;color:#6FE3FF;text-shadow:0 0 4px rgba(0,0,0,0.95),0 0 8px rgba(111,227,255,0.6)">02:14</div>
+        <div style="display:flex;gap:3px;font-size:6px;letter-spacing:0.5px;color:rgba(232,244,255,0.5);text-shadow:0 0 4px rgba(0,0,0,0.9)"><span>192</span><span>44</span><span style="color:#6FE3FF">STEREO</span></div>
+      </div>
+      <div style="flex:0 0 auto;width:100px;height:26px;background:rgba(5,4,10,0.86);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);padding:2px 3px;box-sizing:border-box;display:flex;align-items:flex-end;gap:1px">
+        <div style="width:4px;height:6px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:12px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:18px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat;border-top:1px solid #FF4FD8"></div>
+        <div style="width:4px;height:14px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:20px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat;border-top:1px solid #FFE9FB"></div>
+        <div style="width:4px;height:11px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:8px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:15px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:9px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:5px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:10px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:4px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:7px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+        <div style="width:4px;height:3px;background:linear-gradient(to top,#0A3A16 0%,#13702A 14%,#1FA637 26%,#57C22B 36%,#A8D62B 46%,#E8D021 58%,#FFA82B 68%,#FF7A1F 76%,#FF3B2F 84%,#E01B3C 91%,#FF4FD8 97%,#FFE9FB 100%) bottom/100% 22px no-repeat"></div>
+      </div>
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:6px;letter-spacing:0.5px;color:rgba(232,244,255,0.45);text-shadow:0 0 4px rgba(0,0,0,0.9)">
+        <div>SHUF</div>
+        <div>REP</div>
+        <div style="color: {{ netInk }}">{{ netLabel }}</div>
+      </div>
+    </div>
+
+    <div style="height:15px;flex:0 0 auto;background:rgba(5,4,10,0.86);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);display:flex;align-items:center;padding:0 4px;overflow:hidden">
+      <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#E8F4FF;text-shadow:0 0 6px rgba(111,227,255,0.4)">Talk Talk — New Grass</div>
+    </div>
+
+    <div style="height:8px;flex:0 0 auto;background:rgba(5,4,10,0.86);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16);position:relative">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:23%;background:linear-gradient(90deg,rgba(111,227,255,0.25),rgba(111,227,255,0.75))"></div>
+      <div style="position:absolute;top:-1px;bottom:-1px;left:23%;width:3px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.95)"></div>
+    </div>
+
+    <div style="height:16px;flex:0 0 auto;display:flex;align-items:stretch;gap:4px">
+      <div style="display:flex;gap:1px">
+        <div style="width:17px;height:14px;display:grid;place-items:center;background:rgba(16,13,28,0.82);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);color:#cfe9f6;font-size:6px">◀◀</div>
+        <div style="width:17px;height:14px;display:grid;place-items:center;background:rgba(19,36,54,0.85);box-shadow:inset 0 0 0 1px #6FE3FF,0 0 8px rgba(111,227,255,0.4);color:#6FE3FF;font-size:7px">▶</div>
+        <div style="width:17px;height:14px;display:grid;place-items:center;background:rgba(16,13,28,0.82);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);color:#cfe9f6;font-size:7px">‖</div>
+        <div style="width:17px;height:14px;display:grid;place-items:center;background:rgba(16,13,28,0.82);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);color:#cfe9f6;font-size:6px">■</div>
+        <div style="width:17px;height:14px;display:grid;place-items:center;background:rgba(16,13,28,0.82);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);color:#cfe9f6;font-size:6px">▶▶</div>
+      </div>
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:2px;justify-content:center">
+        <div style="height:5px;background:rgba(5,4,10,0.86);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.16)">
+          <div style="width:78%;height:5px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.7)"></div>
+        </div>
+        <div style="font-size:6px;color:rgba(232,244,255,0.45);text-shadow:0 0 4px rgba(0,0,0,0.9)">VOL 78 · BAL C</div>
+      </div>
+      <div style="display:flex;gap:2px">
+        <div style="width:19px;height:14px;display:grid;place-items:center;background:rgba(19,36,54,0.85);box-shadow:inset 0 0 0 1px #6FE3FF,0 0 8px rgba(111,227,255,0.35);color:#6FE3FF;font-size:6px">EQ</div>
+        <div style="width:19px;height:14px;display:grid;place-items:center;background:rgba(19,36,54,0.85);box-shadow:inset 0 0 0 1px #6FE3FF,0 0 8px rgba(111,227,255,0.35);color:#6FE3FF;font-size:6px">PL</div>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:275,&quot;height&quot;:116},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;live&quot;,&quot;stale&quot;,&quot;nodata&quot;],&quot;default&quot;:&quot;live&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;shade&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.mode || 'live';
+    const live = mode === 'live', stale = mode === 'stale', none = mode === 'nodata';
+    const frameColors = live
+      ? ['rgba(111,227,255,0.25)', 'rgba(111,227,255,0.35)', 'rgba(111,227,255,0.45)', 'rgba(111,227,255,0.55)', 'rgba(111,227,255,0.65)', 'rgba(111,227,255,0.8)', '#6FE3FF', '#E8F4FF']
+      : stale
+        ? ['rgba(255,179,71,0.18)', 'rgba(255,179,71,0.24)', 'rgba(255,179,71,0.3)', 'rgba(255,179,71,0.36)', 'rgba(255,179,71,0.44)', 'rgba(255,179,71,0.55)', 'rgba(255,179,71,0.7)', '#FFB347']
+        : ['rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)', 'rgba(232,244,255,0.10)'];
+    return {
+      isShade: !!this.props.shade, isFull: !this.props.shade,
+      frames: frameColors.map(c => ({ color: c })),
+      fill: none ? '#0C0A14' : (stale ? 'rgba(12,10,20,0.72)' : 'rgba(12,10,20,0.55)'),
+      barFill: none ? 'linear-gradient(#15112a,#0C0A14)' : 'rgba(10,8,18,0.78)',
+      readout: live ? 'RADAR · 18:44 EDT · 2m old · LIVE'
+        : stale ? 'RADAR · 14:32 EDT · 4h 12m old · OFFLINE'
+        : 'RADAR · NO DATA · EYEWALL FALLBACK',
+      readShort: live ? '2m · LIVE' : stale ? '4h 12m OLD' : 'NO DATA',
+      readInk: live ? '#6FE3FF' : (stale ? '#FFB347' : 'rgba(232,244,255,0.35)'),
+      readLamp: live ? '#6FE3FF' : (stale ? '#FFB347' : 'rgba(232,244,255,0.2)'),
+      readBg: live ? 'rgba(5,4,10,0.55)' : (stale ? 'rgba(255,179,71,0.10)' : 'rgba(5,4,10,0.5)'),
+      readRing: stale ? 'inset 0 0 0 1px rgba(255,179,71,0.45)' : 'inset 0 -1px 0 rgba(111,227,255,0.14)',
+      netLabel: live ? 'ONLINE' : 'OFFLINE',
+      netInk: live ? '#6FE3FF' : '#FFB347'
+    };
+  }
+}
+</script>
+</body>
+</html>

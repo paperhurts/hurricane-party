@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:1120px;height:720px;box-sizing:border-box;background:#0C0A14;color:#E8F4FF;font:400 13px/1.45 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.22),0 24px 60px rgba(0,0,0,0.65)">
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#0A0812">
+    <div style="display:flex;align-items:center;gap:9px;padding-left:12px;font-size:12px;color:rgba(232,244,255,0.75)">
+      <div style="width:8px;height:8px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.8)"></div>
+      <span>Library — Radar</span>
+    </div>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;background:rgba(255,179,71,0.10);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:#FFB347">
+        <div style="width:5px;height:5px;background:#FFB347;box-shadow:0 0 6px rgba(255,179,71,0.8)"></div>
+        <span>OFFLINE · LOCAL LIBRARY IS COMPLETE</span>
+      </div>
+    </sc-if>
+    <div style="display:flex">
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6);cursor:default" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">─</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.6);cursor:default" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">▢</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6);cursor:default" style-hover="background:rgba(255,79,216,0.18);color:#FF4FD8">✕</div>
+    </div>
+  </div>
+  <div style="height:1px;flex:0 0 auto;background:linear-gradient(90deg,rgba(111,227,255,0.12),rgba(111,227,255,0.55) 18%,rgba(111,227,255,0.55) 82%,rgba(111,227,255,0.12));box-shadow:0 1px 10px rgba(111,227,255,0.22)"></div>
+
+  <div style="height:52px;flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(111,227,255,0.10)">
+    <div style="flex:0 0 auto;width:320px;height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;box-sizing:border-box;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);font-size:12px;color: {{ filterInk }}">
+      <span style="color:#6FE3FF;font-size:11px">/</span>
+      <span>{{ filterText }}</span>
+    </div>
+    <div style="flex:1 1 auto;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.35)">{{ resultLine }}</div>
+    <div style="display:flex;gap:8px;flex:0 0 auto">
+      <div style="height:30px;display:flex;align-items:center;padding:0 12px;font-size:12px;letter-spacing:0.4px;color:rgba(232,244,255,0.7);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.20);cursor:default" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">Prep</div>
+      <div style="height:30px;display:flex;align-items:center;padding:0 14px;font-size:12px;letter-spacing:0.4px;color:#6FE3FF;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.55),0 0 14px rgba(111,227,255,0.18);cursor:default" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF,0 0 22px rgba(111,227,255,0.32)">Import</div>
+    </div>
+  </div>
+
+  <sc-if value="{{ hasTable }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;min-height:0;opacity: {{ tableOpacity }}">
+      <div style="height:30px;flex:0 0 auto;display:grid;grid-template-columns:1fr 190px 92px 96px 92px 150px;align-items:center;gap:0;padding:0 16px;background:#0A0812;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.3px;color:rgba(232,244,255,0.4)">
+        <div style="color:#6FE3FF;display:flex;gap:6px;align-items:center">TITLE <span style="font-size:8px">▲</span></div>
+        <div>UPLOADER</div>
+        <div style="text-align:right;padding-right:18px">DURATION</div>
+        <div>KIND</div>
+        <div style="text-align:right;padding-right:18px">SIZE</div>
+        <div>SOURCE</div>
+      </div>
+      <div style="flex:1 1 auto;min-height:0;overflow:hidden;background:#05040A;box-shadow:inset 0 1px 0 rgba(111,227,255,0.10)">
+        <sc-for list="{{ rows }}" as="r" hint-placeholder-count="16">
+          <div style="height:34px;display:grid;grid-template-columns:1fr 190px 92px 96px 92px 150px;align-items:center;padding:0 16px;border-bottom:1px solid rgba(111,227,255,0.05);font-size:13px;background: {{ r.bg }};color: {{ r.ink }}">
+            <div style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:16px;text-shadow: {{ r.glow }}">{{ r.title }}</div>
+            <div style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:12px;color: {{ r.dim }}">{{ r.uploader }}</div>
+            <div style="text-align:right;padding-right:18px;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;color: {{ r.dim }}">{{ r.duration }}</div>
+            <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color: {{ r.kindInk }}">{{ r.kind }}</div>
+            <div style="text-align:right;padding-right:18px;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;color: {{ r.dim }}">{{ r.size }}</div>
+            <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color:rgba(232,244,255,0.35)">{{ r.source }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#05040A">
+      <div style="font-size:19px;color:#E8F4FF;text-shadow:0 0 16px rgba(111,227,255,0.3)">Nothing saved yet.</div>
+      <div style="font-size:13px;color:rgba(232,244,255,0.5);max-width:420px;text-align:center;text-wrap:pretty">Paste a YouTube link and Radar keeps it on disk, ready for the next time the power goes.</div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <div style="height:34px;display:flex;align-items:center;padding:0 16px;font-size:13px;color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF,0 0 18px rgba(111,227,255,0.25);cursor:default" style-hover="box-shadow:inset 0 0 0 1px #A7F0FF,0 0 28px rgba(111,227,255,0.4)">Add link</div>
+        <div style="height:34px;display:flex;align-items:center;padding:0 16px;font-size:13px;color:rgba(232,244,255,0.65);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);cursor:default" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">Choose library folder</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;background:#05040A;padding:0 16px;min-height:0">
+      <div style="height:30px;flex:0 0 auto;display:flex;align-items:center;gap:10px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px;color:#6FE3FF">
+        <span>SCANNING LIBRARY · 1 842 FILES READ</span>
+        <div style="flex:1 1 auto;height:2px;background:rgba(111,227,255,0.10)">
+          <div style="width:38%;height:2px;background:#6FE3FF;box-shadow:0 0 8px rgba(111,227,255,0.7)"></div>
+        </div>
+      </div>
+      <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="14">
+        <div style="height:34px;flex:0 0 auto;display:grid;grid-template-columns:1fr 190px 92px 96px 92px 150px;align-items:center;border-bottom:1px solid rgba(111,227,255,0.05)">
+          <div style="height:9px;background:#14111f;width: {{ k.w1 }}%"></div>
+          <div style="height:9px;background:#12101c;width: {{ k.w2 }}%"></div>
+          <div style="height:9px;background:#12101c;width:52%;margin-left:auto;margin-right:18px"></div>
+          <div style="height:9px;background:#12101c;width:58%"></div>
+          <div style="height:9px;background:#12101c;width:48%;margin-left:auto;margin-right:18px"></div>
+          <div style="height:9px;background:#12101c;width: {{ k.w3 }}%"></div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#05040A;padding:0 40px">
+      <div style="width:520px;padding:20px;box-sizing:border-box;background:rgba(255,179,71,0.06);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45)">
+        <div style="display:flex;align-items:center;gap:9px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.3px;color:#FFB347;margin-bottom:10px">
+          <div style="width:6px;height:6px;background:#FFB347;box-shadow:0 0 8px rgba(255,179,71,0.8)"></div>
+          <span>LIBRARY FOLDER UNREADABLE</span>
+        </div>
+        <div style="font-size:14px;color:#E8F4FF;margin-bottom:6px">Couldn't read D:\Radar. The drive is missing or the folder was moved.</div>
+        <div style="font-size:13px;color:rgba(232,244,255,0.55)">Reconnect the drive, or point Radar at a new folder. Nothing was deleted.</div>
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <div style="height:32px;display:flex;align-items:center;padding:0 14px;font-size:13px;color:#FFB347;box-shadow:inset 0 0 0 1px #FFB347,0 0 16px rgba(255,179,71,0.22);cursor:default" style-hover="box-shadow:inset 0 0 0 1px #FFD9A0,0 0 24px rgba(255,179,71,0.35)">Retry</div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 14px;font-size:13px;color:rgba(232,244,255,0.7);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22);cursor:default" style-hover="color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF">Choose folder</div>
+        </div>
+      </div>
+      <div style="font:400 11px/1.6 'Iosevka Web',ui-monospace,monospace;color:rgba(232,244,255,0.3);text-align:center">LAST GOOD READ 02:11 · 142 ITEMS · 61.4 GB</div>
+    </div>
+  </sc-if>
+
+  <div style="height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0A0812;border-top:1px solid rgba(111,227,255,0.10);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.42)">
+    <span>{{ statusLeft }}</span>
+    <span style="color: {{ statusRightInk }}">{{ statusRight }}</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:720},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;loading&quot;,&quot;populated&quot;,&quot;error&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const ITEMS = [
+  ['Storm (Levez Vos Skinny Fists)', 'Constellation', '22:32', 'VIDEO', '412 MB', 'youtube'],
+  ['KEC50 Gainesville — NOAA Weather Radio', 'NOAA', '41:07', 'AUDIO', '38 MB', 'youtube'],
+  ['New Grass', 'Talk Talk Archive', '9:32', 'AUDIO', '22 MB', 'local'],
+  ['Hurricane Prep Checklist 2026', 'WUFT News', '18:02', 'VIDEO', '284 MB', 'youtube'],
+  ['Dayvan Cowboy', 'Warp', '5:00', 'VIDEO', '96 MB', 'youtube'],
+  ['An Ending (Ascent)', 'Obscure Records', '4:24', 'AUDIO', '11 MB', 'local'],
+  ['Generator repair — Honda EU2200i', 'Small Engine Shop', '27:14', 'VIDEO', '498 MB', 'youtube'],
+  ['Rhubarb', 'Warp', '7:41', 'AUDIO', '18 MB', 'local'],
+  ['In a Silent Way', 'Columbia', '4:11', 'AUDIO', '10 MB', 'local'],
+  ['Cat 5 — full documentary', 'Nat Geo Archive', '52:40', 'VIDEO', '1.4 GB', 'youtube'],
+  ['Windowlicker', 'Warp', '6:07', 'VIDEO', '132 MB', 'youtube'],
+  ['Avril 14th', 'Warp', '2:02', 'AUDIO', '5 MB', 'local'],
+  ['Teardrop', 'Circa', '5:29', 'AUDIO', '13 MB', 'local'],
+  ['Alachua County EOC briefing — Sep 26', 'Alachua County', '1:04:18', 'VIDEO', '892 MB', 'youtube'],
+  ['Sunset', 'Kompakt', '4:04', 'AUDIO', '9 MB', 'local'],
+  ['Rainy Night in Georgia', 'Cotillion', '3:39', 'AUDIO', '8 MB', 'local'],
+  ['Boil water notice — how to', 'Gainesville Regional Utilities', '3:12', 'VIDEO', '54 MB', 'youtube']
+];
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.props.state || 'populated';
+    const offline = st === 'offline';
+    const populated = st === 'populated';
+    const rows = ITEMS.slice(0, 16).map((t, i) => {
+      const cur = i === 1;
+      return {
+        title: t[0], uploader: t[1], duration: t[2], kind: t[3], size: t[4], source: t[5],
+        bg: i === 4 ? 'rgba(111,227,255,0.06)' : 'transparent',
+        ink: cur ? '#FF4FD8' : (offline ? 'rgba(232,244,255,0.62)' : '#E8F4FF'),
+        glow: cur ? '0 0 10px rgba(255,79,216,0.45)' : 'none',
+        dim: offline ? 'rgba(232,244,255,0.32)' : 'rgba(232,244,255,0.55)',
+        kindInk: t[3] === 'VIDEO' ? 'rgba(111,227,255,0.7)' : 'rgba(232,244,255,0.45)'
+      };
+    });
+    return {
+      isEmpty: st === 'empty', isLoading: st === 'loading', isError: st === 'error', isOffline: offline,
+      hasTable: populated || offline, rows,
+      tableOpacity: offline ? 0.82 : 1,
+      skeleton: [72, 58, 81, 46, 66, 90, 53, 77, 62, 85, 49, 70, 59, 74].map(w => ({ w1: w, w2: Math.max(30, w - 22), w3: Math.max(28, w - 30) })),
+      filterText: populated || offline ? 'hurricane' : 'Filter by title, uploader, source',
+      filterInk: populated || offline ? '#E8F4FF' : 'rgba(232,244,255,0.35)',
+      resultLine: populated ? '16 OF 142 MATCH' : (offline ? '16 OF 142 MATCH · CACHED' : ''),
+      statusLeft: st === 'empty' ? 'NO LIBRARY FOLDER SET'
+        : st === 'loading' ? 'SCANNING…'
+        : st === 'error' ? 'LIBRARY UNAVAILABLE'
+        : '142 ITEMS · 61.4 GB ON DISK',
+      statusRight: offline ? 'METADATA LAST REFRESHED 02:11 · STALE'
+        : st === 'error' ? 'D:\\RADAR'
+        : st === 'loading' ? 'D:\\RADAR'
+        : st === 'empty' ? 'CHOOSE A FOLDER TO BEGIN'
+        : '41 GB FREE',
+      statusRightInk: offline ? '#FFB347' : (st === 'error' ? '#FFB347' : 'rgba(232,244,255,0.42)')
+    };
+  }
+}
+</script>
+</body>
+</html>

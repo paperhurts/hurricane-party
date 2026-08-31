@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    @font-face { font-family: 'Iosevka Web'; src: local('Iosevka'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.0.8/files/iosevka-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Web'; src: local('Iosevka'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.0.8/files/iosevka-latin-600-normal.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+    @keyframes radar-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    html, body { margin: 0; background: #08070E; }
+    a { color: #6FE3FF; text-decoration: none; }
+    a:hover { color: #FF4FD8; }
+  </style>
+</helmet>
+
+<section style="background:#08070E;color:#E8F4FF;font:400 13px/1.5 'Iosevka Web',Iosevka,ui-monospace,'DejaVu Sans Mono',monospace;padding:56px 64px 96px;display:flex;flex-direction:column;gap:64px;min-width:1280px">
+
+  <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:48px;border-bottom:1px solid rgba(111,227,255,0.16);padding-bottom:28px">
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:640px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:10px;letter-spacing:2px;color:#6FE3FF;padding:3px 7px;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.45),0 0 12px rgba(111,227,255,0.18)">1a</span>
+        <span style="font-size:10px;letter-spacing:2px;color:rgba(232,244,255,0.4)">RADAR · PASS 1 · MAIN / EQ / PLAYLIST</span>
+      </div>
+      <h1 style="margin:0;font-size:26px;font-weight:600;letter-spacing:-0.4px;color:#E8F4FF;text-shadow:0 0 14px rgba(111,227,255,0.28)">During a hurricane, this screen is the only light source in the room.</h1>
+      <p style="margin:0;font-size:12px;line-height:1.7;color:rgba(232,244,255,0.55);text-wrap:pretty">Dark only. 275 × 116 logical px per window, 275 × 14 collapsed, drawn at 2× integer scale. Every window is undecorated and draws its own chrome. Bonded edges light up.</p>
+    </div>
+    <div style="display:flex;gap:14px;flex:0 0 auto">
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:9px;letter-spacing:1px;color:rgba(232,244,255,0.4)">
+        <div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.12)"></span>VOID</div>
+        <div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.12)"></span>WELL</div>
+        <div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;background:#E8F4FF"></span>FILAMENT</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:9px;letter-spacing:1px;color:rgba(232,244,255,0.4)">
+        <div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;background:#6FE3FF;box-shadow:0 0 8px rgba(111,227,255,0.7)"></span>ARC</div>
+        <div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;background:#FF4FD8;box-shadow:0 0 8px rgba(255,79,216,0.6)"></span>STRIKE</div>
+        <div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;background:#FFB347;box-shadow:0 0 8px rgba(255,179,71,0.5)"></span>EMBER</div>
+      </div>
+    </div>
+  </header>
+
+  <div style="display:flex;gap:72px;align-items:flex-start;flex-wrap:wrap">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">THE CLASSIC STACK — LIVE</div>
+        <div style="font-size:11px;color:rgba(232,244,255,0.45);max-width:520px">Bonded, seams visible, group focus. Transport, seek, volume, EQ/PL toggles, shade buttons, and playlist rows all respond. Hover a seam, press it, or double-click to break the bond.</div>
+      </div>
+      <div style="zoom:2;width:275px;display:flex;flex-direction:column;align-items:flex-start">
+        <dc-import name="MainWindow" focused="{{ true }}" shade="{{ mainShade }}" eq-on="{{ eqOn }}" pl-on="{{ plOn }}" on-shade="{{ setMainShade }}" on-toggle-eq="{{ toggleEq }}" on-toggle-pl="{{ togglePl }}" hint-size="275px,116px"></dc-import>
+        <sc-if value="{{ showSeamA }}" hint-placeholder-val="{{ true }}">
+          <div onMouseEnter="{{ seamA.enter }}" onMouseLeave="{{ seamA.leave }}" onMouseDown="{{ seamA.down }}" onMouseUp="{{ seamA.up }}" onDoubleClick="{{ seamA.discharge }}" title="Drag to resize both. Double-click to break the bond." style="width:275px;cursor:row-resize;display:flex;align-items:center;justify-content:center;height: {{ seamA.box }}px;margin: {{ seamA.margin }}">
+            <div style="width:100%;background: {{ seamA.color }};height: {{ seamA.h }}px;box-shadow: {{ seamA.glow }}"></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ eqOn }}" hint-placeholder-val="{{ true }}">
+          <dc-import name="EqWindow" focused="{{ true }}" shade="{{ eqShade }}" preset="STORM WATCH" on-shade="{{ setEqShade }}" hint-size="275px,116px"></dc-import>
+        </sc-if>
+        <sc-if value="{{ showSeamB }}" hint-placeholder-val="{{ true }}">
+          <div onMouseEnter="{{ seamB.enter }}" onMouseLeave="{{ seamB.leave }}" onMouseDown="{{ seamB.down }}" onMouseUp="{{ seamB.up }}" onDoubleClick="{{ seamB.discharge }}" title="Drag to resize both. Double-click to break the bond." style="width:275px;cursor:row-resize;display:flex;align-items:center;justify-content:center;height: {{ seamB.box }}px;margin: {{ seamB.margin }}">
+            <div style="width:100%;background: {{ seamB.color }};height: {{ seamB.h }}px;box-shadow: {{ seamB.glow }}"></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ plOn }}" hint-placeholder-val="{{ true }}">
+          <dc-import name="PlaylistWindow" focused="{{ true }}" shade="{{ plShade }}" h="{{ plH }}" on-shade="{{ setPlShade }}" hint-size="275px,116px"></dc-import>
+        </sc-if>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:10px;letter-spacing:0.8px">
+        <div onClick="{{ resetStack }}" style="padding:5px 9px;color:#6FE3FF;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.4);cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF,0 0 12px rgba(111,227,255,0.25)">RESET STACK</div>
+        <div onClick="{{ shadeAll }}" style="padding:5px 9px;color:#6FE3FF;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.4);cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF,0 0 12px rgba(111,227,255,0.25)">COLLAPSE ALL</div>
+        <div onClick="{{ growPl }}" style="padding:5px 9px;color:#6FE3FF;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.4);cursor:pointer" style-hover="box-shadow:inset 0 0 0 1px #6FE3FF,0 0 12px rgba(111,227,255,0.25)">PLAYLIST +1 STEP</div>
+        <div style="padding:5px 9px;color:rgba(232,244,255,0.45)">{{ bondStatus }}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">THE BOND SEAM — FOUR STATES</div>
+        <div style="font-size:11px;color:rgba(232,244,255,0.45);max-width:420px">A crisp 1px core with a halo underneath. Brighter than any other edge in the interface.</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:22px">
+        <div style="display:flex;align-items:center;gap:18px">
+          <div style="zoom:2;width:275px">
+            <div style="height:22px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-bottom:none"></div>
+            <div style="height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)"></div>
+            <div style="height:22px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-top:none"></div>
+          </div>
+          <div style="width:150px;font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.55)">IDLE<br><span style="color:rgba(232,244,255,0.32);letter-spacing:0">1px arc, soft halo</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px">
+          <div style="zoom:2;width:275px">
+            <div style="height:22px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-bottom:none"></div>
+            <div style="height:2px;background:#A7F0FF;box-shadow:0 0 7px rgba(111,227,255,0.95),0 0 18px rgba(111,227,255,0.4)"></div>
+            <div style="height:22px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-top:none"></div>
+          </div>
+          <div style="width:150px;font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.55)">HOVER<br><span style="color:rgba(232,244,255,0.32);letter-spacing:0">+1px, brighter core</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px">
+          <div style="zoom:2;width:275px;position:relative">
+            <div style="height:16px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-bottom:none"></div>
+            <div style="height:3px;background:#E8F4FF;box-shadow:0 0 9px rgba(111,227,255,1),0 0 22px rgba(111,227,255,0.5)"></div>
+            <div style="height:28px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-top:none"></div>
+            <div style="position:absolute;right:3px;top:13px;font-size:6px;letter-spacing:0.5px;color:#6FE3FF">−12 / +12 px</div>
+          </div>
+          <div style="width:150px;font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.55)">DRAGGING<br><span style="color:rgba(232,244,255,0.32);letter-spacing:0">seam tracks cursor, both neighbours resize</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px">
+          <div style="zoom:2;width:275px">
+            <div style="height:22px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-bottom:none"></div>
+            <div style="height:3px;background:#FFFFFF;box-shadow:0 0 12px rgba(167,240,255,1),0 0 30px rgba(255,79,216,0.55)"></div>
+            <div style="height:22px;background:#0C0A14;border:1px solid rgba(111,227,255,0.30);border-top:none"></div>
+          </div>
+          <div style="width:150px;font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.55)">DISCHARGING<br><span style="color:rgba(232,244,255,0.32);letter-spacing:0">double-click break · bloom then out, 120ms · instant when reduced-motion</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:72px;align-items:flex-start;flex-wrap:wrap">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">WINDOWSHADES — 275 × 14</div>
+        <div style="font-size:11px;color:rgba(232,244,255,0.45);max-width:520px">Main shade carries transport, title, seek and time in fourteen pixels. This is the always-on-top state the owner lives in.</div>
+      </div>
+      <div style="zoom:2;width:275px;display:flex;flex-direction:column;gap:0">
+        <dc-import name="MainWindow" focused="{{ true }}" shade="{{ true }}" hint-size="275px,14px"></dc-import>
+        <div style="height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75)"></div>
+        <dc-import name="EqWindow" focused="{{ true }}" shade="{{ true }}" preset="STORM WATCH" hint-size="275px,14px"></dc-import>
+        <div style="height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75)"></div>
+        <dc-import name="PlaylistWindow" focused="{{ true }}" shade="{{ true }}" hint-size="275px,14px"></dc-import>
+      </div>
+      <div style="font-size:10px;letter-spacing:0.6px;color:rgba(232,244,255,0.35)">Collapsed stack = 44px tall at 1×, 88px at 2×.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">ALTERNATE ARRANGEMENT</div>
+        <div style="font-size:11px;color:rgba(232,244,255,0.45);max-width:420px">EQ bonded to the right of Main, playlist below at one step up. Checks sprite edges where three frames meet.</div>
+      </div>
+      <div style="zoom:2;display:flex;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;align-items:flex-start">
+          <dc-import name="MainWindow" focused="{{ true }}" hint-size="275px,116px"></dc-import>
+          <div style="width:275px;height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)"></div>
+          <dc-import name="PlaylistWindow" focused="{{ true }}" h="{{ 146 }}" selected="{{ 5 }}" hint-size="275px,146px"></dc-import>
+        </div>
+        <div style="width:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28);align-self:stretch"></div>
+        <div>
+          <dc-import name="EqWindow" focused="{{ true }}" preset="VOICE / NOAA" hint-size="275px,116px"></dc-import>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">EQUALIZER STATES</div>
+      <div style="font-size:11px;color:rgba(232,244,255,0.45)">Preamp plus ten bands, ±12 dB. Auto binds the preset to the track, not to the app. Click a band to nudge it; click the preset field to cycle.</div>
+    </div>
+    <div style="display:flex;gap:40px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2"><dc-import name="EqWindow" focused="{{ true }}" preset="FLAT" auto="{{ false }}" hint-size="275px,116px"></dc-import></div>
+        <div style="font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.45)">FLAT · NO BINDING</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2"><dc-import name="EqWindow" focused="{{ true }}" preset="STORM WATCH" hint-size="275px,116px"></dc-import></div>
+        <div style="font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.45)">PRESET APPLIED · BOUND TO TRACK</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2"><dc-import name="EqWindow" focused="{{ true }}" preset="FULL LOUD" clip="{{ true }}" hint-size="275px,116px"></dc-import></div>
+        <div style="font-size:10px;letter-spacing:1px;color:#FFB347">CLIP LIT</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">PLAYLIST — TWO SIZES AND EMPTY</div>
+      <div style="font-size:11px;color:rgba(232,244,255,0.45)">Height moves in 10px row steps because the frame is tiled sprites. Current track in strike, selection in a cold wash. Rows are clickable.</div>
+    </div>
+    <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2"><dc-import name="PlaylistWindow" focused="{{ true }}" h="{{ 116 }}" hint-size="275px,116px"></dc-import></div>
+        <div style="font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.45)">275 × 116 · DEFAULT</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2"><dc-import name="PlaylistWindow" focused="{{ true }}" h="{{ 186 }}" selected="{{ 9 }}" hint-size="275px,186px"></dc-import></div>
+        <div style="font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.45)">275 × 186 · +7 STEPS</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2"><dc-import name="PlaylistWindow" focused="{{ true }}" empty="{{ true }}" hint-size="275px,116px"></dc-import></div>
+        <div style="font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.45)">EMPTY — AN INVITATION</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">FOCUS IS A GROUP PROPERTY</div>
+      <div style="font-size:11px;color:rgba(232,244,255,0.45)">If any bonded window holds focus, every window in the group reads active — chrome lamps lit, seams at full brightness. Unfocused: chrome dims, seams drop to a dull line, content keeps its glow.</div>
+    </div>
+    <div style="display:flex;gap:56px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2;width:275px;display:flex;flex-direction:column">
+          <dc-import name="MainWindow" focused="{{ true }}" hint-size="275px,116px"></dc-import>
+          <div style="height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)"></div>
+          <dc-import name="EqWindow" focused="{{ true }}" preset="STORM WATCH" shade="{{ true }}" hint-size="275px,14px"></dc-import>
+        </div>
+        <div style="font-size:10px;letter-spacing:1px;color:#6FE3FF">GROUP FOCUSED</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="zoom:2;width:275px;display:flex;flex-direction:column;opacity:0.92">
+          <dc-import name="MainWindow" focused="{{ false }}" hint-size="275px,116px"></dc-import>
+          <div style="height:1px;background:rgba(111,227,255,0.28)"></div>
+          <dc-import name="EqWindow" focused="{{ false }}" preset="STORM WATCH" shade="{{ true }}" hint-size="275px,14px"></dc-import>
+        </div>
+        <div style="font-size:10px;letter-spacing:1px;color:rgba(232,244,255,0.35)">GROUP UNFOCUSED</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px;border-top:1px solid rgba(111,227,255,0.16);padding-top:28px">
+    <div style="font-size:11px;letter-spacing:1.6px;color:#6FE3FF">VOICE</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap">
+      <div style="width:300px;padding:12px 14px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.22)">
+        <div style="font-size:9px;letter-spacing:1.4px;color:#6FE3FF;margin-bottom:6px">TOAST</div>
+        <div style="font-size:12px;color:#E8F4FF">Downloaded. 4 files, 218 MB.</div>
+      </div>
+      <div style="width:340px;padding:12px 14px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(255,179,71,0.32)">
+        <div style="font-size:9px;letter-spacing:1.4px;color:#FFB347;margin-bottom:6px">ERROR</div>
+        <div style="font-size:12px;color:#E8F4FF">Couldn't reach YouTube. Check your connection, or try again later.</div>
+      </div>
+      <div style="width:300px;padding:12px 14px;background:#0C0A14;box-shadow:inset 0 0 0 1px rgba(255,79,216,0.3)">
+        <div style="font-size:9px;letter-spacing:1.4px;color:#FF4FD8;margin-bottom:6px">STORAGE PRESSURE</div>
+        <div style="font-size:12px;color:#E8F4FF">6 GB left. Remove a playlist or pick a smaller quality.</div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  state = {
+    eqOn: true, plOn: true,
+    mainShade: false, eqShade: false, plShade: false,
+    plH: 116,
+    bonds: { a: 'idle', b: 'idle' },
+    broken: { a: false, b: false }
+  };
+  componentWillUnmount() { (this.timers || []).forEach(clearTimeout); }
+  seam(key) {
+    const st = this.state.bonds[key];
+    const broken = this.state.broken[key];
+    const set = (v) => this.setState(s => ({ bonds: Object.assign({}, s.bonds, { [key]: v }) }));
+    const map = {
+      idle: { h: 1, box: 1, color: '#6FE3FF', glow: '0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)' },
+      hover: { h: 2, box: 2, color: '#A7F0FF', glow: '0 0 7px rgba(111,227,255,0.95),0 0 18px rgba(111,227,255,0.4)' },
+      drag: { h: 3, box: 3, color: '#E8F4FF', glow: '0 0 9px rgba(111,227,255,1),0 0 22px rgba(111,227,255,0.5)' },
+      bloom: { h: 3, box: 3, color: '#FFFFFF', glow: '0 0 12px rgba(167,240,255,1),0 0 30px rgba(255,79,216,0.55)' },
+      out: { h: 1, box: 3, color: 'rgba(111,227,255,0.25)', glow: 'none' }
+    };
+    const vis = broken ? { h: 0, box: 3, color: 'transparent', glow: 'none' } : map[st] || map.idle;
+    return Object.assign({}, vis, {
+      margin: broken ? '0' : '0',
+      enter: () => { if (!broken && this.state.bonds[key] === 'idle') set('hover'); },
+      leave: () => { if (!broken && this.state.bonds[key] !== 'drag') set('idle'); },
+      down: () => { if (!broken) set('drag'); },
+      up: () => { if (!broken) set('hover'); },
+      discharge: () => {
+        if (broken) return;
+        this.timers = this.timers || [];
+        const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduced) {
+          this.setState(s => ({ broken: Object.assign({}, s.broken, { [key]: true }), bonds: Object.assign({}, s.bonds, { [key]: 'idle' }) }));
+          return;
+        }
+        set('bloom');
+        this.timers.push(setTimeout(() => set('out'), 60));
+        this.timers.push(setTimeout(() => this.setState(s => ({
+          broken: Object.assign({}, s.broken, { [key]: true }),
+          bonds: Object.assign({}, s.bonds, { [key]: 'idle' })
+        })), 120));
+      }
+    });
+  }
+  renderVals() {
+    const s = this.state;
+    const bonded = [!s.broken.a, !s.broken.b].filter(Boolean).length;
+    return {
+      eqOn: s.eqOn, plOn: s.plOn,
+      mainShade: s.mainShade, eqShade: s.eqShade, plShade: s.plShade, plH: s.plH,
+      showSeamA: s.eqOn || s.plOn, showSeamB: s.plOn && s.eqOn,
+      seamA: this.seam('a'), seamB: this.seam('b'),
+      bondStatus: bonded === 2 ? '2 BONDS LIVE' : (bonded === 1 ? '1 BOND LIVE · 1 BROKEN' : 'ALL BONDS BROKEN'),
+      toggleEq: () => this.setState(st => ({ eqOn: !st.eqOn })),
+      togglePl: () => this.setState(st => ({ plOn: !st.plOn })),
+      setMainShade: (v) => this.setState({ mainShade: v }),
+      setEqShade: (v) => this.setState({ eqShade: v }),
+      setPlShade: (v) => this.setState({ plShade: v }),
+      shadeAll: () => this.setState({ mainShade: true, eqShade: true, plShade: true }),
+      growPl: () => this.setState(st => ({ plH: st.plH >= 236 ? 116 : st.plH + 10 })),
+      resetStack: () => this.setState({ eqOn: true, plOn: true, mainShade: false, eqShade: false, plShade: false, plH: 116, bonds: { a: 'idle', b: 'idle' }, broken: { a: false, b: false } })
+    };
+  }
+}
+</script>
+</body>
+</html>

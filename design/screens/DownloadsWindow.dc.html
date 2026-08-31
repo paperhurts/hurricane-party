@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:720px;height:560px;box-sizing:border-box;background:#0C0A14;color:#E8F4FF;font:400 13px/1.45 'Iosevka Aile Web','Iosevka Web',ui-sans-serif,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 0 0 1px rgba(111,227,255,0.22),0 24px 60px rgba(0,0,0,0.65)">
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#0A0812">
+    <div style="display:flex;align-items:center;gap:9px;padding-left:12px;font-size:12px;color:rgba(232,244,255,0.75)">
+      <div style="width:8px;height:8px;background:#6FE3FF;box-shadow:0 0 6px rgba(111,227,255,0.8)"></div>
+      <span>Downloads — Radar</span>
+    </div>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 10px;background:rgba(255,179,71,0.10);box-shadow:inset 0 0 0 1px rgba(255,179,71,0.45);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:#FFB347">
+        <div style="width:5px;height:5px;background:#FFB347;box-shadow:0 0 6px rgba(255,179,71,0.8)"></div>
+        <span>OFFLINE · ALL JOBS HELD</span>
+      </div>
+    </sc-if>
+    <div style="display:flex">
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">─</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(111,227,255,0.10);color:#6FE3FF">▢</div>
+      <div style="width:46px;height:32px;display:grid;place-items:center;font-size:11px;color:rgba(232,244,255,0.6)" style-hover="background:rgba(255,79,216,0.18);color:#FF4FD8">✕</div>
+    </div>
+  </div>
+  <div style="height:1px;flex:0 0 auto;background:linear-gradient(90deg,rgba(111,227,255,0.12),rgba(111,227,255,0.55) 18%,rgba(111,227,255,0.55) 82%,rgba(111,227,255,0.12));box-shadow:0 1px 10px rgba(111,227,255,0.22)"></div>
+
+  <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 60px;text-align:center">
+      <div style="font-size:18px;color:#E8F4FF;text-shadow:0 0 16px rgba(111,227,255,0.28)">Nothing downloading.</div>
+      <div style="font-size:13px;color:rgba(232,244,255,0.5);text-wrap:pretty">Imports land here and start on their own. Two at a time by default, so the connection stays usable.</div>
+      <div style="margin-top:6px;height:34px;display:flex;align-items:center;padding:0 16px;font-size:13px;color:#6FE3FF;box-shadow:inset 0 0 0 1px #6FE3FF,0 0 18px rgba(111,227,255,0.25);cursor:default">Import a link</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:14px;padding:18px 18px 0">
+      <div style="display:flex;align-items:center;gap:10px;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px;color:#6FE3FF">
+        <span>STARTING HELPERS · YT-DLP, FFMPEG</span>
+        <div style="flex:1 1 auto;height:2px;background:rgba(111,227,255,0.10)"><div style="width:44%;height:2px;background:#6FE3FF;box-shadow:0 0 8px rgba(111,227,255,0.7)"></div></div>
+      </div>
+      <sc-for list="{{ skeleton }}" as="k" hint-placeholder-count="6">
+        <div style="height:52px;padding:10px 12px;box-sizing:border-box;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.10);display:flex;flex-direction:column;gap:9px">
+          <div style="height:9px;background:#14111f;width: {{ k.w }}%"></div>
+          <div style="height:3px;background:#12101c"></div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasJobs }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column">
+      <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:0 0 auto;margin:14px 18px 0;padding:12px 14px;background:rgba(255,79,216,0.06);box-shadow:inset 0 0 0 1px rgba(255,79,216,0.4);display:flex;align-items:center;gap:14px">
+          <div style="flex:1 1 auto">
+            <div style="font-size:13px;color:#E8F4FF">3 downloads failed. Two hit a private video, one ran out of disk.</div>
+            <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:#FF4FD8;margin-top:6px">THE QUEUE KEPT GOING · NOTHING ELSE WAS LOST</div>
+          </div>
+          <div style="flex:0 0 auto;height:30px;display:flex;align-items:center;padding:0 13px;font-size:12px;color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8,0 0 14px rgba(255,79,216,0.22);cursor:default">Retry all</div>
+        </div>
+      </sc-if>
+
+      <div style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:16px 18px 8px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color: {{ activeHeadInk }}">{{ activeHead }}</div>
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ rateInk }}">{{ rateLine }}</div>
+      </div>
+      <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px;padding:0 18px">
+        <sc-for list="{{ active }}" as="j" hint-placeholder-count="2">
+          <div style="padding:10px 12px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;color: {{ j.ink }}">{{ j.title }}</div>
+              <div style="flex:0 0 auto;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color:rgba(232,244,255,0.45)">{{ j.detail }}</div>
+              <div style="flex:0 0 auto;width:52px;height:22px;display:grid;place-items:center;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ j.btnInk }};box-shadow: {{ j.btnRing }};cursor:default">{{ j.btn }}</div>
+              <div style="flex:0 0 auto;width:22px;height:22px;display:grid;place-items:center;font-size:10px;color:rgba(232,244,255,0.45);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.14);cursor:default" style-hover="color:#FF4FD8;box-shadow:inset 0 0 0 1px #FF4FD8">✕</div>
+            </div>
+            <div style="height:4px;background:rgba(111,227,255,0.08)">
+              <div style="height:4px;background: {{ j.barColor }};box-shadow: {{ j.barGlow }};width: {{ j.pct }}%"></div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:18px 18px 8px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px;color:rgba(232,244,255,0.4)">{{ queuedHead }}</div>
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.3)">DRAG TO REORDER</div>
+      </div>
+      <div style="flex:1 1 auto;min-height:0;overflow:hidden;margin:0 18px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.12)">
+        <sc-for list="{{ queued }}" as="q" hint-placeholder-count="5">
+          <div style="height:30px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(111,227,255,0.05);font-size:12px">
+            <div style="width:6px;height:6px;flex:0 0 auto;background: {{ q.lamp }};box-shadow:0 0 6px {{ q.lamp }}"></div>
+            <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color: {{ q.ink }}">{{ q.title }}</div>
+            <div style="flex:0 0 auto;font:400 11px/1 'Iosevka Web',ui-monospace,monospace;color:rgba(232,244,255,0.32)">{{ q.size }}</div>
+            <div style="flex:0 0 auto;width:96px;text-align:right;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color: {{ q.stateInk }}">{{ q.state }}</div>
+            <div style="flex:0 0 auto;width:46px;height:20px;display:grid;place-items:center;font:400 10px/1 'Iosevka Web',ui-monospace,monospace;color: {{ q.actionInk }};box-shadow: {{ q.actionRing }};cursor:default">{{ q.action }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <div style="height:32px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0A0812;border-top:1px solid rgba(111,227,255,0.10);font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.8px;color:rgba(232,244,255,0.42)">
+    <span style="color: {{ statusLeftInk }}">{{ statusLeft }}</span>
+    <span>{{ statusRight }}</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:560},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;loading&quot;,&quot;populated&quot;,&quot;error&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;populated&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const ACTIVE = [
+  ['Cat 5 — full documentary', 62, '1.4 GB · 8.2 MB/s · 2 min left'],
+  ['Alachua County EOC briefing — Sep 26', 24, '892 MB · 6.1 MB/s · 3 min left']
+];
+const QUEUED = [
+  ['Generator repair — Honda EU2200i', '498 MB', 'QUEUED'],
+  ['Hurricane Prep Checklist 2026', '284 MB', 'QUEUED'],
+  ['KEC50 Gainesville — NOAA', '38 MB', 'QUEUED'],
+  ['Storm (Levez Vos Skinny Fists)', '412 MB', 'FAILED · PRIVATE'],
+  ['Windowlicker', '132 MB', 'FAILED · NO DISK'],
+  ['Boil water notice — how to', '54 MB', 'QUEUED']
+];
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.props.state || 'populated';
+    const offline = st === 'offline', loading = st === 'loading', empty = st === 'empty', error = st === 'error';
+    const active = ACTIVE.map((a, i) => ({
+      title: a[0], pct: offline ? a[1] : a[1],
+      detail: offline ? 'HELD AT ' + a[1] + '% · RESUMES ON RECONNECT' : a[2],
+      ink: offline ? 'rgba(232,244,255,0.6)' : '#E8F4FF',
+      barColor: offline ? 'rgba(255,179,71,0.55)' : '#6FE3FF',
+      barGlow: offline ? 'none' : '0 0 10px rgba(111,227,255,0.7)',
+      btn: offline ? 'HELD' : 'PAUSE',
+      btnInk: offline ? '#FFB347' : 'rgba(232,244,255,0.6)',
+      btnRing: offline ? 'inset 0 0 0 1px rgba(255,179,71,0.4)' : 'inset 0 0 0 1px rgba(111,227,255,0.2)'
+    }));
+    const queued = QUEUED.map(q => {
+      const failed = q[2].indexOf('FAILED') === 0;
+      return {
+        title: q[0], size: q[1], state: offline && !failed ? 'WAITING FOR NETWORK' : q[2],
+        lamp: failed ? '#FF4FD8' : (offline ? 'rgba(255,179,71,0.7)' : 'rgba(111,227,255,0.4)'),
+        ink: failed ? '#E8F4FF' : (offline ? 'rgba(232,244,255,0.5)' : 'rgba(232,244,255,0.8)'),
+        stateInk: failed ? '#FF4FD8' : (offline ? '#FFB347' : 'rgba(232,244,255,0.35)'),
+        action: failed ? 'RETRY' : 'CANCEL',
+        actionInk: failed ? (offline ? 'rgba(232,244,255,0.25)' : '#FF4FD8') : 'rgba(232,244,255,0.5)',
+        actionRing: failed ? (offline ? 'inset 0 0 0 1px rgba(111,227,255,0.10)' : 'inset 0 0 0 1px rgba(255,79,216,0.5)') : 'inset 0 0 0 1px rgba(111,227,255,0.14)'
+      };
+    });
+    return {
+      isOffline: offline, isLoading: loading, isEmpty: empty, isError: error,
+      hasJobs: !empty && !loading,
+      active, queued,
+      skeleton: [58, 72, 46, 64, 51, 68].map(w => ({ w })),
+      activeHead: offline ? 'HELD · 2 JOBS' : 'ACTIVE · 2 OF 2 SLOTS',
+      activeHeadInk: offline ? '#FFB347' : '#6FE3FF',
+      rateLine: offline ? 'NO NETWORK SINCE 02:11' : '14.3 MB/S COMBINED',
+      rateInk: offline ? '#FFB347' : 'rgba(232,244,255,0.45)',
+      queuedHead: error ? 'QUEUED · 4 WAITING · 3 FAILED' : (offline ? 'QUEUED · 6 WAITING' : 'QUEUED · 4 WAITING · 2 FAILED'),
+      skeletonHead: '',
+      statusLeft: empty ? 'IDLE'
+        : loading ? 'STARTING'
+        : offline ? 'PAUSED — NO NETWORK. RADAR RESUMES ON ITS OWN.'
+        : error ? '3 FAILED · RETRY ALL, OR HANDLE THEM ONE AT A TIME'
+        : '2 ACTIVE · 4 QUEUED · 1.2 GB WRITTEN THIS SESSION',
+      statusLeftInk: offline ? '#FFB347' : (error ? '#FF4FD8' : 'rgba(232,244,255,0.42)'),
+      statusRight: '41 GB FREE'
+    };
+  }
+}
+</script>
+</body>
+</html>

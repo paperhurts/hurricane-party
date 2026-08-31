@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="width:275px;height:11px;box-sizing:border-box;display:flex;align-items:center;gap:4px;padding:0 4px;background: {{ bg }};box-shadow: {{ ring }};font:400 6px/1 Iosevka,'Iosevka Web',ui-monospace,'DejaVu Sans Mono',monospace">
+  <div style="width:3px;height:3px;flex:0 0 auto;background: {{ lamp }};box-shadow:0 0 5px {{ lamp }}"></div>
+  <div style="flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.5px;color: {{ ink }}">{{ readout }}</div>
+  <div style="flex:0 0 auto;display:flex;gap:1px;align-items:center">
+    <sc-for list="{{ frames }}" as="f" hint-placeholder-count="8">
+      <div style="width:2px;height:4px;background: {{ f.color }}"></div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:275,&quot;height&quot;:11},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;live&quot;,&quot;stale&quot;,&quot;nodata&quot;],&quot;default&quot;:&quot;stale&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.mode || 'live';
+    const live = mode === 'live', stale = mode === 'stale';
+    const frames = live
+      ? ['rgba(111,227,255,0.25)', 'rgba(111,227,255,0.35)', 'rgba(111,227,255,0.45)', 'rgba(111,227,255,0.55)', 'rgba(111,227,255,0.65)', 'rgba(111,227,255,0.8)', '#6FE3FF', '#E8F4FF']
+      : stale
+        ? ['rgba(255,179,71,0.18)', 'rgba(255,179,71,0.24)', 'rgba(255,179,71,0.3)', 'rgba(255,179,71,0.36)', 'rgba(255,179,71,0.44)', 'rgba(255,179,71,0.55)', 'rgba(255,179,71,0.7)', '#FFB347']
+        : ['rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)', 'rgba(232,244,255,0.1)'];
+    return {
+      frames: frames.map(c => ({ color: c })),
+      readout: live ? 'RADAR · 18:44 EDT · 2m old · LIVE'
+        : stale ? 'RADAR · 14:32 EDT · 4h 12m old · OFFLINE'
+        : 'RADAR · NO DATA · EYEWALL FALLBACK',
+      ink: live ? '#6FE3FF' : (stale ? '#FFB347' : 'rgba(232,244,255,0.35)'),
+      lamp: live ? '#6FE3FF' : (stale ? '#FFB347' : 'rgba(232,244,255,0.2)'),
+      bg: live ? 'rgba(5,4,10,0.85)' : (stale ? 'rgba(255,179,71,0.10)' : 'rgba(5,4,10,0.85)'),
+      ring: stale ? 'inset 0 0 0 1px rgba(255,179,71,0.45)' : 'inset 0 0 0 1px rgba(111,227,255,0.16)'
+    };
+  }
+}
+</script>
+</body>
+</html>
