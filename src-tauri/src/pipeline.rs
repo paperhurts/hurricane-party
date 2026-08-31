@@ -180,21 +180,6 @@ pub(crate) fn validate_url(raw: &str) -> Result<String> {
     }
 }
 
-/// yt-dlp ids become filenames. Ids come from 1800+ extractors, so treat them
-/// as untrusted: a separator or `..` would escape the library directory.
-fn safe_stem(id: &str) -> String {
-    let cleaned: String = id
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .take(96)
-        .collect();
-    if cleaned.is_empty() {
-        "untitled".into()
-    } else {
-        cleaned
-    }
-}
-
 /// Phase 1 — probe. No download. Cheap enough to run on paste.
 pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Probed> {
     let url = &validate_url(url)?;
@@ -304,8 +289,10 @@ fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u
 /// Phase 2 — fetch the best audio stream to a deterministic path.
 async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
     let root = library_root(app)?;
-    let stem = safe_stem(&probed.id);
-    let outtmpl = root.join(format!("{stem}.%(ext)s"));
+    // architecture.md's template. Human-readable on disk, and the trailing
+    // `[id]` keeps the file findable for resume without parsing yt-dlp's
+    // stdout for the filename it chose.
+    let outtmpl = root.join("%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s");
 
     let mut args = ytdlp_base();
     args.extend([
@@ -314,6 +301,18 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
         // a video stream we'd immediately discard.
         "-f".to_string(),
         "bestaudio/best".into(),
+        // Without these the MP3 has no tags at all and every media library on
+        // the machine shows a blank Title/Artist. architecture.md asked for
+        // them; the first cut dropped them.
+        "--embed-metadata".into(),
+        // NOT --embed-thumbnail: the intermediate is webm/opus, and yt-dlp
+        // hard-errors ("Supported filetypes for thumbnail embedding are: mp3,
+        // mkv/mka, ogg/opus/flac, m4a/mp4/m4v/mov") which fails the whole job
+        // after a successful download. Write the art out and attach it at the
+        // ffmpeg step, where the container is MP3 and supports it.
+        "--write-thumbnail".into(),
+        "--convert-thumbnails".into(),
+        "jpg".into(),
         "--continue".into(), // D26: resume, don't restart
         "--newline".into(),  // without this every progress line concatenates
         "--progress-template".into(),
@@ -379,22 +378,79 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
 
     // Deterministic path is why the probe ran first: scan for <id>.* rather
     // than parsing the filename back out of yt-dlp's chatter.
-    find_by_stem(&root, &stem)
-        .ok_or_else(|| PipelineError::MissingOutput(root.join(&stem).display().to_string()))
+    find_by_id(&root, &probed.id)
+        .ok_or_else(|| PipelineError::MissingOutput(format!("{} [{}]", root.display(), probed.id)))
 }
 
-fn find_by_stem(dir: &Path, stem: &str) -> Option<PathBuf> {
-    std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).find_map(|e| {
-        let p = e.path();
-        let matches = p.file_stem().and_then(|s| s.to_str()) == Some(stem)
-            && p.extension().and_then(|s| s.to_str()) != Some("part");
-        matches.then_some(p)
-    })
+/// Locate a downloaded file by the `[id]` yt-dlp writes into its name.
+///
+/// Recursive, because the template nests by extractor and uploader. Skips
+/// `.part` files — a partial is not a result, it is the thing `--continue`
+/// will finish.
+fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
+    let marker = format!("[{id}]");
+    fn walk(dir: &Path, marker: &str, depth: usize) -> Option<PathBuf> {
+        if depth > 6 {
+            return None; // the template is 3 deep; this is a symlink-loop guard
+        }
+        let entries = std::fs::read_dir(dir).ok()?;
+        let mut dirs = Vec::new();
+        let mut best: Option<PathBuf> = None;
+        for e in entries.filter_map(|e| e.ok()) {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+                continue;
+            }
+            // The thumbnail yt-dlp writes shares the stem exactly, so match on
+            // extension too or the "downloaded file" turns out to be a JPEG.
+            if !is_media_ext(&p) {
+                continue;
+            }
+            if p.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|stem| stem.ends_with(marker))
+            {
+                // Prefer the finished MP3 if both it and its source are here.
+                if p.extension().and_then(|s| s.to_str()) == Some("mp3") {
+                    return Some(p);
+                }
+                best.get_or_insert(p);
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+        dirs.into_iter().find_map(|d| walk(&d, marker, depth + 1))
+    }
+    let found = walk(root, &marker, 0)?;
+    // The walk starts at the library root, but assert containment anyway: this
+    // path is about to be handed to ffmpeg and then to the asset protocol.
+    is_within(root, &found).then_some(found)
+}
+
+/// Audio/video containers only. Excludes the `.jpg` thumbnail, `.info.json`,
+/// subtitle sidecars, and `.part` files.
+fn is_media_ext(p: &Path) -> bool {
+    matches!(
+        p.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).as_deref(),
+        Some("mp3" | "m4a" | "webm" | "opus" | "ogg" | "oga" | "mp4"
+            | "mkv" | "flac" | "wav" | "aac" | "mov" | "m4v")
+    )
+}
+
+/// Is `path` inside `root`? Guards the one place an untrusted-ish path reaches
+/// a sidecar argument and, later, the webview's asset scope.
+fn is_within(root: &Path, path: &Path) -> bool {
+    match (root.canonicalize(), path.canonicalize()) {
+        (Ok(r), Ok(p)) => p.starts_with(r),
+        _ => false,
+    }
 }
 
 /// Phase 3 — derive the MP3 locally (D3).
 async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
-    let dest = src.with_file_name(format!("{}.mp3", safe_stem(&probed.id)));
+    let dest = src.with_extension("mp3");
     if dest == src {
         return Ok(dest); // already an mp3
     }
@@ -413,20 +469,49 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
         },
     );
 
+    // yt-dlp wrote the cover next to the audio (--write-thumbnail). MP3 is the
+    // first container in this pipeline that can actually hold it.
+    let cover = src.with_extension("jpg");
+    let has_cover = cover.exists();
+
+    let mut args: Vec<String> = vec![
+        "-hide_banner".into(),
+        "-loglevel".into(), "error".into(),
+        "-y".into(),
+        "-i".into(), src.to_string_lossy().into_owned(),
+    ];
+    if has_cover {
+        args.extend(["-i".into(), cover.to_string_lossy().into_owned()]);
+        // Audio from input 0, artwork from input 1, copied rather than
+        // re-encoded. id3v2.3 because some players still ignore 2.4.
+        args.extend([
+            "-map".into(), "0:a".into(),
+            "-map".into(), "1:v".into(),
+            "-c:v".into(), "copy".into(),
+            "-id3v2_version".into(), "3".into(),
+            "-metadata:s:v".into(), "title=Album cover".into(),
+            "-metadata:s:v".into(), "comment=Cover (front)".into(),
+        ]);
+    } else {
+        args.extend(["-map".into(), "0:a".into()]);
+    }
+    args.extend([
+        "-map_metadata".into(), "0".into(),
+        "-c:a".into(), "libmp3lame".into(),
+        "-q:a".into(), "2".into(),
+        // Set these explicitly rather than relying on the carried tags: the
+        // probe already knows the real title and uploader, and an empty
+        // Title column in Explorer is exactly what this change is fixing.
+        "-metadata".into(), format!("title={}", probed.title),
+        "-metadata".into(), format!("artist={}", probed.uploader.clone().unwrap_or_default()),
+        dest.to_string_lossy().into_owned(),
+    ]);
+
     let (mut rx, _child) = app
         .shell()
         .sidecar("ffmpeg")
         .map_err(|e| PipelineError::Sidecar(format!("ffmpeg sidecar missing: {e}")))?
-        .args([
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",
-            "-i", &src.to_string_lossy(),
-            "-vn",
-            "-c:a", "libmp3lame",
-            "-q:a", "2",
-            &dest.to_string_lossy(),
-        ])
+        .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start ffmpeg: {e}")))?;
 
@@ -445,8 +530,16 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
         return Err(PipelineError::Ffmpeg { code, tail: tail.text() });
     }
 
-    // The source stream was only ever a means to the MP3.
+    // The source stream and the loose cover were only ever means to the MP3.
+    // Leaving them would double the library's size on disk and clutter a
+    // folder the user is meant to be able to browse.
     let _ = std::fs::remove_file(src);
+    if has_cover {
+        let _ = std::fs::remove_file(&cover);
+    }
+    for stray in ["webp", "png", "info.json"] {
+        let _ = std::fs::remove_file(src.with_extension(stray));
+    }
     Ok(dest)
 }
 
@@ -479,21 +572,27 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track
     }
 
     let root = library_root(app)?;
-    let stem = safe_stem(&probed.id);
-    let finished = root.join(format!("{stem}.mp3"));
 
-    let mp3 = if finished.exists() {
-        // Already converted on a previous run; the kill happened after this.
-        finished
-    } else {
-        let source = match find_by_stem(&root, &stem) {
-            // A complete source stream survived the kill — the download is
-            // done, only the extract needs redoing.
-            Some(existing) => existing,
-            // Either a `.part` (yt-dlp resumes it with --continue) or nothing.
-            None => download_audio(app, url, &probed, job_id).await?,
-        };
-        extract_mp3(app, url, &source, &probed, job_id).await?
+    // Resume derives its recovery from what is on disk, not from the recorded
+    // stage: a status column is written by a process that then died, possibly
+    // between the write and its effect. The filesystem cannot disagree with
+    // itself that way.
+    let existing = find_by_id(&root, &probed.id);
+    let already_mp3 = existing
+        .as_deref()
+        .is_some_and(|p| p.extension().and_then(|s| s.to_str()) == Some("mp3"));
+
+    let mp3 = match existing {
+        // The finished MP3 survived; the kill happened after conversion.
+        Some(p) if already_mp3 => p,
+        // A complete source stream survived — the download is done, only the
+        // extract needs redoing.
+        Some(source) => extract_mp3(app, url, &source, &probed, job_id).await?,
+        // Either a `.part` (which `--continue` picks up mid-file) or nothing.
+        None => {
+            let source = download_audio(app, url, &probed, job_id).await?;
+            extract_mp3(app, url, &source, &probed, job_id).await?
+        }
     };
 
     let filesize = std::fs::metadata(&mp3).map(|m| m.len()).unwrap_or(0);
@@ -565,28 +664,43 @@ mod tests {
         assert!(validate_url("   ").is_err());
     }
 
-    /// Ids become filenames and come from 1800+ extractors, so a separator or
-    /// `..` must not survive into a path.
+    /// The path handed to ffmpeg and later to the webview's asset scope must
+    /// be inside the library root. This is where the old `safe_stem` guard
+    /// moved to: nothing builds a path out of an extractor-supplied id any
+    /// more, so the check belongs on the resolved path instead.
     #[test]
-    fn stem_cannot_escape_the_library_dir() {
-        assert_eq!(safe_stem("../../etc/passwd"), "etcpasswd");
-        assert_eq!(safe_stem(r"a/b\c"), "abc");
-        assert_eq!(safe_stem(".."), "untitled");
-        assert_eq!(safe_stem(""), "untitled");
+    fn containment_check_rejects_escapes() {
+        let tmp = std::env::temp_dir().join("hp-contain-test");
+        let inner = tmp.join("lib");
+        std::fs::create_dir_all(&inner).unwrap();
+        let good = inner.join("a.mp3");
+        std::fs::write(&good, b"x").unwrap();
+        let outside = tmp.join("b.mp3");
+        std::fs::write(&outside, b"x").unwrap();
+
+        assert!(is_within(&inner, &good));
+        assert!(!is_within(&inner, &outside));
+        assert!(!is_within(&inner, &inner.join("../b.mp3")));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// YouTube ids legitimately start with '-', which must still work as a
-    /// filename stem — it is only dangerous as an argv position.
+    /// Files are located by the `[id]` yt-dlp writes into the name, so the
+    /// human-readable part can be anything without breaking resume.
     #[test]
-    fn stem_keeps_legitimate_ids() {
-        assert_eq!(safe_stem("jNQXAC9IVRw"), "jNQXAC9IVRw");
-        assert_eq!(safe_stem("-wtf1234567"), "-wtf1234567");
-        assert_eq!(safe_stem("a_b-c123"), "a_b-c123");
-    }
+    fn finds_a_file_by_its_id_marker_at_depth() {
+        let tmp = std::env::temp_dir().join("hp-find-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let nested = tmp.join("youtube").join("Some Artist");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("A Song [abc123].mp3"), b"x").unwrap();
+        // A partial is not a result.
+        std::fs::write(nested.join("Other [zzz999].webm.part"), b"x").unwrap();
 
-    #[test]
-    fn stem_is_length_capped() {
-        assert_eq!(safe_stem(&"a".repeat(500)).len(), 96);
+        let hit = find_by_id(&tmp, "abc123").unwrap();
+        assert_eq!(hit.file_name().unwrap(), "A Song [abc123].mp3");
+        assert!(find_by_id(&tmp, "zzz999").is_none(), "a .part is not a result");
+        assert!(find_by_id(&tmp, "nope").is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Every yt-dlp invocation must terminate option parsing before the URL.
