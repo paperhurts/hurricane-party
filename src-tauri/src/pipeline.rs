@@ -139,6 +139,23 @@ impl Tail {
     }
 }
 
+/// Path to the bundled ffmpeg, which Tauri places beside the main executable.
+///
+/// yt-dlp needs ffmpeg itself for `--embed-metadata` and `--convert-thumbnails`.
+/// Without this it searches PATH — which happens to work on a dev box with
+/// ffmpeg installed, and silently doesn't on a clean machine. That is exactly
+/// the failure this app cannot have the week before a storm.
+fn bundled_ffmpeg() -> Option<PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    for name in ["ffmpeg.exe", "ffmpeg"] {
+        let p = dir.join(name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 /// Args every yt-dlp invocation needs.
 ///
 /// `--js-runtimes deno` is D46. Without a JS runtime, yt-dlp warns that
@@ -295,6 +312,10 @@ async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
     let outtmpl = root.join("%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s");
 
     let mut args = ytdlp_base();
+    // Point yt-dlp at our ffmpeg rather than letting it search PATH.
+    if let Some(ff) = bundled_ffmpeg() {
+        args.extend(["--ffmpeg-location".to_string(), ff.to_string_lossy().into_owned()]);
+    }
     args.extend([
         // Audio only. D3 forbids downloading twice; for an audio-only request
         // architecture.md sanctions skipping video entirely rather than pulling
@@ -404,7 +425,7 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
             }
             // The thumbnail yt-dlp writes shares the stem exactly, so match on
             // extension too or the "downloaded file" turns out to be a JPEG.
-            if !is_media_ext(&p) {
+            if !is_media_ext(&p) || is_scratch(&p) {
                 continue;
             }
             if p.file_stem()
@@ -429,6 +450,21 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
     is_within(root, &found).then_some(found)
 }
 
+/// Remove the intermediate download and the loose artwork once the MP3 exists.
+///
+/// Deliberately NOT inside `extract_mp3`: the resume path can arrive at a
+/// finished MP3 without extracting anything, and cleanup that only runs on one
+/// branch leaves a 64 MB `.webm` sitting next to every interrupted job.
+fn tidy_intermediates(mp3: &Path) {
+    for ext in ["webm", "m4a", "opus", "ogg", "oga", "mp4", "mkv", "aac", "wav",
+                "jpg", "jpeg", "png", "webp", "info.json", "part.mp3"] {
+        let stray = mp3.with_extension(ext);
+        if stray != mp3 {
+            let _ = std::fs::remove_file(stray);
+        }
+    }
+}
+
 /// Audio/video containers only. Excludes the `.jpg` thumbnail, `.info.json`,
 /// subtitle sidecars, and `.part` files.
 fn is_media_ext(p: &Path) -> bool {
@@ -437,6 +473,13 @@ fn is_media_ext(p: &Path) -> bool {
         Some("mp3" | "m4a" | "webm" | "opus" | "ogg" | "oga" | "mp4"
             | "mkv" | "flac" | "wav" | "aac" | "mov" | "m4v")
     )
+}
+
+/// `foo.part.mp3` is a transcode in flight, not a finished track.
+fn is_scratch(p: &Path) -> bool {
+    p.file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|stem| stem.ends_with(".part"))
 }
 
 /// Is `path` inside `root`? Guards the one place an untrusted-ish path reaches
@@ -454,6 +497,15 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
     if dest == src {
         return Ok(dest); // already an mp3
     }
+
+    // Write to a scratch name and rename only on success. A killed ffmpeg
+    // otherwise leaves a truncated file with the finished name, and the resume
+    // path — which prefers an existing .mp3 — would accept it as done. That is
+    // the "resume silently degrades" failure this milestone exists to prevent,
+    // and it is invisible: the file plays, it just stops early.
+    // `.part.mp3` keeps the media extension so a stray is still recognisable,
+    // while `is_scratch` keeps find_by_id from ever returning one.
+    let scratch = src.with_extension("part.mp3");
 
     emit(
         app,
@@ -504,7 +556,7 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
         // Title column in Explorer is exactly what this change is fixing.
         "-metadata".into(), format!("title={}", probed.title),
         "-metadata".into(), format!("artist={}", probed.uploader.clone().unwrap_or_default()),
-        dest.to_string_lossy().into_owned(),
+        scratch.to_string_lossy().into_owned(),
     ]);
 
     let (mut rx, _child) = app
@@ -527,19 +579,14 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
         }
     }
     if code != 0 {
+        let _ = std::fs::remove_file(&scratch);
         return Err(PipelineError::Ffmpeg { code, tail: tail.text() });
     }
 
-    // The source stream and the loose cover were only ever means to the MP3.
-    // Leaving them would double the library's size on disk and clutter a
-    // folder the user is meant to be able to browse.
-    let _ = std::fs::remove_file(src);
-    if has_cover {
-        let _ = std::fs::remove_file(&cover);
-    }
-    for stray in ["webp", "png", "info.json"] {
-        let _ = std::fs::remove_file(src.with_extension(stray));
-    }
+    // Atomic on the same volume: after this the name either doesn't exist or
+    // refers to a complete file. Never both.
+    std::fs::rename(&scratch, &dest)
+        .map_err(|e| PipelineError::Io(format!("couldn't finalise {}: {e}", dest.display())))?;
     Ok(dest)
 }
 
@@ -594,6 +641,10 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64) -> Result<Track
             extract_mp3(app, url, &source, &probed, job_id).await?
         }
     };
+
+    // Runs on every path to a finished MP3, including the resume path that
+    // found one already converted and skipped extraction entirely.
+    tidy_intermediates(&mp3);
 
     let filesize = std::fs::metadata(&mp3).map(|m| m.len()).unwrap_or(0);
 
@@ -681,6 +732,49 @@ mod tests {
         assert!(is_within(&inner, &good));
         assert!(!is_within(&inner, &outside));
         assert!(!is_within(&inner, &inner.join("../b.mp3")));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A transcode killed mid-write leaves `foo.part.mp3`. If the resume path
+    /// ever accepted that as finished, the track would play and stop early —
+    /// a silent truncation, which is the worst shape this bug can take.
+    #[test]
+    fn a_partial_transcode_is_never_mistaken_for_a_result() {
+        let tmp = std::env::temp_dir().join("hp-scratch-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("Song [abc123].part.mp3"), b"truncated").unwrap();
+
+        assert!(is_scratch(Path::new("Song [abc123].part.mp3")));
+        assert!(!is_scratch(Path::new("Song [abc123].mp3")));
+        assert!(
+            find_by_id(&tmp, "abc123").is_none(),
+            "a .part.mp3 must not be returned as the finished track"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Cleanup has to run on every path to a finished MP3, not just the one
+    /// that did the extracting — the resume path can arrive at a converted
+    /// file without extracting anything.
+    #[test]
+    fn tidy_removes_intermediates_but_never_the_mp3() {
+        let tmp = std::env::temp_dir().join("hp-tidy-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mp3 = tmp.join("Song [abc123].mp3");
+        for f in ["Song [abc123].mp3", "Song [abc123].webm", "Song [abc123].jpg",
+                  "Song [abc123].part.mp3", "Keep me [zzz].mp3"] {
+            std::fs::write(tmp.join(f), b"x").unwrap();
+        }
+
+        tidy_intermediates(&mp3);
+
+        assert!(mp3.exists(), "the finished mp3 must survive");
+        assert!(tmp.join("Keep me [zzz].mp3").exists(), "other tracks untouched");
+        for gone in ["Song [abc123].webm", "Song [abc123].jpg", "Song [abc123].part.mp3"] {
+            assert!(!tmp.join(gone).exists(), "{gone} should have been cleaned up");
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
