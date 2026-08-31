@@ -6,6 +6,7 @@ mod localimport;
 mod pipeline;
 pub mod platform;
 mod playlist;
+pub mod wm;
 
 use db::Db;
 use jobs::{Job, RunnerHandle};
@@ -199,6 +200,7 @@ pub fn run() {
         .manage(RunnerHandle::default())
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
+        .manage(wm::Wm::default())
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this
             // process computes after this line depends on the answer, so there
@@ -235,7 +237,13 @@ pub fn run() {
             // Undocumented and unstable until v1.0 (control-api.md). Shipping
             // it now proves the pipe while nothing external depends on it.
             let bc = app.state::<control::Broadcaster>().inner().clone();
-            control::spawn_server(handle, bc);
+            control::spawn_server(handle.clone(), bc);
+
+            // The three classic windows, their hidden roots (D41), and the
+            // ownership topology. Last in setup because it is the only part
+            // that puts pixels on screen.
+            wm::build_classic_windows(&handle)?;
+            wm::register(&handle)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -79,6 +79,25 @@ pub trait WindowPlatform: Send + Sync {
     fn restore_no_activate(&self, w: NativeWindow);
 }
 
+/// The native handle behind a Tauri window.
+///
+/// Kept here rather than in the window manager so that `wm.rs` — which is
+/// otherwise pure logic over `NativeWindow` — needs no `cfg` of its own.
+/// `HWND`'s single field is a raw pointer in every version of the `windows`
+/// crate, so this does not care whether Tauri's copy matches ours.
+#[cfg(windows)]
+pub fn handle_of(w: &tauri::WebviewWindow) -> NativeWindow {
+    match w.hwnd() {
+        Ok(h) => NativeWindow(h.0 as isize),
+        Err(_) => NativeWindow::NONE,
+    }
+}
+
+#[cfg(not(windows))]
+pub fn handle_of(_w: &tauri::WebviewWindow) -> NativeWindow {
+    NativeWindow::NONE
+}
+
 #[cfg(windows)]
 mod windows_impl;
 
