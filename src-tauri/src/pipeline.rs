@@ -306,10 +306,14 @@ fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u
 /// Phase 2 — fetch the best audio stream to a deterministic path.
 async fn download_audio(app: &AppHandle, url: &str, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
     let root = library_root(app)?;
-    // architecture.md's template. Human-readable on disk, and the trailing
-    // `[id]` keeps the file findable for resume without parsing yt-dlp's
-    // stdout for the filename it chose.
-    let outtmpl = root.join("%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s");
+    // Grouped by extractor, flat within it (D49).
+    //
+    // architecture.md's template also nested by `%(uploader)s`, which was
+    // dropped: on YouTube the uploader is the *channel*, not the artist, so it
+    // produced roughly one folder per file for no navigational gain. It is
+    // still captured on `media.uploader`, so nothing is lost — and the app's
+    // own browser is a DB query (O6), not a directory listing.
+    let outtmpl = root.join("%(extractor)s/%(title)s [%(id)s].%(ext)s");
 
     let mut args = ytdlp_base();
     // Point yt-dlp at our ffmpeg rather than letting it search PATH.

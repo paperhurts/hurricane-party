@@ -291,9 +291,13 @@ yt-dlp \
   --continue \
   --newline \
   --progress-template "download:%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s" \
-  -o "%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s" \
+  -o "%(extractor)s/%(title)s [%(id)s].%(ext)s" \
   "<url>"
 ```
+
+**On the output template (D49):** the `%(uploader)s` level that used to sit between extractor and title is gone. On YouTube the uploader is the channel, not the artist, so it produced roughly one folder per file. It's still stored on `media.uploader`, and the library browser is a DB query (O6) rather than a directory listing.
+
+**The trailing `[%(id)s]` is load-bearing, not decoration.** It's how a resumed job finds the file it was part-way through, without parsing yt-dlp's stdout for the name it chose — which is the same class of mistake as screen-scraping the progress bar.
 
 **Use `--progress-template`, not screen-scraping the progress bar.** Pipe-delimited or JSON, parse it in Rust, emit a Tauri event. The human-readable bar changes between releases; the template doesn't.
 
