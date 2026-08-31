@@ -224,8 +224,20 @@ The two points specific to this document that survive:
 
 ---
 
-## Honest risk note
+## Honest risk note — answered by the spike
 
-The Tauri multi-window path here is less traveled than the single-window one. You will hit at least one thing where the cross-platform API doesn't expose what you need and you drop to `windows-rs`. Budget for that rather than being surprised by it — and keep every platform-specific call behind a small trait so the eventual Linux port is a file, not an archaeology project.
+The prediction was right and the magnitude was pessimistic.
 
-The spike de-risks roughly 80% of this. Do the spike.
+> The Tauri multi-window path here is less traveled than the single-window one. You will hit at least one thing where the cross-platform API doesn't expose what you need and you drop to `windows-rs`.
+
+**Measured: four calls** (D44). Ownership get/set via `GWLP_HWNDPARENT` — the real gap, because Tauri exposes `owner()` on *builders* only and has no `set_owner` on a live window — plus `SetWindowPos` for D42's lazy application, plus the D37 DPI assertion. Everything else stages 0–5 needed was covered cross-platform and was already physical-first. **The trait is a file, not an archaeology project.**
+
+The spike returned **go** on the bond model (D45): drag costs one display frame with 0.2–0.8 px over the theoretical floor, owned HWNDs group z-order and re-parent in ~40 µs with no visual disturbance, and bonds form and break correctly with zero drift over twenty group drags and zero seam error across 61 splitter steps in both the model and the OS. The one open question is cross-scale behaviour (stage 6, O14), still blocked on hardware.
+
+### The trap that nearly ate the signature interaction
+
+**Build every window `resizable(false)`, including the playlist** (D43).
+
+For an undecorated *resizable* window, `tauri-runtime-wry` spawns an invisible `TAURI_DRAG_RESIZE_WINDOW` overlay that hit-tests **above** the webview in a band roughly 8 physical px wide at 150%. That band sits exactly on a bond seam — so it covers precisely the edges D35 makes interactive, and it silently kills seam double-clicks and splitter drags alike. `set_size()` still works with resizing off, and the app does its own resizing through the splitter, so the native affordance was never wanted.
+
+Worth noting *how* this was found: the scripted sweeps passed at 0 px error while the real interaction was completely dead, because they bypassed the mouse. It only surfaced when stage 5 required a real double-click. **Test the interaction the way a user performs it, at least once per stage.**
