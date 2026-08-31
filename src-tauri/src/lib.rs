@@ -4,6 +4,7 @@ mod db;
 mod jobs;
 mod localimport;
 mod pipeline;
+pub mod platform;
 mod playlist;
 
 use db::Db;
@@ -199,6 +200,12 @@ pub fn run() {
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
         .setup(|app| {
+            // D37: the gate, and it runs first. Every physical coordinate this
+            // process computes after this line depends on the answer, so there
+            // is no useful work to do if it is wrong. Panics if awareness is
+            // not per-monitor-v2 — deliberately, and permanently.
+            eprintln!("DPI awareness: {}", platform::platform().assert_dpi_aware());
+
             let handle = app.handle().clone();
             let path = handle
                 .path()
