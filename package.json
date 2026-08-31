@@ -1,7 +1,7 @@
 {
   "name": "hurricane-party",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Offline-first media library and player. Grab it before the storm, play it when the grid's down.",
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.2"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
