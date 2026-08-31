@@ -1,3 +1,4 @@
+pub mod bond;
 mod control;
 mod db;
 mod jobs;
