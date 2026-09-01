@@ -4,12 +4,12 @@
 
 use super::{NativeWindow, WindowPlatform};
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, GetAwarenessFromDpiAwarenessContext,
     GetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     DPI_AWARENESS_PER_MONITOR_AWARE, DPI_AWARENESS_SYSTEM_AWARE, DPI_AWARENESS_UNAWARE,
 };
-use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,

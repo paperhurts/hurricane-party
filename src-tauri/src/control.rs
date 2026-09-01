@@ -32,10 +32,15 @@ impl Broadcaster {
         rx
     }
     pub fn send(&self, ev: &Event) {
-        let Ok(line) = serde_json::to_string(ev) else { return };
+        let Ok(line) = serde_json::to_string(ev) else {
+            return;
+        };
         // Dropping closed senders here is the only cleanup: a client that went
         // away is discovered on the next send, not tracked separately.
-        self.0.lock().unwrap().retain(|tx| tx.send(line.clone()).is_ok());
+        self.0
+            .lock()
+            .unwrap()
+            .retain(|tx| tx.send(line.clone()).is_ok());
     }
 }
 
@@ -72,7 +77,10 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
                 Command::Volume(v) => ("volume", serde_json::json!(v)),
                 _ => unreachable!("handled above"),
             };
-            let _ = app.emit("control-command", serde_json::json!({ "cmd": name, "arg": arg }));
+            let _ = app.emit(
+                "control-command",
+                serde_json::json!({ "cmd": name, "arg": arg }),
+            );
             Response::ok(req.id, serde_json::json!({ "accepted": name }))
         }
     }
@@ -170,6 +178,8 @@ pub fn update_state(app: &AppHandle, incoming: PlayerState) {
         });
     }
     if state_changed {
-        bc.send(&Event::StateChanged { state: incoming.state });
+        bc.send(&Event::StateChanged {
+            state: incoming.state,
+        });
     }
 }
