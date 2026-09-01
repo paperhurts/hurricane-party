@@ -189,8 +189,8 @@ pub(crate) fn validate_url(raw: &str) -> Result<String> {
     if s.is_empty() {
         return Err(PipelineError::BadUrl("no URL given".into()));
     }
-    let parsed = url::Url::parse(s)
-        .map_err(|_| PipelineError::BadUrl(format!("{s:?} isn't a URL")))?;
+    let parsed =
+        url::Url::parse(s).map_err(|_| PipelineError::BadUrl(format!("{s:?} isn't a URL")))?;
     match parsed.scheme() {
         "http" | "https" => Ok(parsed.to_string()),
         other => Err(PipelineError::BadUrl(format!(
@@ -218,7 +218,12 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
 
     let mut args = ytdlp_base();
     // `--` ends option parsing: everything after it is a positional argument.
-    args.extend(["-J".to_string(), "--flat-playlist".into(), "--".into(), url.to_string()]);
+    args.extend([
+        "-J".to_string(),
+        "--flat-playlist".into(),
+        "--".into(),
+        url.to_string(),
+    ]);
 
     let (mut rx, _child) = app
         .shell()
@@ -241,7 +246,10 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         }
     }
     if code != 0 {
-        return Err(PipelineError::YtDlp { code, tail: tail.text() });
+        return Err(PipelineError::YtDlp {
+            code,
+            tail: tail.text(),
+        });
     }
 
     let v: serde_json::Value =
@@ -306,7 +314,13 @@ fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u
 }
 
 /// Phase 2 — fetch the best audio stream to a deterministic path.
-async fn download_media(app: &AppHandle, url: &str, probed: &Probed, job_id: Option<i64>, want_video: bool) -> Result<PathBuf> {
+async fn download_media(
+    app: &AppHandle,
+    url: &str,
+    probed: &Probed,
+    job_id: Option<i64>,
+    want_video: bool,
+) -> Result<PathBuf> {
     let root = library_root(app)?;
     // Grouped by extractor, flat within it (D49).
     //
@@ -320,7 +334,10 @@ async fn download_media(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
     let mut args = ytdlp_base();
     // Point yt-dlp at our ffmpeg rather than letting it search PATH.
     if let Some(ff) = bundled_ffmpeg() {
-        args.extend(["--ffmpeg-location".to_string(), ff.to_string_lossy().into_owned()]);
+        args.extend([
+            "--ffmpeg-location".to_string(),
+            ff.to_string_lossy().into_owned(),
+        ]);
     }
     args.extend([
         "-f".to_string(),
@@ -380,8 +397,8 @@ async fn download_media(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
                 let chunk = String::from_utf8_lossy(&b);
                 for line in chunk.lines() {
                     if let Some((done, total, speed, eta, _status)) = parse_progress(line) {
-                        let persist = last_persist.elapsed()
-                            >= std::time::Duration::from_millis(250);
+                        let persist =
+                            last_persist.elapsed() >= std::time::Duration::from_millis(250);
                         if persist {
                             last_persist = std::time::Instant::now();
                         }
@@ -407,7 +424,10 @@ async fn download_media(app: &AppHandle, url: &str, probed: &Probed, job_id: Opt
         }
     }
     if code != 0 {
-        return Err(PipelineError::YtDlp { code, tail: tail.text() });
+        return Err(PipelineError::YtDlp {
+            code,
+            tail: tail.text(),
+        });
     }
 
     // Deterministic path is why the probe ran first: scan for <id>.* rather
@@ -470,8 +490,23 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
 /// at all. Cleanup that only runs on one branch leaves a 64 MB `.webm` next to
 /// every interrupted job, and a stray cover next to every video.
 fn tidy_intermediates(keep: &Path) {
-    for ext in ["webm", "m4a", "opus", "ogg", "oga", "mp4", "mkv", "aac", "wav",
-                "jpg", "jpeg", "png", "webp", "info.json", "part.mp3"] {
+    for ext in [
+        "webm",
+        "m4a",
+        "opus",
+        "ogg",
+        "oga",
+        "mp4",
+        "mkv",
+        "aac",
+        "wav",
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "info.json",
+        "part.mp3",
+    ] {
         let stray = keep.with_extension(ext);
         // The guard is what makes this safe to call with either an .mp3 or an
         // .mp4 as the thing being kept: the result's own extension is in the
@@ -486,9 +521,25 @@ fn tidy_intermediates(keep: &Path) {
 /// subtitle sidecars, and `.part` files.
 fn is_media_ext(p: &Path) -> bool {
     matches!(
-        p.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).as_deref(),
-        Some("mp3" | "m4a" | "webm" | "opus" | "ogg" | "oga" | "mp4"
-            | "mkv" | "flac" | "wav" | "aac" | "mov" | "m4v")
+        p.extension()
+            .and_then(|s| s.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some(
+            "mp3"
+                | "m4a"
+                | "webm"
+                | "opus"
+                | "ogg"
+                | "oga"
+                | "mp4"
+                | "mkv"
+                | "flac"
+                | "wav"
+                | "aac"
+                | "mov"
+                | "m4v"
+        )
     )
 }
 
@@ -509,7 +560,13 @@ fn is_within(root: &Path, path: &Path) -> bool {
 }
 
 /// Phase 3 — derive the MP3 locally (D3).
-async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, job_id: Option<i64>) -> Result<PathBuf> {
+async fn extract_mp3(
+    app: &AppHandle,
+    url: &str,
+    src: &Path,
+    probed: &Probed,
+    job_id: Option<i64>,
+) -> Result<PathBuf> {
     let dest = src.with_extension("mp3");
     if dest == src {
         return Ok(dest); // already an mp3
@@ -545,34 +602,47 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
 
     let mut args: Vec<String> = vec![
         "-hide_banner".into(),
-        "-loglevel".into(), "error".into(),
+        "-loglevel".into(),
+        "error".into(),
         "-y".into(),
-        "-i".into(), src.to_string_lossy().into_owned(),
+        "-i".into(),
+        src.to_string_lossy().into_owned(),
     ];
     if has_cover {
         args.extend(["-i".into(), cover.to_string_lossy().into_owned()]);
         // Audio from input 0, artwork from input 1, copied rather than
         // re-encoded. id3v2.3 because some players still ignore 2.4.
         args.extend([
-            "-map".into(), "0:a".into(),
-            "-map".into(), "1:v".into(),
-            "-c:v".into(), "copy".into(),
-            "-id3v2_version".into(), "3".into(),
-            "-metadata:s:v".into(), "title=Album cover".into(),
-            "-metadata:s:v".into(), "comment=Cover (front)".into(),
+            "-map".into(),
+            "0:a".into(),
+            "-map".into(),
+            "1:v".into(),
+            "-c:v".into(),
+            "copy".into(),
+            "-id3v2_version".into(),
+            "3".into(),
+            "-metadata:s:v".into(),
+            "title=Album cover".into(),
+            "-metadata:s:v".into(),
+            "comment=Cover (front)".into(),
         ]);
     } else {
         args.extend(["-map".into(), "0:a".into()]);
     }
     args.extend([
-        "-map_metadata".into(), "0".into(),
-        "-c:a".into(), "libmp3lame".into(),
-        "-q:a".into(), "2".into(),
+        "-map_metadata".into(),
+        "0".into(),
+        "-c:a".into(),
+        "libmp3lame".into(),
+        "-q:a".into(),
+        "2".into(),
         // Set these explicitly rather than relying on the carried tags: the
         // probe already knows the real title and uploader, and an empty
         // Title column in Explorer is exactly what this change is fixing.
-        "-metadata".into(), format!("title={}", probed.title),
-        "-metadata".into(), format!("artist={}", probed.uploader.clone().unwrap_or_default()),
+        "-metadata".into(),
+        format!("title={}", probed.title),
+        "-metadata".into(),
+        format!("artist={}", probed.uploader.clone().unwrap_or_default()),
         scratch.to_string_lossy().into_owned(),
     ]);
 
@@ -597,7 +667,10 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
     }
     if code != 0 {
         let _ = std::fs::remove_file(&scratch);
-        return Err(PipelineError::Ffmpeg { code, tail: tail.text() });
+        return Err(PipelineError::Ffmpeg {
+            code,
+            tail: tail.text(),
+        });
     }
 
     // Atomic on the same volume: after this the name either doesn't exist or
@@ -622,7 +695,12 @@ async fn extract_mp3(app: &AppHandle, url: &str, src: &Path, probed: &Probed, jo
 /// | nothing | fetch from the start |
 ///
 /// The recorded `stage` still drives the UI; it just isn't the source of truth.
-pub async fn import_job(app: &AppHandle, url: &str, job_id: i64, want_video: bool) -> Result<Track> {
+pub async fn import_job(
+    app: &AppHandle,
+    url: &str,
+    job_id: i64,
+    want_video: bool,
+) -> Result<Track> {
     let job_id = Some(job_id);
     let url = &validate_url(url)?;
     let probed = probe(app, url, job_id).await?;
@@ -654,16 +732,27 @@ pub async fn import_job(app: &AppHandle, url: &str, job_id: i64, want_video: boo
         tidy_intermediates(&file);
 
         let filesize = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-        emit(app, job_id, Progress {
-            url: url.into(), stage: "done", bytes_done: filesize,
-            bytes_total: Some(filesize), speed_bps: None, eta_s: None,
-            note: Some(probed.title.clone()),
-        });
+        emit(
+            app,
+            job_id,
+            Progress {
+                url: url.into(),
+                stage: "done",
+                bytes_done: filesize,
+                bytes_total: Some(filesize),
+                speed_bps: None,
+                eta_s: None,
+                note: Some(probed.title.clone()),
+            },
+        );
         return Ok(Track {
-            id: probed.id, title: probed.title, uploader: probed.uploader,
+            id: probed.id,
+            title: probed.title,
+            uploader: probed.uploader,
             duration_s: probed.duration_s,
             path: file.to_string_lossy().to_string(),
-            filesize, kind: "video".into(),
+            filesize,
+            kind: "video".into(),
         });
     }
 
@@ -748,7 +837,12 @@ mod tests {
 
     #[test]
     fn rejects_non_http_schemes() {
-        for u in ["file:///etc/passwd", "ftp://x/y", "javascript:alert(1)", "data:text/html,x"] {
+        for u in [
+            "file:///etc/passwd",
+            "ftp://x/y",
+            "javascript:alert(1)",
+            "data:text/html,x",
+        ] {
             assert!(validate_url(u).is_err(), "should reject {u:?}");
         }
     }
@@ -807,17 +901,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let mp3 = tmp.join("Song [abc123].mp3");
-        for f in ["Song [abc123].mp3", "Song [abc123].webm", "Song [abc123].jpg",
-                  "Song [abc123].part.mp3", "Keep me [zzz].mp3"] {
+        for f in [
+            "Song [abc123].mp3",
+            "Song [abc123].webm",
+            "Song [abc123].jpg",
+            "Song [abc123].part.mp3",
+            "Keep me [zzz].mp3",
+        ] {
             std::fs::write(tmp.join(f), b"x").unwrap();
         }
 
         tidy_intermediates(&mp3);
 
         assert!(mp3.exists(), "the finished mp3 must survive");
-        assert!(tmp.join("Keep me [zzz].mp3").exists(), "other tracks untouched");
-        for gone in ["Song [abc123].webm", "Song [abc123].jpg", "Song [abc123].part.mp3"] {
-            assert!(!tmp.join(gone).exists(), "{gone} should have been cleaned up");
+        assert!(
+            tmp.join("Keep me [zzz].mp3").exists(),
+            "other tracks untouched"
+        );
+        for gone in [
+            "Song [abc123].webm",
+            "Song [abc123].jpg",
+            "Song [abc123].part.mp3",
+        ] {
+            assert!(
+                !tmp.join(gone).exists(),
+                "{gone} should have been cleaned up"
+            );
         }
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -831,13 +940,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let mp4 = tmp.join("Clip [abc123].mp4");
-        for f in ["Clip [abc123].mp4", "Clip [abc123].jpg", "Clip [abc123].webm"] {
+        for f in [
+            "Clip [abc123].mp4",
+            "Clip [abc123].jpg",
+            "Clip [abc123].webm",
+        ] {
             std::fs::write(tmp.join(f), b"x").unwrap();
         }
 
         tidy_intermediates(&mp4);
 
-        assert!(mp4.exists(), "the video result must survive its own cleanup");
+        assert!(
+            mp4.exists(),
+            "the video result must survive its own cleanup"
+        );
         assert!(!tmp.join("Clip [abc123].jpg").exists());
         assert!(!tmp.join("Clip [abc123].webm").exists());
         let _ = std::fs::remove_dir_all(&tmp);
@@ -857,7 +973,10 @@ mod tests {
 
         let hit = find_by_id(&tmp, "abc123").unwrap();
         assert_eq!(hit.file_name().unwrap(), "A Song [abc123].mp3");
-        assert!(find_by_id(&tmp, "zzz999").is_none(), "a .part is not a result");
+        assert!(
+            find_by_id(&tmp, "zzz999").is_none(),
+            "a .part is not a result"
+        );
         assert!(find_by_id(&tmp, "nope").is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }

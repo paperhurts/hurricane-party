@@ -42,7 +42,10 @@ fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<Me
         duration_s: r.get("duration_s")?,
         filesize: r.get("filesize")?,
         kind: r.get("kind")?,
-        path: std::path::Path::new(&root).join(&rel).to_string_lossy().to_string(),
+        path: std::path::Path::new(&root)
+            .join(&rel)
+            .to_string_lossy()
+            .to_string(),
         position,
     })
 }
@@ -143,9 +146,8 @@ fn rewrite(tx: &rusqlite::Transaction, playlist_id: i64, order: &[i64]) -> Resul
 }
 
 fn positions(conn: &Connection, playlist_id: i64) -> Result<Vec<i64>, DbError> {
-    let mut st = conn.prepare(
-        "SELECT position FROM playlist_items WHERE playlist_id = ?1 ORDER BY position",
-    )?;
+    let mut st = conn
+        .prepare("SELECT position FROM playlist_items WHERE playlist_id = ?1 ORDER BY position")?;
     let rows = st.query_map([playlist_id], |r| r.get::<_, i64>(0))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -213,7 +215,11 @@ mod tests {
     }
 
     fn titles(conn: &Connection, pid: i64) -> Vec<String> {
-        items(conn, pid).unwrap().into_iter().map(|m| m.title).collect()
+        items(conn, pid)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.title)
+            .collect()
     }
 
     #[test]
@@ -262,7 +268,11 @@ mod tests {
     fn handles_the_same_track_twice() {
         let (mut conn, pid) = fixture(2);
         let first: i64 = conn
-            .query_row("SELECT media_id FROM playlist_items WHERE position = 0", [], |r| r.get(0))
+            .query_row(
+                "SELECT media_id FROM playlist_items WHERE position = 0",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         add(&conn, pid, first).unwrap();
         assert_eq!(titles(&conn, pid), ["track 0", "track 1", "track 0"]);

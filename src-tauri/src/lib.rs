@@ -16,7 +16,10 @@ use tauri::{AppHandle, Manager};
 
 /// Phase 1 — show the user what they're about to download before downloading it.
 #[tauri::command]
-async fn probe_url(app: AppHandle, url: String) -> Result<pipeline::Probed, pipeline::PipelineError> {
+async fn probe_url(
+    app: AppHandle,
+    url: String,
+) -> Result<pipeline::Probed, pipeline::PipelineError> {
     pipeline::probe(&app, url.trim(), None).await
 }
 
@@ -65,12 +68,16 @@ fn library_path(app: AppHandle) -> Result<String, pipeline::PipelineError> {
 // ---- local folder import (D28 roots, D34 titles, D50 tags) -----------------
 
 #[tauri::command]
-async fn add_local_folder(app: AppHandle, path: String, label: Option<String>)
-    -> Result<localimport::ScanReport, db::DbError>
-{
+async fn add_local_folder(
+    app: AppHandle,
+    path: String,
+    label: Option<String>,
+) -> Result<localimport::ScanReport, db::DbError> {
     let p = std::path::PathBuf::from(&path);
     let label = label.unwrap_or_else(|| {
-        p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.clone())
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or(path.clone())
     });
     // Scanning a big folder blocks on I/O and tag reads, so keep it off the
     // main thread rather than freezing the window.
@@ -257,14 +264,23 @@ fn add_to_playlist(app: AppHandle, playlist_id: i64, media_id: i64) -> Result<()
 }
 
 #[tauri::command]
-fn remove_from_playlist(app: AppHandle, playlist_id: i64, position: i64) -> Result<(), db::DbError> {
+fn remove_from_playlist(
+    app: AppHandle,
+    playlist_id: i64,
+    position: i64,
+) -> Result<(), db::DbError> {
     let state = app.state::<Db>();
     let mut conn = state.0.lock().unwrap();
     playlist::remove(&mut conn, playlist_id, position)
 }
 
 #[tauri::command]
-fn reorder_playlist(app: AppHandle, playlist_id: i64, from: i64, to: i64) -> Result<(), db::DbError> {
+fn reorder_playlist(
+    app: AppHandle,
+    playlist_id: i64,
+    from: i64,
+    to: i64,
+) -> Result<(), db::DbError> {
     let state = app.state::<Db>();
     let mut conn = state.0.lock().unwrap();
     playlist::reorder(&mut conn, playlist_id, from, to)

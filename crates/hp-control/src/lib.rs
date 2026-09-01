@@ -57,10 +57,20 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: u64, result: serde_json::Value) -> Self {
-        Self { id, ok: true, result: Some(result), error: None }
+        Self {
+            id,
+            ok: true,
+            result: Some(result),
+            error: None,
+        }
     }
     pub fn err(id: u64, msg: impl Into<String>) -> Self {
-        Self { id, ok: false, result: None, error: Some(msg.into()) }
+        Self {
+            id,
+            ok: false,
+            result: None,
+            error: Some(msg.into()),
+        }
     }
 }
 
@@ -104,7 +114,10 @@ pub enum Event {
 /// Commands the player is expected to act on, parsed from the wire.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Hello { client: String, protocol_version: u32 },
+    Hello {
+        client: String,
+        protocol_version: u32,
+    },
     Status,
     Play,
     Pause,
@@ -128,10 +141,15 @@ pub enum ParseError {
 
 impl Request {
     pub fn parse(&self) -> Result<Command, ParseError> {
-        let missing = |f| ParseError::MissingField { cmd: self.cmd.clone(), field: f };
+        let missing = |f| ParseError::MissingField {
+            cmd: self.cmd.clone(),
+            field: f,
+        };
         Ok(match self.cmd.as_str() {
             "hello" => {
-                let v = self.protocol_version.ok_or_else(|| missing("protocol_version"))?;
+                let v = self
+                    .protocol_version
+                    .ok_or_else(|| missing("protocol_version"))?;
                 // Reject rather than guess: a client speaking a future major
                 // wants a clear no, not silently-wrong behaviour.
                 if v != PROTOCOL_VERSION {
@@ -152,7 +170,9 @@ impl Request {
             "seek" => Command::Seek(self.pos_s.ok_or_else(|| missing("pos_s"))?),
             // Clamped rather than rejected: a client that sends 1.5 means
             // "loud", and refusing is less useful than doing the sane thing.
-            "volume" => Command::Volume(self.level.ok_or_else(|| missing("level"))?.clamp(0.0, 1.0)),
+            "volume" => {
+                Command::Volume(self.level.ok_or_else(|| missing("level"))?.clamp(0.0, 1.0))
+            }
             other => return Err(ParseError::UnknownCommand(other.to_string())),
         })
     }
@@ -183,7 +203,10 @@ mod tests {
         let r = req(r#"{"id":0,"cmd":"hello","client":"led-bridge","protocol_version":1}"#);
         assert_eq!(
             r.parse().unwrap(),
-            Command::Hello { client: "led-bridge".into(), protocol_version: 1 }
+            Command::Hello {
+                client: "led-bridge".into(),
+                protocol_version: 1
+            }
         );
     }
 
@@ -209,9 +232,18 @@ mod tests {
 
     #[test]
     fn volume_is_clamped_not_refused() {
-        assert_eq!(req(r#"{"cmd":"volume","level":1.7}"#).parse().unwrap(), Command::Volume(1.0));
-        assert_eq!(req(r#"{"cmd":"volume","level":-2.0}"#).parse().unwrap(), Command::Volume(0.0));
-        assert_eq!(req(r#"{"cmd":"volume","level":0.7}"#).parse().unwrap(), Command::Volume(0.7));
+        assert_eq!(
+            req(r#"{"cmd":"volume","level":1.7}"#).parse().unwrap(),
+            Command::Volume(1.0)
+        );
+        assert_eq!(
+            req(r#"{"cmd":"volume","level":-2.0}"#).parse().unwrap(),
+            Command::Volume(0.0)
+        );
+        assert_eq!(
+            req(r#"{"cmd":"volume","level":0.7}"#).parse().unwrap(),
+            Command::Volume(0.7)
+        );
     }
 
     #[test]
@@ -232,8 +264,11 @@ mod tests {
     /// on the same stream.
     #[test]
     fn events_serialise_without_an_id() {
-        let e = Event::StateChanged { state: "paused".into() };
-        let j: serde_json::Value = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        let e = Event::StateChanged {
+            state: "paused".into(),
+        };
+        let j: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
         assert_eq!(j["event"], "state_changed");
         assert_eq!(j["state"], "paused");
         assert!(j.get("id").is_none());
