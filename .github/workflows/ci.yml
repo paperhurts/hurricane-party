@@ -1,0 +1,74 @@
+# Gates on every pull request and on main. Windows only: this is a Windows-first
+# project (O7) and the platform layer does not compile anywhere else.
+#
+# These are exactly the gates /land runs locally. There is no Tauri build here:
+# the three sidecars are 230 MB and gitignored, and tauri-build only checks that
+# each bundle.externalBin path exists before copying it, so zero-byte stand-ins
+# are enough to compile and run the library tests. The shipping exe is a
+# separate, on-demand workflow: release-exe.yml.
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stub the sidecars so tauri-build can run
+        run: |
+          mkdir -p src-tauri/binaries
+          for t in yt-dlp deno ffmpeg; do : > "src-tauri/binaries/$t-x86_64-pc-windows-msvc.exe"; done
+
+      - name: Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+            crates/hp-control/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'crates/hp-control/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: rustfmt (app)
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: rustfmt (hp-control)
+        run: cargo fmt --manifest-path crates/hp-control/Cargo.toml --check
+
+      - name: clippy
+        # Warnings do not fail the build yet. Once the "clear clippy warnings"
+        # issue lands, append `-- -D warnings` here and they will.
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: cargo test (app)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: cargo test (hp-control)
+        run: cargo test --manifest-path crates/hp-control/Cargo.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: pnpm
+        run: npm install -g pnpm@9
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+      - name: svelte-check + tsc
+        run: pnpm check

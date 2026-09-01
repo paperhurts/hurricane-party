@@ -88,7 +88,12 @@ fn read_tags(path: &Path) -> Tags {
         .to_string();
 
     let Ok(tagged) = Probe::open(path).and_then(|p| p.read()) else {
-        return Tags { title: stem, artist: None, duration_s: None, bitrate_kbps: None };
+        return Tags {
+            title: stem,
+            artist: None,
+            duration_s: None,
+            bitrate_kbps: None,
+        };
     };
 
     let props = tagged.properties();
@@ -105,14 +110,17 @@ fn read_tags(path: &Path) -> Tags {
             t.get_string(ItemKey::TrackArtist)
                 .map(str::to_string)
                 .filter(|s| !s.trim().is_empty())
-                .or_else(|| {
-                    t.get_string(ItemKey::AlbumArtist).map(str::to_string)
-                }),
+                .or_else(|| t.get_string(ItemKey::AlbumArtist).map(str::to_string)),
         ),
         None => (stem, None),
     };
 
-    Tags { title, artist, duration_s, bitrate_kbps }
+    Tags {
+        title,
+        artist,
+        duration_s,
+        bitrate_kbps,
+    }
 }
 
 /// Register a folder as a library root and pull everything in it into `media`.
@@ -228,8 +236,12 @@ pub fn allow_known_roots(app: &AppHandle) {
     let paths: Vec<String> = {
         let state = app.state::<Db>();
         let Ok(conn) = state.0.lock() else { return };
-        let Ok(mut st) = conn.prepare("SELECT path FROM library_roots") else { return };
-        let Ok(rows) = st.query_map([], |r| r.get::<_, String>(0)) else { return };
+        let Ok(mut st) = conn.prepare("SELECT path FROM library_roots") else {
+            return;
+        };
+        let Ok(rows) = st.query_map([], |r| r.get::<_, String>(0)) else {
+            return;
+        };
         rows.filter_map(|r| r.ok()).collect()
     };
     for p in paths {
