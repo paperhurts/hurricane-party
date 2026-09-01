@@ -56,7 +56,7 @@ These have burned into the design. Don't quietly relax them.
 
 Work one at a time. Don't build ahead.
 
-**v0.0 through v0.3 are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` and 34 tests are the one artifact that ports, and the spike repo must not be deleted until they do. Currently starting **v0.4** — briefed in `docs/v0.4-brief.md`.
+**v0.0 through v0.4a are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` and 34 tests **have now been ported byte-identical**, so the spike repo is no longer load-bearing and may be archived. Currently starting **v0.4b** — the skin renderer, EQ and analyser, briefed in `docs/v0.4-brief.md`.
 
 ---
 

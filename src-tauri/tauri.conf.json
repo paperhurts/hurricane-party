@@ -12,8 +12,8 @@
   "app": {
     "windows": [
       {
-        "label": "main",
-        "title": "hurricane-party",
+        "label": "library",
+        "title": "hurricane-party — library",
         "width": 900,
         "height": 620,
         "resizable": true,
