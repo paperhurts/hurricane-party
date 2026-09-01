@@ -1,0 +1,17 @@
+#!/bin/sh
+# Refuse a direct push to main. Main moves only by merging a pull request on
+# GitHub (merge commit, never squash), so the review trail and the merge bubble
+# both survive. Installed by tools/check-prereqs.ps1 through core.hooksPath.
+#
+# Escape hatch for a push agreed in the open (an emergency fix, a re-import):
+#   HP_ALLOW_MAIN=1 git push origin main
+[ -n "$HP_ALLOW_MAIN" ] && exit 0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "pre-push: refusing to push main directly. Open a pull request and merge it on GitHub." >&2
+      echo "          (HP_ALLOW_MAIN=1 git push ... overrides this on purpose)" >&2
+      exit 1 ;;
+  esac
+done
+exit 0
