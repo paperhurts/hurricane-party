@@ -10,6 +10,7 @@
 //! truth and every physical number is recomputed from them, never carried
 //! forward (D40).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use tauri::{
@@ -214,6 +215,11 @@ pub struct WmState {
     /// Which window last took focus, so a window that mounts late can be told
     /// whether its group is active.
     pub focused: Option<WindowId>,
+    /// Windows currently collapsed to the 275 x 14 strip (D60).
+    pub shaded: BTreeSet<WindowId>,
+    /// Height to restore on expand, per window. The playlist can be at any
+    /// legal D30 size, so the base height is not the right answer for it.
+    pub unshaded_h: BTreeMap<WindowId, Px>,
 }
 
 /// A title-bar drag in flight.
@@ -458,7 +464,7 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
     }; // D54: lock dropped here, before a single OS call.
 
     apply_ownership(&plan);
-    emit_edges(app);
+    emit_state(app);
     Ok(())
 }
 
@@ -740,7 +746,7 @@ pub fn drag_end(app: &AppHandle) {
         plan_ownership(&s, active)
     };
     apply_ownership(&plan);
-    emit_edges(app);
+    emit_state(app);
 }
 
 // ---- seams ------------------------------------------------------------------
@@ -783,16 +789,33 @@ pub fn edges_for(state: &WmState, id: WindowId) -> Edges {
     e
 }
 
-/// Tell every classic window which of its edges are seams. Call after anything
-/// that changes the graph.
-pub fn emit_edges(app: &AppHandle) {
-    let all: Vec<(WindowId, Edges)> = {
+/// Push every classic window its whole view of the world: seams, focus, shade.
+///
+/// One event rather than three. They all derive from the same locked state, so
+/// splitting them into separate messages only creates opportunities for a
+/// window to hold two of them from different moments.
+pub fn emit_state(app: &AppHandle) {
+    let all: Vec<(WindowId, Hello)> = {
         let state = app.state::<Wm>();
         let s = state.0.lock().unwrap();
-        CLASSIC.iter().map(|id| (*id, edges_for(&s, *id))).collect()
+        let focused = s.focused;
+        let flags = focus_plan(&s, focused);
+        CLASSIC
+            .iter()
+            .map(|id| {
+                (
+                    *id,
+                    Hello {
+                        edges: edges_for(&s, *id),
+                        active: flags.iter().any(|(w, a)| w == id && *a),
+                        shaded: s.shaded.contains(id),
+                    },
+                )
+            })
+            .collect()
     };
-    for (id, e) in all {
-        let _ = app.emit_to(label_of(id), "wm:edges", e);
+    for (id, h) in all {
+        let _ = app.emit_to(label_of(id), "wm:state", h);
     }
 }
 
@@ -947,9 +970,135 @@ pub fn demagnetize(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
     };
     if broke {
         apply_ownership(&plan);
-        emit_edges(app);
+        emit_state(app);
     }
     broke
+}
+
+// ---- windowshade -------------------------------------------------------------
+
+/// Collapse or expand a window in place, keeping the group flush.
+///
+/// The window's **top-left stays put** and only its height changes; everything
+/// bonded below it slides by the difference. That is what makes a shade feel
+/// like a collapse rather than a re-layout — the thing you clicked does not
+/// move, and neither does anything above it.
+///
+/// `side_of` is what makes this safe in a group of any shape: it walks the
+/// graph from the far end of the bottom seam *without crossing that seam*, so
+/// exactly the rigid body below moves, however many windows are in it and
+/// whatever else they are bonded to.
+pub fn apply_shade(layout: &mut Layout, graph: &WindowGraph, id: WindowId, new_h: Px) {
+    let Some(r) = layout.get(&id).copied() else {
+        return;
+    };
+    let delta = new_h - r.h;
+    if delta == 0 {
+        return;
+    }
+
+    // Take the bottom seam before resizing, while the geometry still agrees
+    // with the graph.
+    let below = graph
+        .bonds
+        .iter()
+        .find(|b| b.edge == Edge::Bottom && b.a == id)
+        .map(|b| {
+            let mut side = bond::side_of(graph, b, b.b);
+            side.retain(|s| *s != id);
+            side
+        })
+        .unwrap_or_default();
+
+    layout.insert(id, Rect { h: new_h, ..r });
+    bond::translate_group(layout, &below, 0, delta);
+}
+
+/// The height a window should have right now, in physical px.
+///
+/// D51: this is *rendered geometry*, so it resolves from the window's own
+/// monitor — the 14 px strip really is physically taller on a 150% display.
+/// D40: recomputed from the logical constant, never scaled from the height the
+/// window happens to have.
+pub fn height_for(state: &WmState, id: WindowId, shaded: bool) -> Px {
+    let scale = state
+        .layout
+        .get(&id)
+        .and_then(|r| monitor_at(&state.monitors, r.x, r.y))
+        .map(|m| m.scale)
+        .unwrap_or(state.scale);
+    if shaded {
+        bond::d40::physical(SHADE_H, scale)
+    } else {
+        // The playlist can be any legal D30 size, so expanding restores the
+        // height it had before it was collapsed rather than the base height.
+        // Losing a resized playlist to a double-click would be a data loss the
+        // user did not ask for.
+        state
+            .unshaded_h
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| bond::d40::physical(CHROME_H, scale))
+    }
+}
+
+/// D61: which windows should be topmost.
+///
+/// Shading Main makes Main's whole connected component float. Pure so the rule
+/// is testable without a window: the interesting part is that it follows the
+/// *group*, not the window.
+pub fn topmost_set(state: &WmState) -> Vec<WindowId> {
+    if state.shaded.contains(&MAIN) {
+        state.graph.component(MAIN)
+    } else {
+        vec![]
+    }
+}
+
+/// Toggle windowshade on one window (D60).
+pub fn toggle_shade(app: &AppHandle, id: WindowId) {
+    let (layout, moved, topmost) = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+
+        let shaded = !s.shaded.contains(&id);
+        if shaded {
+            // Remember the height to come back to before it is overwritten.
+            if let Some(h) = s.layout.get(&id).map(|r| r.h) {
+                s.unshaded_h.insert(id, h);
+            }
+            s.shaded.insert(id);
+        } else {
+            s.shaded.remove(&id);
+        }
+
+        let h = height_for(&s, id, shaded);
+        let graph = s.graph.clone();
+        let mut layout = s.layout.clone();
+        apply_shade(&mut layout, &graph, id, h);
+        s.layout = layout.clone();
+
+        // Everything in the component may have moved, plus the window itself.
+        let moved = s.graph.component(id);
+        (layout, moved, topmost_set(&s))
+    }; // D54: lock dropped before any OS call.
+
+    push_to_os(app, &layout, &moved);
+
+    let p = platform::platform();
+    let handles: Vec<(NativeWindow, bool)> = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        CLASSIC
+            .iter()
+            .map(|id| (s.handle(*id), topmost.contains(id)))
+            .collect()
+    };
+    for (w, on) in handles {
+        p.set_topmost(w, on);
+    }
+
+    emit_state(app);
 }
 
 // ---- focus ------------------------------------------------------------------
@@ -975,6 +1124,7 @@ pub fn focus_plan(state: &WmState, focused: Option<WindowId>) -> Vec<(WindowId, 
 pub struct Hello {
     pub edges: Edges,
     pub active: bool,
+    pub shaded: bool,
 }
 
 pub fn hello(app: &AppHandle, id: WindowId) -> Hello {
@@ -988,6 +1138,7 @@ pub fn hello(app: &AppHandle, id: WindowId) -> Hello {
             .find(|(w, _)| *w == id)
             .map(|(_, a)| a)
             .unwrap_or(false),
+        shaded: s.shaded.contains(&id),
     }
 }
 
@@ -1007,9 +1158,8 @@ pub fn focus_group(app: &AppHandle, focused: Option<WindowId>) {
     if focused.is_some() {
         apply_ownership(&plan);
     }
-    for (id, active) in flags {
-        let _ = app.emit_to(label_of(id), "wm:active", active);
-    }
+    let _ = flags;
+    emit_state(app);
 }
 
 // ---- tests ------------------------------------------------------------------
@@ -1565,6 +1715,120 @@ mod tests {
         let bad = bond::violations(&graph, &layout);
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].0.pair(), (EQ, PLAYLIST));
+    }
+
+
+    // ---- windowshade (D60/D61) ----------------------------------------------
+
+    #[test]
+    fn shading_collapses_in_place_and_the_group_follows() {
+        let s = stacked();
+        let mut layout = s.layout.clone();
+        apply_shade(&mut layout, &s.graph, EQ, 14);
+
+        // The window you clicked does not move, and neither does anything
+        // above it. Only the height changes.
+        assert_eq!(layout[&MAIN], s.layout[&MAIN]);
+        assert_eq!(layout[&EQ].x, s.layout[&EQ].x);
+        assert_eq!(layout[&EQ].y, s.layout[&EQ].y);
+        assert_eq!(layout[&EQ].h, 14);
+        // Everything below slides up by the difference.
+        assert_eq!(layout[&PLAYLIST].y, s.layout[&PLAYLIST].y - 102);
+        assert!(bond::violations(&s.graph, &layout).is_empty());
+    }
+
+    #[test]
+    fn shading_the_top_window_pulls_the_whole_stack_up() {
+        let s = stacked();
+        let mut layout = s.layout.clone();
+        apply_shade(&mut layout, &s.graph, MAIN, 14);
+        assert_eq!(layout[&MAIN].y, s.layout[&MAIN].y);
+        assert_eq!(layout[&EQ].y, s.layout[&EQ].y - 102);
+        assert_eq!(layout[&PLAYLIST].y, s.layout[&PLAYLIST].y - 102);
+        assert!(bond::violations(&s.graph, &layout).is_empty());
+    }
+
+    #[test]
+    fn shading_the_bottom_window_moves_nothing_else() {
+        let s = stacked();
+        let mut layout = s.layout.clone();
+        apply_shade(&mut layout, &s.graph, PLAYLIST, 14);
+        assert_eq!(layout[&MAIN], s.layout[&MAIN]);
+        assert_eq!(layout[&EQ], s.layout[&EQ]);
+        assert_eq!(layout[&PLAYLIST].h, 14);
+        assert!(bond::violations(&s.graph, &layout).is_empty());
+    }
+
+    #[test]
+    fn a_shade_and_an_expand_round_trip_exactly() {
+        let s = stacked();
+        let mut layout = s.layout.clone();
+        apply_shade(&mut layout, &s.graph, EQ, 14);
+        apply_shade(&mut layout, &s.graph, EQ, 116);
+        assert_eq!(layout, s.layout, "the stack did not come back to where it was");
+    }
+
+    #[test]
+    fn an_unbonded_window_shades_without_disturbing_anyone() {
+        let mut s = stacked();
+        s.graph = WindowGraph::new();
+        let mut layout = s.layout.clone();
+        apply_shade(&mut layout, &s.graph, MAIN, 14);
+        assert_eq!(layout[&EQ], s.layout[&EQ]);
+        assert_eq!(layout[&PLAYLIST], s.layout[&PLAYLIST]);
+    }
+
+    #[test]
+    fn expanding_restores_a_resized_playlist_rather_than_the_base_height() {
+        // The playlist can sit at any legal D30 size. Coming back from a shade
+        // has to return the height it had, not 116 -- silently discarding a
+        // resize on a double-click would be data loss the user did not ask for.
+        let mut s = stacked();
+        s.unshaded_h.insert(PLAYLIST, 174);
+        assert_eq!(height_for(&s, PLAYLIST, false), 174);
+        assert_eq!(height_for(&s, PLAYLIST, true), 14);
+        // A window that has never been shaded falls back to the base height.
+        assert_eq!(height_for(&s, EQ, false), 116);
+    }
+
+    #[test]
+    fn the_shade_strip_is_taller_on_a_scaled_display() {
+        // D51: rendered geometry resolves from the window's OWN monitor, and
+        // the 14px strip really is physically taller at 150%.
+        let mut s = stacked();
+        s.monitors = vec![mon(0, 0, 2560, 1440, 1.5), mon(2560, 0, 1920, 1080, 1.0)];
+        s.layout.insert(MAIN, Rect::new(100, 100, 413, 174));
+        assert_eq!(height_for(&s, MAIN, true), 21);
+        s.layout.insert(MAIN, Rect::new(3000, 100, 275, 116));
+        assert_eq!(height_for(&s, MAIN, true), 14);
+    }
+
+    #[test]
+    fn shading_main_floats_the_whole_group() {
+        // D61. Topmost is per-window and does not follow ownership, so lifting
+        // only main would leave its bonded neighbours behind other apps.
+        let mut s = stacked();
+        assert!(topmost_set(&s).is_empty());
+        s.shaded.insert(MAIN);
+        assert_eq!(topmost_set(&s), vec![MAIN, EQ, PLAYLIST]);
+    }
+
+    #[test]
+    fn a_detached_main_floats_alone() {
+        let mut s = stacked();
+        s.graph.break_bond(MAIN, EQ);
+        s.shaded.insert(MAIN);
+        assert_eq!(topmost_set(&s), vec![MAIN]);
+    }
+
+    #[test]
+    fn shading_anything_other_than_main_floats_nothing() {
+        // The mini-player is the Main shade specifically. A shaded equalizer is
+        // just a shaded equalizer.
+        let mut s = stacked();
+        s.shaded.insert(EQ);
+        s.shaded.insert(PLAYLIST);
+        assert!(topmost_set(&s).is_empty());
     }
 
     #[test]

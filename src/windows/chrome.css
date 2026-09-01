@@ -141,3 +141,21 @@ body {
     transition: none;
   }
 }
+
+/* ---- windowshade (D60) ----
+ *
+ * 275 x 14: the title bar is the entire window. In v0.4b this grows transport
+ * buttons, a small time readout and a scrolling title -- per theme.md it is
+ * "the state you'll actually live in", so it gets the full sprite treatment
+ * rather than a clipped main window (skin-manifest.md makes `shade` a required
+ * element set, not an optional one). */
+.chrome[data-shaded="true"] .body {
+  display: none;
+}
+
+/* At 14px tall, a 4px seam on each edge would leave 6px of title bar to grab.
+ * Halve the band so the strip stays draggable. */
+.chrome[data-shaded="true"] .seam.top,
+.chrome[data-shaded="true"] .seam.bottom {
+  height: 2px;
+}

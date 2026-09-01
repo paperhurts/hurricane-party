@@ -170,6 +170,15 @@ fn wm_hello(app: AppHandle, label: String) -> Option<wm::Hello> {
     wm::id_of(&label).map(|id| wm::hello(&app, id))
 }
 
+/// D60: title-bar double-click collapses a window to the 275 x 14 strip, and
+/// expands it again. D61 handles the always-on-top half.
+#[tauri::command]
+fn wm_toggle_shade(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::toggle_shade(&app, id);
+    }
+}
+
 /// Pointerdown on a bonded edge.
 ///
 /// Returns which gesture the caller actually got. D35: a seam whose neighbours
@@ -403,6 +412,7 @@ pub fn run() {
             wm_drag_end,
             wm_focus,
             wm_hello,
+            wm_toggle_shade,
             wm_seam_down,
             wm_splitter_move,
             wm_splitter_end,
