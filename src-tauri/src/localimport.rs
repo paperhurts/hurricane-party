@@ -23,12 +23,22 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Extensions worth scanning. Deliberately audio-only for v0.3 — video import
-/// from a local folder is a different question (thumbnails, playback window)
-/// and isn't what this milestone asked for.
+/// Extensions worth scanning.
+///
+/// Audio and video both, as of D64. This was audio-only through v0.3 because
+/// local video raised questions the milestone had not answered yet — where it
+/// plays, what a thumbnail is. The playback question is now settled: D13's
+/// decorated video window exists, and the library already routes a
+/// `kind = 'video'` row to it. Leaving the scanner audio-only made a downloaded
+/// video visible while the identical file found by a folder scan was not.
 const AUDIO_EXTS: &[&str] = &[
     "mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "wav", "wma", "aiff", "aif", "alac",
 ];
+
+/// Containers the video window can actually play. Deliberately not "anything
+/// ffmpeg knows" — a row that opens a window and then fails is worse than a
+/// file the library never claimed.
+const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mkv", "webm", "mov", "avi"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanReport {
@@ -39,11 +49,22 @@ pub struct ScanReport {
     pub skipped: usize,
 }
 
-fn is_audio(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .is_some_and(|e| AUDIO_EXTS.contains(&e.as_str()))
+/// `"audio"`, `"video"`, or `None` for a file the library should not claim.
+///
+/// The returned string is written straight into `media.kind`, so the two lists
+/// and the column cannot drift apart.
+fn kind_of(p: &Path) -> Option<&'static str> {
+    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
+    if AUDIO_EXTS.contains(&ext.as_str()) {
+        Some("audio")
+    } else if VIDEO_EXTS.contains(&ext.as_str()) {
+        Some("video")
+    } else {
+        // Everything else, including the .part files a killed download leaves
+        // behind (D26 keeps those on purpose) and the cover art next to a
+        // track.
+        None
+    }
 }
 
 /// What we could learn about a file without opening a subprocess.
@@ -132,9 +153,9 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if !entry.file_type().is_file() || !is_audio(path) {
+        let Some(kind) = kind_of(path).filter(|_| entry.file_type().is_file()) else {
             continue;
-        }
+        };
         report.found += 1;
 
         let Ok(rel) = path.strip_prefix(&root) else {
@@ -145,17 +166,32 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
         let filesize = entry.metadata().map(|m| m.len() as i64).ok();
         let t = read_tags(path);
 
+        // Ask first, because the counts are reported to the user and an UPSERT
+        // cannot tell them apart: SQLite reports one changed row whether the
+        // conflict clause inserted or updated, so counting `execute`'s return
+        // called every re-scan a fresh import. One indexed lookup per file is a
+        // cheap price for a message that is true.
+        let existed: bool = tx
+            .query_row(
+                "SELECT 1 FROM media WHERE root_id = ?1 AND relpath = ?2",
+                rusqlite::params![root_id, relpath],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
         // D28: (root_id, relpath), never the absolute path.
-        let n = tx.execute(
+        tx.execute(
             "INSERT INTO media (source_id, root_id, relpath, kind, title, uploader,
                                 duration_s, container, bitrate_kbps, filesize, added_at)
-             VALUES (NULL, ?1, ?2, 'audio', ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(root_id, relpath) DO UPDATE SET
-                title = excluded.title, uploader = excluded.uploader,
-                duration_s = excluded.duration_s, filesize = excluded.filesize",
+                kind = excluded.kind, title = excluded.title,
+                uploader = excluded.uploader, duration_s = excluded.duration_s,
+                filesize = excluded.filesize",
             rusqlite::params![
                 root_id,
                 relpath,
+                kind,
                 t.title,
                 t.artist,
                 t.duration_s,
@@ -165,10 +201,10 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
                 db::now(),
             ],
         )?;
-        if n == 1 {
-            report.added += 1;
-        } else {
+        if existed {
             report.updated += 1;
+        } else {
+            report.added += 1;
         }
     }
 
@@ -236,12 +272,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognises_audio_by_extension() {
-        for good in ["a.mp3", "b.FLAC", "c.m4a", "d.opus", "e.Wav"] {
-            assert!(is_audio(Path::new(good)), "{good} should be audio");
-        }
-        for bad in ["a.txt", "b.jpg", "c.mp4", "d.webm", "cover.png", "no-extension"] {
-            assert!(!is_audio(Path::new(bad)), "{bad} should not be audio");
+    fn audio_and_video_are_both_claimed_and_nothing_else_is() {
+        // D64. The playback question that kept video out of here is settled --
+        // the row routes to D13's video window -- so a folder scan now finds
+        // the same file the download pipeline would have.
+        assert_eq!(kind_of(Path::new("a/b/track.mp3")), Some("audio"));
+        assert_eq!(kind_of(Path::new("a/b/track.FLAC")), Some("audio"));
+        assert_eq!(kind_of(Path::new("a/b/clip.mp4")), Some("video"));
+        assert_eq!(kind_of(Path::new("a/b/clip.MKV")), Some("video"));
+
+        // Not claimed: cover art, and the .part files a killed download leaves
+        // behind on purpose (D26). Claiming either would put a row in the
+        // library that cannot be played.
+        assert_eq!(kind_of(Path::new("a/b/cover.jpg")), None);
+        assert_eq!(kind_of(Path::new("a/b/track.mp3.part")), None);
+        assert_eq!(kind_of(Path::new("a/b/notes.txt")), None);
+        assert_eq!(kind_of(Path::new("a/b/no-extension")), None);
+    }
+
+    #[test]
+    fn the_two_extension_lists_do_not_overlap() {
+        // m4a is audio and m4v is video, which is exactly the kind of pair that
+        // ends up in both lists. An overlap would make kind_of depend on which
+        // list is checked first.
+        for e in AUDIO_EXTS {
+            assert!(!VIDEO_EXTS.contains(e), "{e} is in both lists");
         }
     }
 

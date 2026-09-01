@@ -1,9 +1,12 @@
+pub mod bond;
 mod control;
 mod db;
 mod jobs;
 mod localimport;
 mod pipeline;
+pub mod platform;
 mod playlist;
+pub mod wm;
 
 use db::Db;
 use jobs::{Job, RunnerHandle};
@@ -129,6 +132,100 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+// ---- window manager ---------------------------------------------------------
+//
+// These are synchronous on purpose. Tauri runs a non-async command on the main
+// thread, which is where our windows live — so every SetWindowPos in a drag
+// frame is same-thread, and D54's cross-thread deadlock is structurally out of
+// reach rather than merely avoided. It also keeps the drag off the async
+// runtime, where a scheduling hiccup would show up as a stutter.
+
+/// Title-bar pointerdown. Snapshots the group and the cursor; everything after
+/// this is derived from that origin (D40).
+#[tauri::command]
+fn wm_drag_start(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::drag_start(&app, id);
+    }
+}
+
+/// One drag frame. The webview coalesces pointermove to one per display frame,
+/// so this is called at roughly refresh rate and has to stay cheap.
+#[tauri::command]
+fn wm_drag_move(app: AppHandle) {
+    wm::drag_move(&app);
+}
+
+#[tauri::command]
+fn wm_drag_end(app: AppHandle) {
+    wm::drag_end(&app);
+}
+
+/// What a classic window asks for on mount.
+///
+/// The push events fire when things change; a window still loading its bundle
+/// misses them. This is the pull half of that pair.
+#[tauri::command]
+fn wm_hello(app: AppHandle, label: String) -> Option<wm::Hello> {
+    wm::id_of(&label).map(|id| wm::hello(&app, id))
+}
+
+/// D60: title-bar double-click collapses a window to the 275 x 14 strip, and
+/// expands it again. D61 handles the always-on-top half.
+#[tauri::command]
+fn wm_toggle_shade(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::toggle_shade(&app, id);
+    }
+}
+
+/// Pointerdown on a bonded edge.
+///
+/// Returns which gesture the caller actually got. D35: a seam whose neighbours
+/// cannot resize is a move handle, so rather than offering a splitter and then
+/// doing nothing, the gesture degrades to a group move and says so.
+#[tauri::command]
+fn wm_seam_down(app: AppHandle, label: String, edge: String) -> &'static str {
+    let (Some(id), Some(edge)) = (wm::id_of(&label), wm::edge_from_str(&edge)) else {
+        return "none";
+    };
+    if wm::splitter_start(&app, id, edge) {
+        "splitter"
+    } else {
+        wm::drag_start(&app, id);
+        "move"
+    }
+}
+
+#[tauri::command]
+fn wm_splitter_move(app: AppHandle) {
+    wm::splitter_move(&app);
+}
+
+#[tauri::command]
+fn wm_splitter_end(app: AppHandle) {
+    wm::splitter_end(&app);
+}
+
+/// Double-click on a seam. Breaking a bond in the middle of a chain splits one
+/// group into two, so the components are recomputed and each side gets its own
+/// hidden root (D41).
+#[tauri::command]
+fn wm_demagnetize(app: AppHandle, label: String, edge: String) -> bool {
+    let (Some(id), Some(edge)) = (wm::id_of(&label), wm::edge_from_str(&edge)) else {
+        return false;
+    };
+    wm::demagnetize(&app, id, edge)
+}
+
+/// Pointerdown anywhere in a classic window: raise the whole group (D42).
+#[tauri::command]
+fn wm_focus(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::focus_group(&app, Some(id));
+    }
+}
+
 // ---- playlists --------------------------------------------------------------
 
 #[tauri::command]
@@ -190,6 +287,93 @@ fn set_concurrency(app: AppHandle, n: usize) -> Result<(), db::DbError> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Focus is a group property (v0.4-brief): when any bonded window has focus, all
+/// of them render active.
+///
+/// The deferred re-check on focus loss is not defensive, it is required.
+/// Windows sends `WM_KILLFOCUS` to the old window *before* `WM_SETFOCUS` to the
+/// new one, so clicking from main to eq passes through a moment where nothing
+/// in the group is focused. Deactivating on that intermediate state flickers
+/// the entire group on every click inside it — which is precisely the thing the
+/// brief says looks broken immediately.
+fn wire_focus_events(app: &AppHandle) {
+    for id in wm::CLASSIC {
+        let Some(win) = app.get_webview_window(wm::label_of(id)) else {
+            continue;
+        };
+        let handle = app.clone();
+        win.on_window_event(move |event| {
+            // D63: closing the Main window quits the app; the satellites refuse
+            // to close at all.
+            //
+            // This is not a nicety, it is the only way out. Tauri exits when
+            // every window is closed, and D41's three hidden roots are windows
+            // that are never shown and can never be closed — so that condition
+            // could not be met, and the app had no exit path whatsoever.
+            // Worse, closing Main from the taskbar destroyed only Main and left
+            // eq and playlist behind as undecorated windows with no taskbar
+            // button and no title bar: D59's unrecoverable state, reached
+            // without a monitor ever being unplugged.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if id == wm::MAIN {
+                    wm::save_now(&handle);
+                    handle.exit(0);
+                } else {
+                    // The satellites have no close affordance of their own and
+                    // nothing yet to bring them back, so Alt+F4 doing nothing
+                    // beats a window that vanishes for good. Reopening them is
+                    // v0.4b, with the sprite chrome that offers it.
+                    api.prevent_close();
+                }
+                return;
+            }
+            let tauri::WindowEvent::Focused(gained) = event else {
+                return;
+            };
+            if *gained {
+                wm::focus_group(&handle, Some(id));
+                return;
+            }
+            let handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                let still_ours = wm::CLASSIC.iter().any(|id| {
+                    handle
+                        .get_webview_window(wm::label_of(*id))
+                        .and_then(|w| w.is_focused().ok())
+                        .unwrap_or(false)
+                });
+                if !still_ours {
+                    wm::focus_group(&handle, None);
+                }
+            });
+        });
+    }
+}
+
+/// D63, the other half: the library window is an ordinary decorated window, so
+/// closing it closes it — but it must not be able to leave the app running with
+/// no way out either. If the classic windows are somehow already gone, closing
+/// the library is the last window the user can actually see, and the hidden
+/// roots would keep the process alive invisibly.
+fn wire_library_close(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("library") else {
+        return;
+    };
+    let handle = app.clone();
+    win.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            return;
+        }
+        let any_classic_left = wm::CLASSIC
+            .iter()
+            .any(|id| handle.get_webview_window(wm::label_of(*id)).is_some());
+        if !any_classic_left {
+            handle.exit(0);
+        }
+    });
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -197,7 +381,14 @@ pub fn run() {
         .manage(RunnerHandle::default())
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
+        .manage(wm::Wm::default())
         .setup(|app| {
+            // D37: the gate, and it runs first. Every physical coordinate this
+            // process computes after this line depends on the answer, so there
+            // is no useful work to do if it is wrong. Panics if awareness is
+            // not per-monitor-v2 — deliberately, and permanently.
+            eprintln!("DPI awareness: {}", platform::platform().assert_dpi_aware());
+
             let handle = app.handle().clone();
             let path = handle
                 .path()
@@ -227,7 +418,25 @@ pub fn run() {
             // Undocumented and unstable until v1.0 (control-api.md). Shipping
             // it now proves the pipe while nothing external depends on it.
             let bc = app.state::<control::Broadcaster>().inner().clone();
-            control::spawn_server(handle, bc);
+            control::spawn_server(handle.clone(), bc);
+
+            // The three classic windows, their hidden roots (D41), and the
+            // ownership topology. Last in setup because it is the only part
+            // that puts pixels on screen.
+            // Seed first: a webview starts loading the instant its window is
+            // constructed and asks for its bonds before setup has finished.
+            wm::seed_state(&handle)?;
+            wm::build_classic_windows(&handle)?;
+            wm::register(&handle)?;
+            wire_focus_events(&handle);
+            wire_library_close(&handle);
+            // Last: the windows are only revealed once the bond graph and the
+            // ownership topology behind them are real.
+            wm::show_classic_windows(&handle)?;
+            // D62: the display watchdog. Polls rather than hooking
+            // WM_DISPLAYCHANGE, and covers a group already stranded at launch
+            // as well as one stranded while running.
+            wm::spawn_display_watch(&handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -249,7 +458,17 @@ pub fn run() {
             add_local_folder,
             list_roots,
             open_video,
-            report_state
+            report_state,
+            wm_drag_start,
+            wm_drag_move,
+            wm_drag_end,
+            wm_focus,
+            wm_hello,
+            wm_toggle_shade,
+            wm_seam_down,
+            wm_splitter_move,
+            wm_splitter_end,
+            wm_demagnetize
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

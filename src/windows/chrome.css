@@ -1,0 +1,161 @@
+/* Shared chrome for the three classic 275px windows.
+ *
+ * v0.4a is the window *system*: bonding, z-order, splitter, persistence. The
+ * interior of these windows is a placeholder until v0.4b brings the sprite
+ * renderer and the hp-skin/1 manifest. What is NOT placeholder is the geometry
+ * — the document must be exactly the window's size with no scrollbar and no
+ * overflow, or the seam between two bonded windows picks up a stray pixel.
+ *
+ * Every colour is a token (CLAUDE.md non-negotiable). Nothing here is a hex. */
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* The mount point is a plain div, so without this it is auto-height and
+ * `.chrome { height: 100% }` resolves against nothing — the chrome collapses to
+ * its content and the window is mostly empty below it. Caught by screenshot,
+ * not by a test: the window geometry was right, only the document inside it
+ * was wrong. */
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+/* No text selection anywhere in the chrome: a drag that starts on a label must
+ * move the window, not select the label. */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.chrome {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--void);
+  color: var(--filament);
+  /* An inset line rather than a border: a border would occupy a physical pixel
+   * that the bond seam also wants, and at 150% the two disagree about which
+   * one owns it. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 30%, transparent);
+}
+
+.titlebar {
+  height: 14px;
+  flex: 0 0 14px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arc);
+  background: color-mix(in srgb, var(--arc) 10%, transparent);
+  /* D35: the cursor tells the truth. The title bar is a move handle, and it is
+   * the only move handle -- the gesture table gives the shared edge to the
+   * splitter, so offering a move cursor there would be a lie. */
+  cursor: move;
+}
+
+/* Focus is a group property (v0.4-brief): when any bonded window has focus,
+ * every member renders active. Getting this wrong looks broken immediately, so
+ * the inactive state is defined up front even though nothing sets it yet. */
+.chrome[data-active="false"] .titlebar {
+  color: color-mix(in srgb, var(--filament) 45%, transparent);
+  background: color-mix(in srgb, var(--filament) 6%, transparent);
+}
+
+.body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--filament) 55%, transparent);
+}
+
+/* ---- seams ----
+ *
+ * The grab band sits inside the window, along an edge that carries a bond.
+ * Two bonded windows are flush by construction, so there is no gap between
+ * them to put a handle in -- each side contributes half of an 8px band.
+ *
+ * 4px is deliberate. It has to be wide enough to hit and narrow enough not to
+ * swallow the controls that land along the window edge in v0.4b. */
+.chrome {
+  position: relative;
+}
+
+.seam {
+  position: absolute;
+  /* In the v0.0 spike an invisible resize overlay hit-tested ABOVE the webview
+   * and ate every click on exactly this band (D43) -- which is why all three
+   * windows are built resizable(false) and this element is the only thing
+   * claiming the seam. */
+  z-index: 2;
+}
+
+.seam.top,
+.seam.bottom {
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+.seam.top { top: 0; }
+.seam.bottom { bottom: 0; }
+
+.seam.left,
+.seam.right {
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+.seam.left { left: 0; }
+.seam.right { right: 0; }
+
+/* The one animated moment in the interface (v0.4-brief). Idle is a hairline,
+ * hover lifts it. Opacity on a pre-composited layer, never box-shadow -- and
+ * nothing else in the chrome moves. */
+.seam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--arc);
+  opacity: 0;
+  transition: opacity 90ms linear;
+  will-change: opacity;
+}
+.seam:hover::after {
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seam::after {
+    transition: none;
+  }
+}
+
+/* ---- windowshade (D60) ----
+ *
+ * 275 x 14: the title bar is the entire window. In v0.4b this grows transport
+ * buttons, a small time readout and a scrolling title -- per theme.md it is
+ * "the state you'll actually live in", so it gets the full sprite treatment
+ * rather than a clipped main window (skin-manifest.md makes `shade` a required
+ * element set, not an optional one). */
+.chrome[data-shaded="true"] .body {
+  display: none;
+}
+
+/* At 14px tall, a 4px seam on each edge would leave 6px of title bar to grab.
+ * Halve the band so the strip stays draggable. */
+.chrome[data-shaded="true"] .seam.top,
+.chrome[data-shaded="true"] .seam.bottom {
+  height: 2px;
+}

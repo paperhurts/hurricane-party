@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  D37: Tauri ships no <dpiAware> element at all — tauri-build's own
+  windows-app-manifest.xml declares only the Common-Controls dependency
+  (verified against tauri-build 2.6.3, the version in Cargo.lock). Process DPI
+  awareness therefore comes from tao's become_dpi_aware(), a four-rung fallback
+  ladder where every rung below the top is a silent `let _ =`.
+
+  A silent landing on v1 or system-aware still reports scale_factor() == 1.5 on
+  a single monitor while breaking every cross-monitor coordinate — which is the
+  entire premise of the bond model. So awareness is declared here AND asserted
+  at startup; the manifest is the belt, platform::assert_dpi_aware() is the
+  braces. Neither alone is sufficient: the manifest can be stripped by a
+  repackager, and the assertion cannot fire before the process is already wrong.
+
+  The Common-Controls dependency below is copied verbatim from tauri-build.
+  Removing it un-themes native dialogs, so it has to stay.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- Windows 10 1703+. This is the one that actually gets us v2. -->
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <!-- Fallback for anything that does not understand the element above.
+           "true/pm" lands on per-monitor v1, which the startup assertion will
+           then reject loudly rather than let the app run on bad coordinates. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+    </windowsSettings>
+  </application>
+</assembly>

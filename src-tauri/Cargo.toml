@@ -31,3 +31,12 @@ walkdir = "2"
 tauri-plugin-dialog = "2"
 hp-control = { path = "../crates/hp-control" }
 
+# D44: the entire platform surface of the window engine is six calls, all of
+# them behind the `platform` trait. Ownership (D41), the forcing SetWindowPos
+# (D42), the startup DPI assertion (D37), and display-change rescue (D57).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }

@@ -192,15 +192,36 @@
   }
 
   async function addFolder() {
-    const picked = await openDialog({ directory: true, multiple: false, title: "Add a music folder" });
-    if (typeof picked !== "string") return;
-    scanning = true;
+    // Clear first. Leaving the previous run's notice on screen while a new one
+    // is in flight is how a no-op reads as a success.
     notice = null;
+    error = null;
+
+    const picked = await openDialog({ directory: true, multiple: false, title: "Add a music folder" });
+
+    // A cancel and a dialog that failed to return a path both arrive here, and
+    // returning silently made them indistinguishable — from each other and from
+    // a scan that ran and found nothing. That is exactly how a folder that
+    // imports perfectly well when handed straight to the scanner can look like
+    // it "silently does nothing" in the UI.
+    if (picked === null || picked === undefined) {
+      notice = "No folder chosen.";
+      return;
+    }
+    if (typeof picked !== "string") {
+      error = `The folder picker returned something unexpected: ${JSON.stringify(picked)}`;
+      return;
+    }
+
+    scanning = true;
     try {
       const r = await invoke<{ found: number; added: number; updated: number }>(
         "add_local_folder", { path: picked }
       );
-      notice = `Scanned ${r.found} file${r.found === 1 ? "" : "s"} — ${r.added} added, ${r.updated} updated.`;
+      notice =
+        r.found === 0
+          ? `${picked} — no audio files found in that folder or below it.`
+          : `Scanned ${r.found} file${r.found === 1 ? "" : "s"} — ${r.added} added, ${r.updated} updated.`;
       await refreshLibrary();
     } catch (e) {
       error = String(e);
