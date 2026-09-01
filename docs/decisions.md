@@ -4,6 +4,8 @@ Authoritative. When anything contradicts this file, the other thing is wrong or 
 
 **Append, don't rewrite.** Superseded decisions get struck through with a pointer to what replaced them, so the reasoning survives.
 
+**Provenance.** These rows were drafted in planning sessions with Claude. Some are the owner's business requirements; others are recommendations the owner accepted at the time. Where a decision conflicts with a business requirement the owner states, **the requirement wins**, and the fix is a superseding row (`/decide`) so the log stays true, rather than a silent contradiction in the code. Rows from D65 on say which they are: **(req)** or **(adv)**. Tagging D1–D64 is tracked as a GitHub issue.
+
 | # | Decision | Resolution |
 |---|---|---|
 | D1 | Shell | Tauri v2 + Svelte 5 + Vite |
