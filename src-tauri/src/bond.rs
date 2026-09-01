@@ -37,7 +37,11 @@ impl Rect {
         self.y + self.h
     }
     pub fn translated(&self, dx: Px, dy: Px) -> Rect {
-        Rect { x: self.x + dx, y: self.y + dy, ..*self }
+        Rect {
+            x: self.x + dx,
+            y: self.y + dy,
+            ..*self
+        }
     }
 }
 
@@ -78,13 +82,27 @@ impl Bond {
     pub fn new(a: WindowId, b: WindowId, edge: Edge, span: (Px, Px)) -> Bond {
         match edge {
             Edge::Right | Edge::Bottom => Bond { a, b, edge, span },
-            Edge::Left => Bond { a: b, b: a, edge: Edge::Right, span },
-            Edge::Top => Bond { a: b, b: a, edge: Edge::Bottom, span },
+            Edge::Left => Bond {
+                a: b,
+                b: a,
+                edge: Edge::Right,
+                span,
+            },
+            Edge::Top => Bond {
+                a: b,
+                b: a,
+                edge: Edge::Bottom,
+                span,
+            },
         }
     }
 
     pub fn pair(&self) -> (WindowId, WindowId) {
-        if self.a <= self.b { (self.a, self.b) } else { (self.b, self.a) }
+        if self.a <= self.b {
+            (self.a, self.b)
+        } else {
+            (self.b, self.a)
+        }
     }
 
     pub fn touches(&self, id: WindowId) -> bool {
@@ -221,7 +239,10 @@ pub fn probe(moving: Rect, fixed: Rect, threshold: Px) -> Option<Snap> {
 
     // vertical seams: moving sits against fixed's right or left edge
     if overlap(moving.y, moving.bottom(), fixed.y, fixed.bottom()).is_some() {
-        for (edge, target_x) in [(Edge::Right, fixed.right()), (Edge::Left, fixed.x - moving.w)] {
+        for (edge, target_x) in [
+            (Edge::Right, fixed.right()),
+            (Edge::Left, fixed.x - moving.w),
+        ] {
             let dx = target_x - moving.x;
             if dx.abs() <= threshold {
                 // align tops if they are already close
@@ -235,7 +256,12 @@ pub fn probe(moving: Rect, fixed: Rect, threshold: Px) -> Option<Snap> {
                 let m = moving.translated(dx, dy);
                 if let Some(span2) = overlap(m.y, m.bottom(), fixed.y, fixed.bottom()) {
                     let cost = dx.abs() + dy.abs();
-                    let snap = Snap { edge, span: span2, dx, dy };
+                    let snap = Snap {
+                        edge,
+                        span: span2,
+                        dx,
+                        dy,
+                    };
                     if best.map_or(true, |(c, _)| cost < c) {
                         best = Some((cost, snap));
                     }
@@ -246,7 +272,10 @@ pub fn probe(moving: Rect, fixed: Rect, threshold: Px) -> Option<Snap> {
 
     // horizontal seams: moving sits against fixed's bottom or top edge
     if overlap(moving.x, moving.right(), fixed.x, fixed.right()).is_some() {
-        for (edge, target_y) in [(Edge::Bottom, fixed.bottom()), (Edge::Top, fixed.y - moving.h)] {
+        for (edge, target_y) in [
+            (Edge::Bottom, fixed.bottom()),
+            (Edge::Top, fixed.y - moving.h),
+        ] {
             let dy = target_y - moving.y;
             if dy.abs() <= threshold {
                 let dx = if (fixed.x - moving.x).abs() <= threshold {
@@ -259,7 +288,12 @@ pub fn probe(moving: Rect, fixed: Rect, threshold: Px) -> Option<Snap> {
                 let m = moving.translated(dx, dy);
                 if let Some(span2) = overlap(m.x, m.right(), fixed.x, fixed.right()) {
                     let cost = dx.abs() + dy.abs();
-                    let snap = Snap { edge, span: span2, dx, dy };
+                    let snap = Snap {
+                        edge,
+                        span: span2,
+                        dx,
+                        dy,
+                    };
                     if best.map_or(true, |(c, _)| cost < c) {
                         best = Some((cost, snap));
                     }
@@ -356,8 +390,16 @@ pub fn apply_splitter(
     }
 
     let vertical = bond.edge.is_vertical_seam();
-    let (a_lo, a_hi) = if vertical { (ra.x, ra.right()) } else { (ra.y, ra.bottom()) };
-    let (b_lo, b_hi) = if vertical { (rb.x, rb.right()) } else { (rb.y, rb.bottom()) };
+    let (a_lo, a_hi) = if vertical {
+        (ra.x, ra.right())
+    } else {
+        (ra.y, ra.bottom())
+    };
+    let (b_lo, b_hi) = if vertical {
+        (rb.x, rb.right())
+    } else {
+        (rb.y, rb.bottom())
+    };
     debug_assert_eq!(a_hi, b_lo, "bond was not flush before the splitter drag");
 
     // Clamp so no *resizable* side goes under its minimum. A fixed side imposes
@@ -435,13 +477,18 @@ pub fn apply_splitter_in_graph(
     resizable: &dyn Fn(WindowId) -> bool,
     min_size: Px,
 ) -> SplitterOutcome {
-    let before = [(bond.a, layout.get(&bond.a).copied()), (bond.b, layout.get(&bond.b).copied())];
+    let before = [
+        (bond.a, layout.get(&bond.a).copied()),
+        (bond.b, layout.get(&bond.b).copied()),
+    ];
     let out = apply_splitter(layout, bond, pos, resizable, min_size);
     if out == SplitterOutcome::NotLive {
         return out;
     }
     for (id, b0) in before {
-        let (Some(b0), Some(a1)) = (b0, layout.get(&id).copied()) else { continue };
+        let (Some(b0), Some(a1)) = (b0, layout.get(&id).copied()) else {
+            continue;
+        };
         // only a size-preserving slide drags its neighbours along
         if a1.w != b0.w || a1.h != b0.h {
             continue;
@@ -648,7 +695,10 @@ mod tests {
     #[test]
     fn unbonded_windows_are_their_own_components() {
         let g = WindowGraph::new();
-        assert_eq!(g.components(&[a(), b(), c()]), vec![vec![a()], vec![b()], vec![c()]]);
+        assert_eq!(
+            g.components(&[a(), b(), c()]),
+            vec![vec![a()], vec![b()], vec![c()]]
+        );
     }
 
     // ------------------------------------------- STAGE 5: the named cases
@@ -658,12 +708,18 @@ mod tests {
     fn stage5_break_middle_of_three_in_a_row() {
         let (mut g, _) = chain();
         assert!(g.break_bond(b(), c()));
-        assert_eq!(g.components(&[a(), b(), c()]), vec![vec![a(), b()], vec![c()]]);
+        assert_eq!(
+            g.components(&[a(), b(), c()]),
+            vec![vec![a(), b()], vec![c()]]
+        );
 
         // and the other middle bond, from a fresh chain
         let (mut g2, _) = chain();
         assert!(g2.break_bond(a(), b()));
-        assert_eq!(g2.components(&[a(), b(), c()]), vec![vec![a()], vec![b(), c()]]);
+        assert_eq!(
+            g2.components(&[a(), b(), c()]),
+            vec![vec![a()], vec![b(), c()]]
+        );
     }
 
     /// Break a bond that is not there. Must be a no-op, not a panic or a
@@ -684,7 +740,10 @@ mod tests {
 
         // break A–B: {A} and {B,C}
         g.break_bond(a(), b());
-        assert_eq!(g.components(&[a(), b(), c()]), vec![vec![a()], vec![b(), c()]]);
+        assert_eq!(
+            g.components(&[a(), b(), c()]),
+            vec![vec![a()], vec![b(), c()]]
+        );
 
         // drag A around to C's right-hand side, landing 7 px short
         let c_rect = l[&c()];
@@ -696,14 +755,20 @@ mod tests {
 
         // one component again, and crucially A–B is NOT resurrected
         assert_eq!(g.components(&[a(), b(), c()]), vec![vec![a(), b(), c()]]);
-        assert!(g.bond_between(a(), b()).is_none(), "stale A-B bond leaked back in");
+        assert!(
+            g.bond_between(a(), b()).is_none(),
+            "stale A-B bond leaked back in"
+        );
         assert!(g.bond_between(c(), a()).is_some());
         assert_eq!(g.bonds.len(), 2, "exactly B-C and C-A");
         assert!(violations(&g, &l).is_empty(), "{:?}", violations(&g, &l));
 
         // and breaking the NEW bond splits along the new topology, not the old
         g.break_bond(c(), a());
-        assert_eq!(g.components(&[a(), b(), c()]), vec![vec![a()], vec![b(), c()]]);
+        assert_eq!(
+            g.components(&[a(), b(), c()]),
+            vec![vec![a()], vec![b(), c()]]
+        );
     }
 
     /// L shape: A right of B, C below B. Break A–B. Does C stay with B?
@@ -745,11 +810,17 @@ mod tests {
         // splitter drag begins on the B|C seam
         let bc = *g.bond_between(b(), c()).unwrap();
         apply_splitter(&mut l, &bc, 2 * W - 40, &resizable, 50);
-        assert!(violations(&g, &l).is_empty(), "seam should stay flush mid-drag");
+        assert!(
+            violations(&g, &l).is_empty(),
+            "seam should stay flush mid-drag"
+        );
 
         // mid-drag, the A|B bond is broken
         g.break_bond(a(), b());
-        assert_eq!(g.components(&[a(), b(), c()]), vec![vec![a()], vec![b(), c()]]);
+        assert_eq!(
+            g.components(&[a(), b(), c()]),
+            vec![vec![a()], vec![b(), c()]]
+        );
 
         // the drag continues against the still-valid bond object
         let outcome = apply_splitter(&mut l, &bc, 2 * W - 80, &resizable, 50);
@@ -865,7 +936,11 @@ mod tests {
         let a_w_before = l[&a()].w;
         let out = apply_splitter(&mut l, &bond, W - 40, &only_b, 50);
         assert_eq!(out, SplitterOutcome::OneMoved);
-        assert_eq!(l[&a()].w, a_w_before, "a is fixed, its size must not change");
+        assert_eq!(
+            l[&a()].w,
+            a_w_before,
+            "a is fixed, its size must not change"
+        );
         assert_eq!(l[&a()].right(), l[&b()].x, "seam still flush");
         assert!(violations(&g, &l).is_empty());
     }
@@ -878,7 +953,10 @@ mod tests {
         let bond = *g.bond_between(a(), b()).unwrap();
         let none = |_: WindowId| false;
         let before = l.clone();
-        assert_eq!(apply_splitter(&mut l, &bond, W - 40, &none, 50), SplitterOutcome::NotLive);
+        assert_eq!(
+            apply_splitter(&mut l, &bond, W - 40, &none, 50),
+            SplitterOutcome::NotLive
+        );
         assert_eq!(l, before, "a dead splitter must not move anything");
         assert!(!splitter_is_live(false, false));
         assert!(splitter_is_live(false, true));
@@ -961,7 +1039,10 @@ mod tests {
         g.insert(Bond::new(a(), b(), Edge::Bottom, (0, W)));
         let bond = *g.bond_between(a(), b()).unwrap();
         let all = |_: WindowId| true;
-        assert_eq!(apply_splitter(&mut l, &bond, H + 30, &all, 50), SplitterOutcome::BothResized);
+        assert_eq!(
+            apply_splitter(&mut l, &bond, H + 30, &all, 50),
+            SplitterOutcome::BothResized
+        );
         assert_eq!(l[&a()].bottom(), l[&b()].y);
         assert!(violations(&g, &l).is_empty());
     }
@@ -988,7 +1069,10 @@ mod tests {
     #[test]
     fn no_screen_snap_when_far_away() {
         let screen = Rect::new(0, 0, 2560, 1080);
-        assert_eq!(screen_edge_snap(Rect::new(400, 400, W, H), screen, T), (0, 0));
+        assert_eq!(
+            screen_edge_snap(Rect::new(400, 400, W, H), screen, T),
+            (0, 0)
+        );
     }
 
     // -------------------------------------------------------------- D40
@@ -1038,8 +1122,14 @@ mod tests {
         );
 
         // and it keeps growing: roughly n/2 px after n steps
-        assert_eq!(d40::stepped_naive(base, step, 20, scale) - d40::stepped(base, step, 20, scale), 10);
-        assert_eq!(d40::stepped_naive(base, step, 40, scale) - d40::stepped(base, step, 40, scale), 20);
+        assert_eq!(
+            d40::stepped_naive(base, step, 20, scale) - d40::stepped(base, step, 20, scale),
+            10
+        );
+        assert_eq!(
+            d40::stepped_naive(base, step, 40, scale) - d40::stepped(base, step, 40, scale),
+            20
+        );
 
         // the correct form never drifts, by construction
         for n in 0..=40 {

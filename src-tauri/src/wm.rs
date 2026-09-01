@@ -10,13 +10,12 @@
 //! truth and every physical number is recomputed from them, never carried
 //! forward (D40).
 
-use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::Connection;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
 };
 
 use crate::bond::{self, Bond, Edge, Layout, Px, Rect, WindowGraph, WindowId};
@@ -125,7 +124,9 @@ pub fn monitor_at(monitors: &[MonitorInfo], x: Px, y: Px) -> Option<MonitorInfo>
 /// not from the window being dragged. A 10 px magnet has to feel like 10 px
 /// under the hand, whichever display the window itself is on.
 pub fn scale_at(monitors: &[MonitorInfo], x: Px, y: Px, fallback: f64) -> f64 {
-    monitor_at(monitors, x, y).map(|m| m.scale).unwrap_or(fallback)
+    monitor_at(monitors, x, y)
+        .map(|m| m.scale)
+        .unwrap_or(fallback)
 }
 
 /// D53: a shared monitor edge is **not** a screen edge.
@@ -151,34 +152,42 @@ pub fn screen_rect_for(monitors: &[MonitorInfo], start: Rect, group: Rect) -> Re
     let limit = monitors.len() + 1;
 
     for _ in 0..limit {
-        let Some(n) = monitors.iter().map(|m| m.rect).find(|n| {
-            n.x == r.right() && n.y <= group.y && n.bottom() >= group.bottom()
-        }) else {
+        let Some(n) = monitors
+            .iter()
+            .map(|m| m.rect)
+            .find(|n| n.x == r.right() && n.y <= group.y && n.bottom() >= group.bottom())
+        else {
             break;
         };
         r.w = n.right() - r.x;
     }
     for _ in 0..limit {
-        let Some(n) = monitors.iter().map(|m| m.rect).find(|n| {
-            n.right() == r.x && n.y <= group.y && n.bottom() >= group.bottom()
-        }) else {
+        let Some(n) = monitors
+            .iter()
+            .map(|m| m.rect)
+            .find(|n| n.right() == r.x && n.y <= group.y && n.bottom() >= group.bottom())
+        else {
             break;
         };
         r.w = r.right() - n.x;
         r.x = n.x;
     }
     for _ in 0..limit {
-        let Some(n) = monitors.iter().map(|m| m.rect).find(|n| {
-            n.y == r.bottom() && n.x <= group.x && n.right() >= group.right()
-        }) else {
+        let Some(n) = monitors
+            .iter()
+            .map(|m| m.rect)
+            .find(|n| n.y == r.bottom() && n.x <= group.x && n.right() >= group.right())
+        else {
             break;
         };
         r.h = n.bottom() - r.y;
     }
     for _ in 0..limit {
-        let Some(n) = monitors.iter().map(|m| m.rect).find(|n| {
-            n.bottom() == r.y && n.x <= group.x && n.right() >= group.right()
-        }) else {
+        let Some(n) = monitors
+            .iter()
+            .map(|m| m.rect)
+            .find(|n| n.bottom() == r.y && n.x <= group.x && n.right() >= group.right())
+        else {
             break;
         };
         r.h = r.bottom() - n.y;
@@ -241,7 +250,10 @@ pub struct DragState {
 
 impl WmState {
     fn handle(&self, id: WindowId) -> NativeWindow {
-        self.handles.get(id.0 as usize).copied().unwrap_or(NativeWindow::NONE)
+        self.handles
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(NativeWindow::NONE)
     }
 }
 
@@ -438,7 +450,10 @@ pub fn show_classic_windows(app: &AppHandle) -> tauri::Result<()> {
 /// perfectly self-consistent while describing a layout that exists nowhere, so
 /// the OS is the authority and the model is the thing that gets corrected.
 pub fn register(app: &AppHandle) -> tauri::Result<()> {
-    let scale = app.primary_monitor()?.map(|m| m.scale_factor()).unwrap_or(1.0);
+    let scale = app
+        .primary_monitor()?
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0);
 
     // D55: read the topology once, here. Every interaction afterwards is a
     // lookup against this cache, because monitor_from_point() from a sync
@@ -993,14 +1008,7 @@ pub fn splitter_move(app: &AppHandle) {
         } else {
             bond::d40::physical(CHROME_H, scale)
         };
-        bond::apply_splitter_in_graph(
-            &mut layout,
-            &s.graph,
-            &sp.bond,
-            pos,
-            &is_resizable,
-            min,
-        );
+        bond::apply_splitter_in_graph(&mut layout, &s.graph, &sp.bond, pos, &is_resizable, min);
         s.layout = layout.clone();
         (layout, s.graph.component(sp.bond.a))
     };
@@ -1178,7 +1186,9 @@ pub fn toggle_shade(app: &AppHandle, id: WindowId) {
 /// Returns the per-window flags so the caller can emit them once the lock is
 /// gone.
 pub fn focus_plan(state: &WmState, focused: Option<WindowId>) -> Vec<(WindowId, bool)> {
-    let group = focused.map(|f| state.graph.component(f)).unwrap_or_default();
+    let group = focused
+        .map(|f| state.graph.component(f))
+        .unwrap_or_default();
     CLASSIC.iter().map(|id| (*id, group.contains(id))).collect()
 }
 
@@ -1305,7 +1315,10 @@ pub fn rescue_layout(layout: &Layout, graph: &WindowGraph, monitors: &[MonitorIn
         let Some(bounds) = bond::bounds(&out, &comp) else {
             continue;
         };
-        if comp.iter().any(|id| out.get(id).is_some_and(|r| is_on_screen(*r, monitors))) {
+        if comp
+            .iter()
+            .any(|id| out.get(id).is_some_and(|r| is_on_screen(*r, monitors)))
+        {
             continue;
         }
         let Some(m) = nearest_monitor(monitors, bounds) else {
@@ -1418,7 +1431,10 @@ pub fn spawn_display_watch(app: &AppHandle) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let handle = app.clone();
-            if app.run_on_main_thread(move || check_displays(&handle)).is_err() {
+            if app
+                .run_on_main_thread(move || check_displays(&handle))
+                .is_err()
+            {
                 break; // app is shutting down
             }
         }
@@ -1478,7 +1494,10 @@ pub fn save(
     }
 
     let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM window_layout WHERE window_id IN ('main','eq','playlist')", [])?;
+    tx.execute(
+        "DELETE FROM window_layout WHERE window_id IN ('main','eq','playlist')",
+        [],
+    )?;
     tx.execute("DELETE FROM window_bonds", [])?;
 
     for id in CLASSIC {
@@ -1591,8 +1610,7 @@ pub fn load(conn: &Connection) -> Option<Restored> {
     }
 
     let mut graph = WindowGraph::new();
-    if let Ok(mut stmt) =
-        conn.prepare("SELECT a, b, edge, span_start, span_end FROM window_bonds")
+    if let Ok(mut stmt) = conn.prepare("SELECT a, b, edge, span_start, span_end FROM window_bonds")
     {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
@@ -1604,8 +1622,7 @@ pub fn load(conn: &Connection) -> Option<Restored> {
             ))
         }) {
             for (a, b, edge, s0, s1) in rows.flatten() {
-                let (Some(a), Some(b), Some(edge)) =
-                    (id_of(&a), id_of(&b), edge_from_str(&edge))
+                let (Some(a), Some(b), Some(edge)) = (id_of(&a), id_of(&b), edge_from_str(&edge))
                 else {
                     continue;
                 };
@@ -1614,7 +1631,12 @@ pub fn load(conn: &Connection) -> Option<Restored> {
         }
     }
 
-    Some(Restored { layout, graph, shaded, unshaded_h })
+    Some(Restored {
+        layout,
+        graph,
+        shaded,
+        unshaded_h,
+    })
 }
 
 // ---- tests ------------------------------------------------------------------
@@ -1716,8 +1738,14 @@ mod tests {
         assert!(!is_resizable(MAIN));
         assert!(!is_resizable(EQ));
         assert!(is_resizable(PLAYLIST));
-        assert!(!bond::splitter_is_live(is_resizable(MAIN), is_resizable(EQ)));
-        assert!(bond::splitter_is_live(is_resizable(EQ), is_resizable(PLAYLIST)));
+        assert!(!bond::splitter_is_live(
+            is_resizable(MAIN),
+            is_resizable(EQ)
+        ));
+        assert!(bond::splitter_is_live(
+            is_resizable(EQ),
+            is_resizable(PLAYLIST)
+        ));
     }
 
     #[test]
@@ -1729,11 +1757,13 @@ mod tests {
         assert_ne!(bond::d40::physical(CHROME_W, 1.5) * 2, 825);
     }
 
-
     // ---- monitors -----------------------------------------------------------
 
     fn mon(x: Px, y: Px, w: Px, h: Px, scale: f64) -> MonitorInfo {
-        MonitorInfo { rect: Rect::new(x, y, w, h), scale }
+        MonitorInfo {
+            rect: Rect::new(x, y, w, h),
+            scale,
+        }
     }
 
     /// Laptop at 150% on the left, external at 100% to its right, sharing the
@@ -1749,8 +1779,14 @@ mod tests {
         let ms = two_monitors();
         assert_eq!(scale_at(&ms, 100, 100, 1.0), 1.5);
         assert_eq!(scale_at(&ms, 3000, 100, 1.5), 1.0);
-        assert_eq!(bond::d40::threshold(SNAP_THRESHOLD, scale_at(&ms, 100, 100, 1.0)), 15);
-        assert_eq!(bond::d40::threshold(SNAP_THRESHOLD, scale_at(&ms, 3000, 100, 1.0)), 10);
+        assert_eq!(
+            bond::d40::threshold(SNAP_THRESHOLD, scale_at(&ms, 100, 100, 1.0)),
+            15
+        );
+        assert_eq!(
+            bond::d40::threshold(SNAP_THRESHOLD, scale_at(&ms, 3000, 100, 1.0)),
+            10
+        );
     }
 
     #[test]
@@ -1813,7 +1849,10 @@ mod tests {
         let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
         let g = Rect::new(100, 100, 275, 116);
         assert_eq!(screen_rect_for(&ms, ms[0].rect, g), ms[0].rect);
-        assert_eq!(screen_rect_for(&[], Rect::new(0, 0, 800, 600), g), Rect::new(0, 0, 800, 600));
+        assert_eq!(
+            screen_rect_for(&[], Rect::new(0, 0, 800, 600), g),
+            Rect::new(0, 0, 800, 600)
+        );
     }
 
     // ---- drag ---------------------------------------------------------------
@@ -1854,11 +1893,15 @@ mod tests {
         let one_shot = drag_frame(&origin, &[MAIN, EQ], (3000, 1000), &[PLAYLIST], 10, None);
         assert_eq!(last[&MAIN], one_shot[&MAIN]);
         assert_eq!(last[&EQ], one_shot[&EQ]);
-        assert!(bond::violations(&{
-            let mut g = WindowGraph::new();
-            g.insert(Bond::new(MAIN, EQ, Edge::Bottom, (0, 275)));
-            g
-        }, &last).is_empty());
+        assert!(bond::violations(
+            &{
+                let mut g = WindowGraph::new();
+                g.insert(Bond::new(MAIN, EQ, Edge::Bottom, (0, 275)));
+                g
+            },
+            &last
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1869,7 +1912,11 @@ mod tests {
         let out = drag_frame(&origin, &[MAIN, EQ], (318, 0), &[PLAYLIST], 10, None);
         assert_eq!(out[&MAIN].right(), out[&PLAYLIST].x, "did not snap flush");
         assert_eq!(out[&EQ].x, out[&MAIN].x, "eq did not come along");
-        assert_eq!(out[&MAIN].bottom(), out[&EQ].y, "the group's own bond opened");
+        assert_eq!(
+            out[&MAIN].bottom(),
+            out[&EQ].y,
+            "the group's own bond opened"
+        );
     }
 
     #[test]
@@ -1888,7 +1935,11 @@ mod tests {
         origin.insert(EQ, Rect::new(283, 0, 275, 116)); // 8 px to the right
         origin.insert(PLAYLIST, Rect::new(-278, 0, 275, 116)); // 3 px to the left
         let out = drag_frame(&origin, &[MAIN], (0, 0), &[EQ, PLAYLIST], 10, None);
-        assert_eq!(out[&MAIN].x, origin[&PLAYLIST].right(), "snapped to the far one");
+        assert_eq!(
+            out[&MAIN].x,
+            origin[&PLAYLIST].right(),
+            "snapped to the far one"
+        );
     }
 
     #[test]
@@ -1896,7 +1947,14 @@ mod tests {
         let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
         let screen = screen_rect_for(&ms, ms[0].rect, Rect::new(0, 0, 275, 232));
         let origin = drag_layout();
-        let out = drag_frame(&origin, &[MAIN, EQ], (-6, -4), &[PLAYLIST], 10, Some(screen));
+        let out = drag_frame(
+            &origin,
+            &[MAIN, EQ],
+            (-6, -4),
+            &[PLAYLIST],
+            10,
+            Some(screen),
+        );
         assert_eq!(out[&MAIN], Rect::new(0, 0, 275, 116));
         // No resize, and the group's internal offset is untouched.
         assert_eq!(out[&EQ], Rect::new(0, 116, 275, 116));
@@ -1913,7 +1971,11 @@ mod tests {
         origin.insert(EQ, Rect::new(291, 300, 275, 116));
         origin.insert(PLAYLIST, Rect::new(1600, 900, 275, 116));
         let out = drag_frame(&origin, &[MAIN], (0, 0), &[EQ, PLAYLIST], 10, Some(screen));
-        assert_eq!(out[&MAIN].right(), origin[&EQ].x, "took the screen edge instead");
+        assert_eq!(
+            out[&MAIN].right(),
+            origin[&EQ].x,
+            "took the screen edge instead"
+        );
         assert_ne!(out[&MAIN].x, 0);
     }
 
@@ -1974,7 +2036,6 @@ mod tests {
         assert!(flags.iter().all(|(_, active)| !active));
     }
 
-
     // ---- seams --------------------------------------------------------------
 
     /// The default stack: main on top, eq under it, playlist under that.
@@ -1990,15 +2051,25 @@ mod tests {
         // up drawn on the outside of a group.
         assert_eq!(
             edges_for(&s, MAIN),
-            Edges { bottom: Some(false), ..Default::default() }
+            Edges {
+                bottom: Some(false),
+                ..Default::default()
+            }
         );
         assert_eq!(
             edges_for(&s, EQ),
-            Edges { top: Some(false), bottom: Some(true), ..Default::default() }
+            Edges {
+                top: Some(false),
+                bottom: Some(true),
+                ..Default::default()
+            }
         );
         assert_eq!(
             edges_for(&s, PLAYLIST),
-            Edges { top: Some(true), ..Default::default() }
+            Edges {
+                top: Some(true),
+                ..Default::default()
+            }
         );
     }
 
@@ -2100,7 +2171,11 @@ mod tests {
         // an owner.
         let plan = plan_ownership(&s, Some(PLAYLIST));
         let root_of = |id: WindowId| {
-            plan.owners.iter().find(|(w, _)| *w == s.handle(id)).unwrap().1
+            plan.owners
+                .iter()
+                .find(|(w, _)| *w == s.handle(id))
+                .unwrap()
+                .1
         };
         assert_eq!(root_of(MAIN), root_of(EQ));
         assert_ne!(root_of(MAIN), root_of(PLAYLIST));
@@ -2145,7 +2220,11 @@ mod tests {
     fn the_opening_stack_is_flush_and_bonded_at_any_scale() {
         for scale in [1.0, 1.25, 1.5, 2.0] {
             let (layout, graph) = initial_layout(scale);
-            assert_eq!(graph.components(&CLASSIC).len(), 1, "scale {scale} came up split");
+            assert_eq!(
+                graph.components(&CLASSIC).len(),
+                1,
+                "scale {scale} came up split"
+            );
             assert!(
                 bond::violations(&graph, &layout).is_empty(),
                 "scale {scale} opened with a gap in the seam"
@@ -2171,7 +2250,6 @@ mod tests {
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].0.pair(), (EQ, PLAYLIST));
     }
-
 
     // ---- windowshade (D60/D61) ----------------------------------------------
 
@@ -2220,7 +2298,10 @@ mod tests {
         let mut layout = s.layout.clone();
         apply_shade(&mut layout, &s.graph, EQ, 14);
         apply_shade(&mut layout, &s.graph, EQ, 116);
-        assert_eq!(layout, s.layout, "the stack did not come back to where it was");
+        assert_eq!(
+            layout, s.layout,
+            "the stack did not come back to where it was"
+        );
     }
 
     #[test]
@@ -2286,7 +2367,6 @@ mod tests {
         assert!(topmost_set(&s).is_empty());
     }
 
-
     // ---- rescue (D57) -------------------------------------------------------
 
     #[test]
@@ -2312,9 +2392,15 @@ mod tests {
     fn the_nearest_surviving_display_wins() {
         let ms = two_monitors();
         // Just off the left-hand display's top-left.
-        assert_eq!(nearest_monitor(&ms, Rect::new(-500, 0, 275, 116)), Some(ms[0]));
+        assert_eq!(
+            nearest_monitor(&ms, Rect::new(-500, 0, 275, 116)),
+            Some(ms[0])
+        );
         // Out beyond the right-hand one.
-        assert_eq!(nearest_monitor(&ms, Rect::new(5000, 500, 275, 116)), Some(ms[1]));
+        assert_eq!(
+            nearest_monitor(&ms, Rect::new(5000, 500, 275, 116)),
+            Some(ms[1])
+        );
     }
 
     #[test]
@@ -2352,7 +2438,10 @@ mod tests {
         bond::translate_group(&mut layout, &[PLAYLIST], -32000, -32000);
 
         let out = rescue_layout(&layout, &s.graph, &ms);
-        assert_eq!(out[&MAIN], s.layout[&MAIN], "an on-screen group was disturbed");
+        assert_eq!(
+            out[&MAIN], s.layout[&MAIN],
+            "an on-screen group was disturbed"
+        );
         assert_eq!(out[&EQ], s.layout[&EQ], "an on-screen group was disturbed");
         assert!(is_on_screen(out[&PLAYLIST], &ms));
     }
@@ -2394,7 +2483,15 @@ mod tests {
         // drag.
         let conn = memory_db();
         let s = stacked();
-        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        save(
+            &conn,
+            &s.layout,
+            &s.graph,
+            &s.shaded,
+            &s.unshaded_h,
+            &s.monitors,
+        )
+        .unwrap();
 
         let r = load(&conn).expect("nothing came back");
         assert_eq!(r.layout, s.layout);
@@ -2407,7 +2504,15 @@ mod tests {
         let conn = memory_db();
         let mut s = stacked();
         s.graph.break_bond(EQ, PLAYLIST);
-        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        save(
+            &conn,
+            &s.layout,
+            &s.graph,
+            &s.shaded,
+            &s.unshaded_h,
+            &s.monitors,
+        )
+        .unwrap();
 
         let r = load(&conn).expect("nothing came back");
         assert_eq!(r.graph.components(&CLASSIC).len(), 2);
@@ -2434,7 +2539,15 @@ mod tests {
         apply_shade(&mut s.layout, &graph, EQ, 14);
         assert_eq!(s.layout[&PLAYLIST].y, before[&PLAYLIST].y - 102);
 
-        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        save(
+            &conn,
+            &s.layout,
+            &s.graph,
+            &s.shaded,
+            &s.unshaded_h,
+            &s.monitors,
+        )
+        .unwrap();
         let r = load(&conn).expect("nothing came back");
 
         // What is stored is the expanded world, and it is flush.
@@ -2472,7 +2585,15 @@ mod tests {
         s.unshaded_h.insert(PLAYLIST, 174);
         s.shaded.insert(PLAYLIST);
         s.layout.insert(PLAYLIST, Rect::new(0, 232, 275, 14));
-        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        save(
+            &conn,
+            &s.layout,
+            &s.graph,
+            &s.shaded,
+            &s.unshaded_h,
+            &s.monitors,
+        )
+        .unwrap();
 
         let r = load(&conn).expect("nothing came back");
         assert!(r.shaded.contains(&PLAYLIST));
@@ -2485,7 +2606,15 @@ mod tests {
         let conn = memory_db();
         let s = stacked();
         for _ in 0..3 {
-            save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+            save(
+                &conn,
+                &s.layout,
+                &s.graph,
+                &s.shaded,
+                &s.unshaded_h,
+                &s.monitors,
+            )
+            .unwrap();
         }
         let layouts: i64 = conn
             .query_row("SELECT COUNT(*) FROM window_layout", [], |r| r.get(0))
@@ -2510,7 +2639,15 @@ mod tests {
         let conn = memory_db();
         let mut s = stacked();
         s.layout.remove(&PLAYLIST);
-        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        save(
+            &conn,
+            &s.layout,
+            &s.graph,
+            &s.shaded,
+            &s.unshaded_h,
+            &s.monitors,
+        )
+        .unwrap();
         assert!(load(&conn).is_none());
     }
 
@@ -2520,7 +2657,15 @@ mod tests {
         let mut s = stacked();
         s.monitors = two_monitors();
         s.layout.insert(MAIN, Rect::new(3000, 100, 275, 116));
-        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        save(
+            &conn,
+            &s.layout,
+            &s.graph,
+            &s.shaded,
+            &s.unshaded_h,
+            &s.monitors,
+        )
+        .unwrap();
         let id: Option<String> = conn
             .query_row(
                 "SELECT monitor_id FROM window_layout WHERE window_id = 'main'",
