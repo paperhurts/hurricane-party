@@ -28,6 +28,8 @@ impl WindowPlatform for StubPlatform {
         (0, 0)
     }
 
+    fn set_topmost(&self, _w: NativeWindow, _on: bool) {}
+
     fn is_minimized(&self, _w: NativeWindow) -> bool {
         false
     }

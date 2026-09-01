@@ -24,30 +24,32 @@
   // Rust holds the bond graph. A window cannot work out on its own whether a
   // sibling being focused should light it up, or whether its bottom edge is
   // somebody else's top edge.
+  type WmState = { edges: Edges; active: boolean; shaded: boolean };
+
   let active = $state(true);
+  let shaded = $state(false);
   let edges = $state<Edges>({ top: null, right: null, bottom: null, left: null });
 
+  function absorb(s: WmState) {
+    edges = s.edges;
+    active = s.active;
+    shaded = s.shaded;
+  }
+
   $effect(() => {
-    const subs = [
-      listen<boolean>("wm:active", (e) => {
-        active = e.payload;
-      }),
-      listen<Edges>("wm:edges", (e) => {
-        edges = e.payload;
-      }),
-    ];
+    // One event carrying the whole picture. Seams, focus and shade all derive
+    // from the same locked state in Rust, so splitting them into separate
+    // messages would only let this window hold two of them from different
+    // moments.
+    const subs = [listen<WmState>("wm:state", (e) => absorb(e.payload))];
     // Subscribe first, then ask. The push events fire when something changes,
     // and the first one is emitted during Rust setup -- long before this bundle
     // has loaded. Without the pull the seams simply never appear, and every
     // click on one falls through to the title bar underneath and moves the
     // group instead of resizing it.
-    invoke<{ edges: Edges; active: boolean } | null>("wm_hello", { label }).then(
-      (state) => {
-        if (!state) return;
-        edges = state.edges;
-        active = state.active;
-      },
-    );
+    invoke<WmState | null>("wm_hello", { label }).then((s) => {
+      if (s) absorb(s);
+    });
     return () => {
       for (const s of subs) s.then((off) => off());
     };
@@ -105,6 +107,12 @@
     gesture = "none";
   }
 
+  // D60. The seam already owns dblclick for demagnetize, and its 4px strip
+  // stacks above the title bar, so the hit target decides which one fires.
+  function toggleShade() {
+    invoke("wm_toggle_shade", { label });
+  }
+
   function demagnetize(side: Side) {
     if (edges[side] === null) return;
     invoke("wm_demagnetize", { label, edge: side });
@@ -126,8 +134,15 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="chrome" data-active={active} onpointerdown={raise}>
-  <div class="titlebar" onpointerdown={titleDown} onpointermove={move} onpointerup={up} onpointercancel={up}>
+<div class="chrome" data-active={active} data-shaded={shaded} onpointerdown={raise}>
+  <div
+    class="titlebar"
+    onpointerdown={titleDown}
+    onpointermove={move}
+    onpointerup={up}
+    onpointercancel={up}
+    ondblclick={toggleShade}
+  >
     {title}
   </div>
   <div class="body">{body}</div>

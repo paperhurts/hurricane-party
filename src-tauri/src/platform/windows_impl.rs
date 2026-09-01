@@ -12,7 +12,8 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWLP_HWNDPARENT, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNOACTIVATE,
+    GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SW_SHOWNOACTIVATE,
 };
 
 pub struct Win32Platform;
@@ -98,6 +99,23 @@ impl WindowPlatform for Win32Platform {
             let _ = GetCursorPos(&mut p);
         }
         (p.x, p.y)
+    }
+
+    fn set_topmost(&self, w: NativeWindow, on: bool) {
+        // SAFETY: NOMOVE|NOSIZE means the four zeros are ignored, and
+        // NOACTIVATE keeps the mini-player from stealing focus the moment it
+        // floats.
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd(w),
+                Some(if on { HWND_TOPMOST } else { HWND_NOTOPMOST }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
     }
 
     fn is_minimized(&self, w: NativeWindow) -> bool {

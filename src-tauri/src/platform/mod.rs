@@ -75,6 +75,14 @@ pub trait WindowPlatform: Send + Sync {
     /// message and cannot deadlock under D54.
     fn cursor_pos(&self) -> (i32, i32);
 
+    /// D61: keep a window above every non-topmost window, without activating it.
+    ///
+    /// Applied to a whole bond group rather than one window: the classic three
+    /// are owned by a hidden root and not by each other (D41), so topmost does
+    /// not propagate along ownership the way a raise does. Lifting only the
+    /// shaded Main window would leave its bonded neighbours behind other apps.
+    fn set_topmost(&self, w: NativeWindow, on: bool);
+
     /// D57: is this window minimized?
     ///
     /// Losing a display minimizes the group rather than relocating it. The
