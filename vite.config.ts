@@ -19,12 +19,12 @@ export default defineConfig({
       // share a document -- windows are not routes, and this is the whole
       // reason the frontend is plain Vite rather than SvelteKit.
       input: {
-        library: resolve(__dirname, "index.html"),
-        main: resolve(__dirname, "main.html"),
-        eq: resolve(__dirname, "eq.html"),
-        playlist: resolve(__dirname, "playlist.html"),
-        video: resolve(__dirname, "video.html"),
-        root: resolve(__dirname, "root.html"),
+        library: resolve(import.meta.dirname, "index.html"),
+        main: resolve(import.meta.dirname, "main.html"),
+        eq: resolve(import.meta.dirname, "eq.html"),
+        playlist: resolve(import.meta.dirname, "playlist.html"),
+        video: resolve(import.meta.dirname, "video.html"),
+        root: resolve(import.meta.dirname, "root.html"),
       },
     },
   },

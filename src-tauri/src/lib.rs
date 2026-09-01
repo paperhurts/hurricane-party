@@ -303,6 +303,30 @@ fn wire_focus_events(app: &AppHandle) {
         };
         let handle = app.clone();
         win.on_window_event(move |event| {
+            // D63: closing the Main window quits the app; the satellites refuse
+            // to close at all.
+            //
+            // This is not a nicety, it is the only way out. Tauri exits when
+            // every window is closed, and D41's three hidden roots are windows
+            // that are never shown and can never be closed — so that condition
+            // could not be met, and the app had no exit path whatsoever.
+            // Worse, closing Main from the taskbar destroyed only Main and left
+            // eq and playlist behind as undecorated windows with no taskbar
+            // button and no title bar: D59's unrecoverable state, reached
+            // without a monitor ever being unplugged.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if id == wm::MAIN {
+                    wm::save_now(&handle);
+                    handle.exit(0);
+                } else {
+                    // The satellites have no close affordance of their own and
+                    // nothing yet to bring them back, so Alt+F4 doing nothing
+                    // beats a window that vanishes for good. Reopening them is
+                    // v0.4b, with the sprite chrome that offers it.
+                    api.prevent_close();
+                }
+                return;
+            }
             let tauri::WindowEvent::Focused(gained) = event else {
                 return;
             };
@@ -325,6 +349,29 @@ fn wire_focus_events(app: &AppHandle) {
             });
         });
     }
+}
+
+/// D63, the other half: the library window is an ordinary decorated window, so
+/// closing it closes it — but it must not be able to leave the app running with
+/// no way out either. If the classic windows are somehow already gone, closing
+/// the library is the last window the user can actually see, and the hidden
+/// roots would keep the process alive invisibly.
+fn wire_library_close(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("library") else {
+        return;
+    };
+    let handle = app.clone();
+    win.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            return;
+        }
+        let any_classic_left = wm::CLASSIC
+            .iter()
+            .any(|id| handle.get_webview_window(wm::label_of(*id)).is_some());
+        if !any_classic_left {
+            handle.exit(0);
+        }
+    });
 }
 
 pub fn run() {
@@ -382,6 +429,7 @@ pub fn run() {
             wm::build_classic_windows(&handle)?;
             wm::register(&handle)?;
             wire_focus_events(&handle);
+            wire_library_close(&handle);
             // Last: the windows are only revealed once the bond graph and the
             // ownership topology behind them are real.
             wm::show_classic_windows(&handle)?;
