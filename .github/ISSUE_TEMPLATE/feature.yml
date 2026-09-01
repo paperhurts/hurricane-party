@@ -1,0 +1,25 @@
+name: Feature
+description: Something the app should do that it does not yet
+labels: [feature]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: In business terms, reviewable by anyone. What can the user do afterward that they cannot do now?
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything already known. Constraints, prior art, what it must not do.
+  - type: input
+    id: decisions
+    attributes:
+      label: Decisions implicated
+      placeholder: D21, D31
+  - type: markdown
+    attributes:
+      value: |
+        Set the milestone on the issue. The brief (scope, acceptance, hand test) is added with `/brief` before anyone implements.

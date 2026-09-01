@@ -128,7 +128,12 @@ fn claim_next(conn: &Connection) -> Result<Option<Job>, DbError> {
     }
 }
 
-pub fn set_identity(conn: &Connection, id: i64, title: &str, video_id: &str) -> Result<(), DbError> {
+pub fn set_identity(
+    conn: &Connection,
+    id: i64,
+    title: &str,
+    video_id: &str,
+) -> Result<(), DbError> {
     conn.execute(
         "UPDATE jobs SET title = ?2, video_id = ?3, updated_at = ?4 WHERE id = ?1",
         params![id, title, video_id, db::now()],
@@ -233,7 +238,9 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<(), DbError>
             db::now(),
             track.kind,
             std::path::Path::new(&track.path)
-                .extension().and_then(|e| e.to_str()).unwrap_or("mp3"),
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("mp3"),
         ],
     )?;
     Ok(())
