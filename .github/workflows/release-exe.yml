@@ -1,0 +1,65 @@
+# The shipping exe, built on demand. Not part of the PR gate: it fetches the
+# three pinned sidecars (~230 MB; D46, D47, D48) and takes several minutes.
+#
+# Run it from the Actions tab (workflow_dispatch) when a merged build is wanted
+# on another machine, or push a v* tag. The artifact is the exe plus the three
+# sidecars Tauri copies beside it: unzip anywhere and run. Windows 11 already
+# ships the WebView2 runtime. Artifacts expire after 14 days to keep the private
+# repo's storage small; re-run the workflow for a fresh one.
+name: release-exe
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: cargo-release-${{ runner.os }}-
+
+      - name: Fetch the pinned sidecars
+        shell: pwsh
+        run: ./tools/fetch-sidecars.ps1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: pnpm
+        run: npm install -g pnpm@9
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (no installer)
+        run: pnpm tauri build --no-bundle
+
+      - name: Collect the exe and its sidecars
+        run: |
+          mkdir -p out
+          cp src-tauri/target/release/*.exe out/
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hurricane-party-${{ github.ref_name }}-${{ github.sha }}
+          path: out/
+          retention-days: 14
