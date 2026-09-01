@@ -31,3 +31,8 @@ src-tauri/binaries/
 
 # screenshots dropped in by hand
 .sid/
+
+# Claude Code: the skills are shared, the local settings are not.
+# settings.local.json holds per-machine choices (which plugins this checkout
+# has enabled) and would fight between machines if it were tracked.
+.claude/settings.local.json
