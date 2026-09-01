@@ -385,6 +385,10 @@ pub fn run() {
             // Last: the windows are only revealed once the bond graph and the
             // ownership topology behind them are real.
             wm::show_classic_windows(&handle)?;
+            // D62: the display watchdog. Polls rather than hooking
+            // WM_DISPLAYCHANGE, and covers a group already stranded at launch
+            // as well as one stranded while running.
+            wm::spawn_display_watch(&handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

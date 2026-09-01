@@ -11,6 +11,7 @@
 //! forward (D40).
 
 use std::collections::{BTreeMap, BTreeSet};
+use rusqlite::Connection;
 use std::sync::Mutex;
 
 use tauri::{
@@ -288,13 +289,53 @@ pub fn initial_layout(scale: f64) -> (Layout, WindowGraph) {
 /// D58 still holds: this is *intent*, and `register` reconciles it against what
 /// the OS actually did.
 pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
-    let scale = app.primary_monitor()?.map(|m| m.scale_factor()).unwrap_or(1.0);
-    let (layout, graph) = initial_layout(scale);
+    let monitors = read_monitors(app);
+    let scale = monitors.first().map(|m| m.scale).unwrap_or(1.0);
+
+    // D33: last session's geometry, bonds and shade state, if there are any.
+    let restored = app.try_state::<crate::db::Db>().and_then(|db| {
+        let conn = db.0.lock().unwrap();
+        load(&conn)
+    });
+
+    let (mut layout, graph, shaded, unshaded_h) = match restored {
+        Some(r) => (r.layout, r.graph, r.shaded, r.unshaded_h),
+        None => {
+            let (l, g) = initial_layout(scale);
+            (l, g, BTreeSet::new(), BTreeMap::new())
+        }
+    };
+
+    // D33 again, and the reason the column records a monitor at all: a layout
+    // saved on a display that is no longer attached must not restore into empty
+    // space. Same rigid-translation rescue the display watchdog uses, so a
+    // group that comes back does so with its bonds intact.
+    layout = rescue_layout(&layout, &graph, &monitors);
+
+    // Re-collapse whatever was left shaded. The stored height is the *unshaded*
+    // one, so this is a fresh collapse from a known-good size rather than a
+    // 14 px rect remembered from last time — which is what keeps a resized
+    // playlist from being lost across a restart.
+    for id in CLASSIC {
+        if !shaded.contains(&id) {
+            continue;
+        }
+        let at = layout
+            .get(&id)
+            .and_then(|r| monitor_at(&monitors, r.x, r.y))
+            .map(|m| m.scale)
+            .unwrap_or(scale);
+        apply_shade(&mut layout, &graph, id, bond::d40::physical(SHADE_H, at));
+    }
+
     let state = app.state::<Wm>();
     let mut s = state.0.lock().unwrap();
     s.scale = scale;
+    s.monitors = monitors;
     s.layout = layout;
     s.graph = graph;
+    s.shaded = shaded;
+    s.unshaded_h = unshaded_h;
     Ok(())
 }
 
@@ -726,6 +767,26 @@ pub fn drag_move(app: &AppHandle) {
 
 /// End a drag: form whatever bonds the final position earned, then re-apply the
 /// ownership topology so the new group shape is real in the z-order too.
+/// Recompute every bond's span from where the windows actually are.
+///
+/// The span is the overlapping extent of a shared boundary, so it moves when
+/// the windows move. Nothing reads it yet — `violations` checks flushness and
+/// overlap, not the recorded span — which is exactly why it needs doing now:
+/// it is persisted (D33), and a stale span would be silently written to disk
+/// and read back as though it meant something.
+pub fn resync_spans(graph: &mut WindowGraph, layout: &Layout) {
+    for b in &mut graph.bonds {
+        let (Some(ra), Some(rb)) = (layout.get(&b.a).copied(), layout.get(&b.b).copied()) else {
+            continue;
+        };
+        b.span = if b.edge.is_vertical_seam() {
+            (ra.y.max(rb.y), ra.bottom().min(rb.bottom()))
+        } else {
+            (ra.x.max(rb.x), ra.right().min(rb.right()))
+        };
+    }
+}
+
 pub fn drag_end(app: &AppHandle) {
     let plan = {
         let state = app.state::<Wm>();
@@ -742,11 +803,14 @@ pub fn drag_end(app: &AppHandle) {
         for b in bonds_after_drag(&s.layout, &drag.moving, &others) {
             s.graph.insert(b);
         }
+        let layout = s.layout.clone();
+        resync_spans(&mut s.graph, &layout);
         let active = drag.moving.first().copied();
         plan_ownership(&s, active)
     };
     apply_ownership(&plan);
     emit_state(app);
+    save_now(app);
 }
 
 // ---- seams ------------------------------------------------------------------
@@ -945,9 +1009,12 @@ pub fn splitter_move(app: &AppHandle) {
 }
 
 pub fn splitter_end(app: &AppHandle) {
-    let state = app.state::<Wm>();
-    let mut s = state.0.lock().unwrap();
-    s.splitter = None;
+    {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        s.splitter = None;
+    }
+    save_now(app);
 }
 
 /// Double-click on a seam: demagnetize.
@@ -971,6 +1038,7 @@ pub fn demagnetize(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
     if broke {
         apply_ownership(&plan);
         emit_state(app);
+        save_now(app);
     }
     broke
 }
@@ -1099,6 +1167,7 @@ pub fn toggle_shade(app: &AppHandle, id: WindowId) {
     }
 
     emit_state(app);
+    save_now(app);
 }
 
 // ---- focus ------------------------------------------------------------------
@@ -1160,6 +1229,392 @@ pub fn focus_group(app: &AppHandle, focused: Option<WindowId>) {
     }
     let _ = flags;
     emit_state(app);
+}
+
+// ---- rescue -----------------------------------------------------------------
+
+/// Does this rect put any of itself on a display?
+///
+/// The test is intersection, not containment: a window half off the right-hand
+/// edge is reachable and must not be dragged back by a well-meaning rescue.
+pub fn is_on_screen(r: Rect, monitors: &[MonitorInfo]) -> bool {
+    monitors.iter().any(|m| {
+        let n = m.rect;
+        r.x < n.right() && r.right() > n.x && r.y < n.bottom() && r.bottom() > n.y
+    })
+}
+
+/// The display nearest a rect, by centre-to-centre distance.
+pub fn nearest_monitor(monitors: &[MonitorInfo], r: Rect) -> Option<MonitorInfo> {
+    let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
+    monitors
+        .iter()
+        .min_by_key(|m| {
+            let (mx, my) = (m.rect.x + m.rect.w / 2, m.rect.y + m.rect.h / 2);
+            // i64 because a virtual desktop several thousand px wide squares
+            // into a number an i32 cannot hold.
+            let (dx, dy) = ((cx - mx) as i64, (cy - my) as i64);
+            dx * dx + dy * dy
+        })
+        .copied()
+}
+
+/// The translation that brings `bounds` inside `m`.
+///
+/// Clamped to the **top-left**, not centred. A group taller than the display
+/// keeps its title bars on screen rather than being centred so that both ends
+/// fall off — the top edge is where every grab handle is, so it is the edge
+/// worth saving.
+///
+/// The `max` is what encodes that preference, and it is the whole subtlety
+/// here: pulling the bottom edge into view wants a negative dy, keeping the top
+/// edge in view wants a non-negative one, and when the group does not fit the
+/// second has to win. Taking the minimum instead drags the title bars off the
+/// top of the screen, which is exactly the state nothing can recover from.
+pub fn contain_translation(bounds: Rect, m: Rect) -> (Px, Px) {
+    let dx = if bounds.x < m.x {
+        m.x - bounds.x
+    } else if bounds.right() > m.right() {
+        (m.right() - bounds.right()).max(m.x - bounds.x)
+    } else {
+        0
+    };
+    let dy = if bounds.y < m.y {
+        m.y - bounds.y
+    } else if bounds.bottom() > m.bottom() {
+        (m.bottom() - bounds.bottom()).max(m.y - bounds.y)
+    } else {
+        0
+    };
+    (dx, dy)
+}
+
+/// D57: bring any stranded group back onto a surviving display.
+///
+/// Every group that has nothing on screen is moved as a **rigid translation**,
+/// which is what makes this safe: a rigid move cannot change any relative
+/// position, so the rescue provably cannot open a seam. Groups that are still
+/// reachable are left exactly where they are — a rescue that tidied up windows
+/// the user could still see would be a bug, not a feature.
+pub fn rescue_layout(layout: &Layout, graph: &WindowGraph, monitors: &[MonitorInfo]) -> Layout {
+    if monitors.is_empty() {
+        return layout.clone();
+    }
+    let mut out = layout.clone();
+    for comp in graph.components(&CLASSIC) {
+        let Some(bounds) = bond::bounds(&out, &comp) else {
+            continue;
+        };
+        if comp.iter().any(|id| out.get(id).is_some_and(|r| is_on_screen(*r, monitors))) {
+            continue;
+        }
+        let Some(m) = nearest_monitor(monitors, bounds) else {
+            continue;
+        };
+        let (dx, dy) = contain_translation(bounds, m.rect);
+        bond::translate_group(&mut out, &comp, dx, dy);
+    }
+    out
+}
+
+/// Read the display topology from the OS.
+///
+/// D57: `scale_factor()` on a window goes **stale** after a topology change —
+/// windows kept reporting 1.5 with only a 1.0 display attached — while a fresh
+/// monitor enumeration was correct immediately. So this always re-enumerates
+/// and never derives anything from a window.
+pub fn read_monitors(app: &AppHandle) -> Vec<MonitorInfo> {
+    app.available_monitors()
+        .map(|ms| {
+            ms.iter()
+                .map(|m| MonitorInfo {
+                    rect: Rect::new(
+                        m.position().x,
+                        m.position().y,
+                        m.size().width as Px,
+                        m.size().height as Px,
+                    ),
+                    scale: m.scale_factor(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One pass of the display watchdog.
+///
+/// **Must run on the main thread.** Every Win32 call below targets a window
+/// owned by it, so running here makes D54's cross-thread deadlock structurally
+/// unreachable rather than merely avoided.
+pub fn check_displays(app: &AppHandle) {
+    let monitors = read_monitors(app);
+    let p = platform::platform();
+
+    // D57: losing a display *minimizes* the group rather than relocating it,
+    // and `IsVisible` stays true throughout — so visibility is not the signal
+    // and a z-order walk still lists the windows. `IsIconic` is the signal.
+    let (handles, topology_changed) = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        (
+            CLASSIC.iter().map(|id| s.handle(*id)).collect::<Vec<_>>(),
+            monitors != s.monitors,
+        )
+    }; // D54: the lock is gone before is_minimized touches a window.
+    let minimized: Vec<NativeWindow> = handles
+        .into_iter()
+        .filter(|w| !w.is_none() && p.is_minimized(*w))
+        .collect();
+    if !topology_changed && minimized.is_empty() {
+        return;
+    }
+
+    // D59 is why this cannot be left to the user: undecorated windows with no
+    // taskbar button have no restore affordance at all. Main keeps a taskbar
+    // button as a second way back, but the rescue is the first.
+    for w in &minimized {
+        p.restore_no_activate(*w);
+    }
+
+    let (layout, moved) = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        s.monitors = monitors.clone();
+        s.scale = monitors.first().map(|m| m.scale).unwrap_or(s.scale);
+        let rescued = rescue_layout(&s.layout, &s.graph, &s.monitors);
+        let moved: Vec<WindowId> = CLASSIC
+            .iter()
+            .copied()
+            .filter(|id| s.layout.get(id) != rescued.get(id))
+            .collect();
+        s.layout = rescued.clone();
+        (rescued, moved)
+    }; // D54: lock dropped before the OS is touched.
+
+    if !moved.is_empty() {
+        eprintln!(
+            "wm: display topology changed, rescued {} window(s) onto a surviving display",
+            moved.len()
+        );
+        push_to_os(app, &layout, &moved);
+    } else if !minimized.is_empty() {
+        // Un-minimizing alone can leave the OS geometry behind the model, so
+        // re-assert it (D58: the model and the OS have to be made to agree,
+        // and the graph agreeing with itself proves nothing).
+        push_to_os(app, &layout, &CLASSIC);
+    }
+    save_now(app);
+}
+
+/// Watch for display changes.
+///
+/// This polls rather than handling `WM_DISPLAYCHANGE` directly — see D62. The
+/// interval is deliberately slack: D55 measured topology as changing about once
+/// a day, and the failure being guarded against is one where nothing reacts at
+/// all, not one where a second matters.
+pub fn spawn_display_watch(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let handle = app.clone();
+            if app.run_on_main_thread(move || check_displays(&handle)).is_err() {
+                break; // app is shutting down
+            }
+        }
+    });
+}
+
+// ---- persistence (D33) -------------------------------------------------------
+
+/// The monitor a rect sits on, encoded for the `monitor_id` column.
+///
+/// The display's own rect, not its device name. What a restore actually needs
+/// to know is whether the geometry still lands somewhere real, and the rect
+/// answers that directly — while keeping `MonitorInfo` `Copy` and every
+/// function above it pure.
+fn monitor_id_of(r: Rect, monitors: &[MonitorInfo]) -> Option<String> {
+    monitor_at(monitors, r.x, r.y)
+        .map(|m| format!("{},{},{}x{}", m.rect.x, m.rect.y, m.rect.w, m.rect.h))
+}
+
+fn edge_name(e: Edge) -> &'static str {
+    match e {
+        Edge::Right => "right",
+        Edge::Bottom => "bottom",
+        Edge::Left => "left",
+        Edge::Top => "top",
+    }
+}
+
+/// D33: geometry **and** the bond graph survive restart.
+///
+/// Physical pixels, per the project convention and the schema comment. Written
+/// in one transaction so a hard kill mid-write cannot leave the layout and the
+/// bonds describing different worlds.
+pub fn save(
+    conn: &Connection,
+    layout: &Layout,
+    graph: &WindowGraph,
+    shaded: &BTreeSet<WindowId>,
+    unshaded_h: &BTreeMap<WindowId, Px>,
+    monitors: &[MonitorInfo],
+) -> Result<(), rusqlite::Error> {
+    // Store the layout **as if nothing were shaded**, and the shade flags
+    // beside it. A shade moves its neighbours as well as changing one height,
+    // so writing the collapsed positions next to the expanded heights would
+    // save a world that never existed: on the next launch eq's bottom edge and
+    // the playlist's top edge would not meet, and register() would correctly
+    // drop the bond between them. Expanding first keeps the two halves
+    // describing the same layout, and load() re-collapses from it.
+    let mut expanded = layout.clone();
+    for id in CLASSIC {
+        if !shaded.contains(&id) {
+            continue;
+        }
+        if let Some(h) = unshaded_h.get(&id).copied() {
+            apply_shade(&mut expanded, graph, id, h);
+        }
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM window_layout WHERE window_id IN ('main','eq','playlist')", [])?;
+    tx.execute("DELETE FROM window_bonds", [])?;
+
+    for id in CLASSIC {
+        let Some(r) = expanded.get(&id) else {
+            continue;
+        };
+        let h = r.h;
+        tx.execute(
+            "INSERT INTO window_layout (window_id, x, y, w, h, shaded, visible, monitor_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+            rusqlite::params![
+                label_of(id),
+                r.x,
+                r.y,
+                r.w,
+                h,
+                shaded.contains(&id) as i32,
+                monitor_id_of(*r, monitors),
+            ],
+        )?;
+    }
+
+    for b in &graph.bonds {
+        tx.execute(
+            "INSERT INTO window_bonds (a, b, edge, span_start, span_end) VALUES (?1,?2,?3,?4,?5)",
+            rusqlite::params![
+                label_of(b.a),
+                label_of(b.b),
+                edge_name(b.edge),
+                b.span.0,
+                b.span.1
+            ],
+        )?;
+    }
+    tx.commit()
+}
+
+/// Persist the current layout. Called after every gesture that ends, never
+/// per frame — a drag writes once on release, not sixty times a second.
+pub fn save_now(app: &AppHandle) {
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
+    let (layout, graph, shaded, unshaded_h, monitors) = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        (
+            s.layout.clone(),
+            s.graph.clone(),
+            s.shaded.clone(),
+            s.unshaded_h.clone(),
+            s.monitors.clone(),
+        )
+    }; // The wm lock is released before the db lock is taken -- always in that
+       // order, so the two can never be acquired against each other.
+    let conn = db.0.lock().unwrap();
+    if let Err(e) = save(&conn, &layout, &graph, &shaded, &unshaded_h, &monitors) {
+        eprintln!("wm: could not save the window layout: {e}");
+    }
+}
+
+/// What a previous session left behind.
+pub struct Restored {
+    pub layout: Layout,
+    pub graph: WindowGraph,
+    pub shaded: BTreeSet<WindowId>,
+    pub unshaded_h: BTreeMap<WindowId, Px>,
+}
+
+/// D33: read back geometry, bonds and shade state.
+///
+/// Returns `None` if nothing was stored or the rows do not describe all three
+/// windows — a partial layout is not worth reconstructing around, and the
+/// default stack is a perfectly good answer.
+pub fn load(conn: &Connection) -> Option<Restored> {
+    let mut layout = Layout::new();
+    let mut shaded = BTreeSet::new();
+    let mut unshaded_h = BTreeMap::new();
+
+    let mut stmt = conn
+        .prepare("SELECT window_id, x, y, w, h, shaded FROM window_layout")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i32>(1)?,
+                row.get::<_, i32>(2)?,
+                row.get::<_, i32>(3)?,
+                row.get::<_, i32>(4)?,
+                row.get::<_, i32>(5)?,
+            ))
+        })
+        .ok()?;
+
+    for row in rows.flatten() {
+        let (label, x, y, w, h, is_shaded) = row;
+        let Some(id) = id_of(&label) else { continue };
+        unshaded_h.insert(id, h);
+        if is_shaded != 0 {
+            shaded.insert(id);
+        }
+        // The stored height is the unshaded one, so a window that was left
+        // collapsed comes back collapsed at the right size rather than at 14px
+        // forever. The exact strip height is recomputed on restore.
+        layout.insert(id, Rect::new(x, y, w, h));
+    }
+    if CLASSIC.iter().any(|id| !layout.contains_key(id)) {
+        return None;
+    }
+
+    let mut graph = WindowGraph::new();
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT a, b, edge, span_start, span_end FROM window_bonds")
+    {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i32>(3)?,
+                row.get::<_, i32>(4)?,
+            ))
+        }) {
+            for (a, b, edge, s0, s1) in rows.flatten() {
+                let (Some(a), Some(b), Some(edge)) =
+                    (id_of(&a), id_of(&b), edge_from_str(&edge))
+                else {
+                    continue;
+                };
+                graph.insert(Bond::new(a, b, edge, (s0, s1)));
+            }
+        }
+    }
+
+    Some(Restored { layout, graph, shaded, unshaded_h })
 }
 
 // ---- tests ------------------------------------------------------------------
@@ -1829,6 +2284,251 @@ mod tests {
         s.shaded.insert(EQ);
         s.shaded.insert(PLAYLIST);
         assert!(topmost_set(&s).is_empty());
+    }
+
+
+    // ---- rescue (D57) -------------------------------------------------------
+
+    #[test]
+    fn a_window_hanging_off_the_edge_is_still_on_screen() {
+        // Intersection, not containment. A window half off the right-hand edge
+        // is reachable, and a rescue that hauled it back would be undoing
+        // something the user did on purpose.
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        assert!(is_on_screen(Rect::new(1800, 100, 275, 116), &ms));
+        assert!(is_on_screen(Rect::new(-100, 100, 275, 116), &ms));
+        assert!(!is_on_screen(Rect::new(-400, 100, 275, 116), &ms));
+        // The minimized rect D57 measured on a real cable-pull.
+        assert!(!is_on_screen(Rect::new(-32000, -32000, 160, 28), &ms));
+    }
+
+    #[test]
+    fn nothing_is_on_screen_when_there_are_no_screens() {
+        assert!(!is_on_screen(Rect::new(0, 0, 275, 116), &[]));
+        assert_eq!(nearest_monitor(&[], Rect::new(0, 0, 1, 1)), None);
+    }
+
+    #[test]
+    fn the_nearest_surviving_display_wins() {
+        let ms = two_monitors();
+        // Just off the left-hand display's top-left.
+        assert_eq!(nearest_monitor(&ms, Rect::new(-500, 0, 275, 116)), Some(ms[0]));
+        // Out beyond the right-hand one.
+        assert_eq!(nearest_monitor(&ms, Rect::new(5000, 500, 275, 116)), Some(ms[1]));
+    }
+
+    #[test]
+    fn a_rescue_is_a_rigid_translation_with_no_bond_violations() {
+        // The whole reason the rescue is a translation: a rigid move cannot
+        // change any relative position, so it provably cannot open a seam.
+        // Measured on the spike as 0 violations; here it is structural.
+        let s = stacked();
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        let mut stranded = s.layout.clone();
+        bond::translate_group(&mut stranded, &CLASSIC, -32000, -32000);
+
+        let out = rescue_layout(&stranded, &s.graph, &ms);
+        assert!(bond::violations(&s.graph, &out).is_empty());
+        // Offsets preserved exactly.
+        assert_eq!(out[&EQ].y - out[&MAIN].y, 116);
+        assert_eq!(out[&PLAYLIST].y - out[&EQ].y, 116);
+        // And it landed somewhere real.
+        assert!(CLASSIC.iter().all(|id| is_on_screen(out[id], &ms)));
+    }
+
+    #[test]
+    fn a_rescue_leaves_reachable_groups_alone() {
+        let s = stacked();
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(rescue_layout(&s.layout, &s.graph, &ms), s.layout);
+    }
+
+    #[test]
+    fn only_the_stranded_group_is_moved() {
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        let mut layout = s.layout.clone();
+        bond::translate_group(&mut layout, &[PLAYLIST], -32000, -32000);
+
+        let out = rescue_layout(&layout, &s.graph, &ms);
+        assert_eq!(out[&MAIN], s.layout[&MAIN], "an on-screen group was disturbed");
+        assert_eq!(out[&EQ], s.layout[&EQ], "an on-screen group was disturbed");
+        assert!(is_on_screen(out[&PLAYLIST], &ms));
+    }
+
+    #[test]
+    fn with_no_displays_at_all_nothing_is_invented() {
+        // Every display gone is not a case to guess at: leave the model alone
+        // and wait for one to come back.
+        let s = stacked();
+        assert_eq!(rescue_layout(&s.layout, &s.graph, &[]), s.layout);
+    }
+
+    #[test]
+    fn a_group_taller_than_the_display_keeps_its_top_edge() {
+        // Clamped rather than centred: centring a 348px stack on a 200px-tall
+        // display would push the title bars off the top, where nothing can grab
+        // them.
+        let short = vec![mon(0, 0, 1920, 200, 1.0)];
+        let s = stacked();
+        let mut stranded = s.layout.clone();
+        bond::translate_group(&mut stranded, &CLASSIC, -32000, -32000);
+        let out = rescue_layout(&stranded, &s.graph, &short);
+        assert_eq!(out[&MAIN].y, 0, "the top of the group went off screen");
+    }
+
+    // ---- persistence (D33) --------------------------------------------------
+
+    fn memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        conn
+    }
+
+    #[test]
+    fn geometry_and_the_bond_graph_both_survive_a_restart() {
+        // D33 is explicit that the *graph* persists too, not just the rects.
+        // Restoring three windows in the right places with no bonds between
+        // them would look identical on the first frame and wrong on the first
+        // drag.
+        let conn = memory_db();
+        let s = stacked();
+        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+
+        let r = load(&conn).expect("nothing came back");
+        assert_eq!(r.layout, s.layout);
+        assert_eq!(r.graph.components(&CLASSIC).len(), 1);
+        assert!(bond::violations(&r.graph, &r.layout).is_empty());
+    }
+
+    #[test]
+    fn a_broken_bond_stays_broken_across_a_restart() {
+        let conn = memory_db();
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+
+        let r = load(&conn).expect("nothing came back");
+        assert_eq!(r.graph.components(&CLASSIC).len(), 2);
+        assert!(r.graph.bond_between(EQ, PLAYLIST).is_none());
+        assert!(r.graph.bond_between(MAIN, EQ).is_some());
+    }
+
+    #[test]
+    fn a_shaded_stack_round_trips_through_the_database_exactly() {
+        // The bug this pins down: a shade moves its neighbours as well as
+        // changing one height, so storing the collapsed positions next to the
+        // expanded heights saves a world that never existed. On the next launch
+        // eq's bottom edge and the playlist's top edge do not meet, register()
+        // correctly drops the bond between them, and the group silently comes
+        // back in two pieces.
+        let conn = memory_db();
+        let mut s = stacked();
+        let before = s.layout.clone();
+
+        // Collapse eq the way toggle_shade would.
+        s.unshaded_h.insert(EQ, s.layout[&EQ].h);
+        s.shaded.insert(EQ);
+        let graph = s.graph.clone();
+        apply_shade(&mut s.layout, &graph, EQ, 14);
+        assert_eq!(s.layout[&PLAYLIST].y, before[&PLAYLIST].y - 102);
+
+        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        let r = load(&conn).expect("nothing came back");
+
+        // What is stored is the expanded world, and it is flush.
+        assert_eq!(r.layout, before);
+        assert!(bond::violations(&r.graph, &r.layout).is_empty());
+
+        // Re-collapsing on load reproduces exactly what was on screen.
+        let mut restored = r.layout.clone();
+        apply_shade(&mut restored, &r.graph, EQ, 14);
+        assert_eq!(restored, s.layout);
+        assert!(bond::violations(&r.graph, &restored).is_empty());
+    }
+
+    #[test]
+    fn a_bond_span_follows_the_windows_it_describes() {
+        // Nothing reads the span yet, which is exactly why it has to be right:
+        // it is persisted, so a stale one gets written to disk and read back as
+        // though it meant something.
+        let mut s = stacked();
+        assert_eq!(s.graph.bonds[0].span, (0, 275));
+        bond::translate_group(&mut s.layout, &CLASSIC, 400, 200);
+        let layout = s.layout.clone();
+        resync_spans(&mut s.graph, &layout);
+        assert!(s.graph.bonds.iter().all(|b| b.span == (400, 675)));
+    }
+
+    #[test]
+    fn a_shaded_window_comes_back_at_the_size_it_had_before_it_collapsed() {
+        // The stored height is the *unshaded* one. Persisting 14px would mean a
+        // playlist resized to 174 and then shaded is 116 forever after the next
+        // restart -- a resize silently destroyed by a restart nobody connected
+        // to it.
+        let conn = memory_db();
+        let mut s = stacked();
+        s.unshaded_h.insert(PLAYLIST, 174);
+        s.shaded.insert(PLAYLIST);
+        s.layout.insert(PLAYLIST, Rect::new(0, 232, 275, 14));
+        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+
+        let r = load(&conn).expect("nothing came back");
+        assert!(r.shaded.contains(&PLAYLIST));
+        assert_eq!(r.unshaded_h[&PLAYLIST], 174);
+        assert_eq!(r.layout[&PLAYLIST].h, 174, "came back collapsed forever");
+    }
+
+    #[test]
+    fn saving_twice_does_not_accumulate_rows() {
+        let conn = memory_db();
+        let s = stacked();
+        for _ in 0..3 {
+            save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        }
+        let layouts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM window_layout", [], |r| r.get(0))
+            .unwrap();
+        let bonds: i64 = conn
+            .query_row("SELECT COUNT(*) FROM window_bonds", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(layouts, 3);
+        assert_eq!(bonds, 2);
+    }
+
+    #[test]
+    fn an_empty_database_restores_nothing_rather_than_half_a_layout() {
+        assert!(load(&memory_db()).is_none());
+    }
+
+    #[test]
+    fn a_partial_layout_is_refused() {
+        // Two of three windows is not something to reconstruct around. The
+        // default stack is a perfectly good answer and a guessed third window
+        // is not.
+        let conn = memory_db();
+        let mut s = stacked();
+        s.layout.remove(&PLAYLIST);
+        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        assert!(load(&conn).is_none());
+    }
+
+    #[test]
+    fn the_monitor_a_window_sat_on_is_recorded() {
+        let conn = memory_db();
+        let mut s = stacked();
+        s.monitors = two_monitors();
+        s.layout.insert(MAIN, Rect::new(3000, 100, 275, 116));
+        save(&conn, &s.layout, &s.graph, &s.shaded, &s.unshaded_h, &s.monitors).unwrap();
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT monitor_id FROM window_layout WHERE window_id = 'main'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(id.as_deref(), Some("2560,0,1920x1080"));
     }
 
     #[test]

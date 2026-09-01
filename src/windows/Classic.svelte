@@ -73,38 +73,107 @@
 
   // ---- title bar: always a group move ----
 
-  function titleDown(e: PointerEvent) {
+  // Capture on <html>, never on the element that was clicked, and never until
+  // the pointer has actually moved.
+  //
+  // Two separate lessons, both learned the hard way.
+  //
+  // Capture is required at all because the cursor leaves the 275px window
+  // almost immediately during a drag, and without it the move events stop
+  // arriving the moment it does. But capture dies with the element holding it,
+  // and these elements are Svelte-rendered — a `wm:state` push arriving
+  // mid-gesture replaces the very seam strip the pointer is captured to, and
+  // the drag goes silent with no error anywhere. <html> is outside Svelte's
+  // control and cannot be re-rendered out from under a gesture.
+  //
+  // Taking capture on pointerdown then breaks double-click, because a captured
+  // pointer retargets the derived click and dblclick events to the capture
+  // element — so the title bar never sees the double-click that toggles shade.
+  // Waiting for the first move fixes both: a click that never moves takes no
+  // capture at all, and dblclick behaves normally.
+  function arm(e: PointerEvent, begin: () => void) {
     if (e.button !== 0) return;
-    // Pointer capture, not a window-level listener: the cursor leaves the 275px
-    // window almost immediately during a drag, and without capture the move
-    // events stop arriving the moment it does.
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    gesture = "move";
-    invoke("wm_drag_start", { label });
+    const root = document.documentElement;
+    let started = false;
+
+    const onMove = () => {
+      if (!started) {
+        started = true;
+        root.setPointerCapture(e.pointerId);
+        begin();
+      }
+      if (gesture === "splitter") frame(() => invoke("wm_splitter_move"));
+      else if (gesture === "move") frame(() => invoke("wm_drag_move"));
+    };
+    const onUp = () => {
+      root.removeEventListener("pointermove", onMove);
+      root.removeEventListener("pointerup", onUp);
+      root.removeEventListener("pointercancel", onUp);
+      if (!started) return; // a plain click: leave click/dblclick alone
+      if (gesture === "splitter") invoke("wm_splitter_end");
+      else if (gesture === "move") invoke("wm_drag_end");
+      gesture = "none";
+    };
+
+    root.addEventListener("pointermove", onMove);
+    root.addEventListener("pointerup", onUp);
+    root.addEventListener("pointercancel", onUp);
+  }
+
+  // ---- title bar: always a group move ----
+
+  // Double-click, detected from pointerdown timing rather than from the DOM's
+  // dblclick event.
+  //
+  // dblclick is a *derived* event, and it stops being generated here: raising
+  // the group on the first click re-applies window ownership and z-order
+  // through Win32, and WebView2 does not produce a dblclick across that. The
+  // click events themselves arrive fine — both reach Rust — so the timing is
+  // all that is actually needed, and reading it directly removes the
+  // dependency on a synthesised event surviving a native window operation.
+  //
+  // Keyed per target so a click on the title bar followed by one on a seam is
+  // never mistaken for a double-click on either.
+  let lastTapAt = 0;
+  let lastTapKey = "";
+
+  function doubleTap(key: string): boolean {
+    const now = Date.now();
+    const hit = key === lastTapKey && now - lastTapAt < 400;
+    // Reset on a hit so a triple-click is not read as two overlapping doubles.
+    lastTapAt = hit ? 0 : now;
+    lastTapKey = hit ? "" : key;
+    return hit;
+  }
+
+  function titleDown(e: PointerEvent) {
+    if (e.button === 0 && doubleTap("title")) {
+      toggleShade();
+      return;
+    }
+    arm(e, () => {
+      gesture = "move";
+      invoke("wm_drag_start", { label });
+    });
   }
 
   // ---- seam: splitter, or a move handle where nothing can resize ----
 
-  async function seamDown(e: PointerEvent, side: Side) {
-    if (e.button !== 0 || edges[side] === null) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    gesture = (await invoke("wm_seam_down", { label, edge: side })) as typeof gesture;
-  }
-
-  function move(e: PointerEvent) {
-    const el = e.currentTarget as HTMLElement;
-    if (!el.hasPointerCapture(e.pointerId)) return;
-    if (gesture === "splitter") frame(() => invoke("wm_splitter_move"));
-    else if (gesture === "move") frame(() => invoke("wm_drag_move"));
-  }
-
-  function up(e: PointerEvent) {
-    const el = e.currentTarget as HTMLElement;
-    if (!el.hasPointerCapture(e.pointerId)) return;
-    el.releasePointerCapture(e.pointerId);
-    if (gesture === "splitter") invoke("wm_splitter_end");
-    else if (gesture === "move") invoke("wm_drag_end");
-    gesture = "none";
+  function seamDown(e: PointerEvent, side: Side) {
+    if (edges[side] === null) return;
+    if (e.button === 0 && doubleTap(`seam:${side}`)) {
+      demagnetize(side);
+      return;
+    }
+    arm(e, () => {
+      // Provisionally a move, so the frames arriving before Rust answers are
+      // not dropped. Rust decides which it really is: a seam whose neighbours
+      // cannot resize degrades to a group move (D35).
+      gesture = "move";
+      invoke<typeof gesture>("wm_seam_down", { label, edge: side }).then((g) => {
+        if (gesture !== "none") gesture = g;
+      });
+    });
   }
 
   // D60. The seam already owns dblclick for demagnetize, and its 4px strip
@@ -135,14 +204,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="chrome" data-active={active} data-shaded={shaded} onpointerdown={raise}>
-  <div
-    class="titlebar"
-    onpointerdown={titleDown}
-    onpointermove={move}
-    onpointerup={up}
-    onpointercancel={up}
-    ondblclick={toggleShade}
-  >
+  <div class="titlebar" onpointerdown={titleDown}>
     {title}
   </div>
   <div class="body">{body}</div>
@@ -156,10 +218,6 @@
         class="seam {side}"
         style:cursor={cursorFor(side)}
         onpointerdown={(e) => seamDown(e, side)}
-        onpointermove={move}
-        onpointerup={up}
-        onpointercancel={up}
-        ondblclick={() => demagnetize(side)}
       ></div>
     {/if}
   {/each}
