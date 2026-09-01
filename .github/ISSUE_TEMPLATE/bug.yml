@@ -1,0 +1,32 @@
+name: Bug
+description: Something the app does that it should not, or fails to do
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw. A screenshot from `.sid/` is worth a paragraph.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce, the way a user does it
+      description: Real input, not a script. Monitor layout and scale factors matter here (D51).
+      placeholder: |
+        1. Launch. Two monitors, 100% and 150%.
+        2. Drag Main across the seam.
+        3. ...
+  - type: input
+    id: decisions
+    attributes:
+      label: Decisions implicated
+      description: D-numbers from docs/decisions.md, if you know them. Leave blank if not.
+      placeholder: D43, D52
