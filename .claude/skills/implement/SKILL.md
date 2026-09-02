@@ -25,10 +25,13 @@ Issue: $ARGUMENTS
 
        cargo fmt --manifest-path src-tauri/Cargo.toml
        cargo fmt --manifest-path crates/hp-control/Cargo.toml
-       cargo clippy --manifest-path src-tauri/Cargo.toml --lib
+       cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+       cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
        cargo test --manifest-path src-tauri/Cargo.toml --lib
        cargo test --manifest-path crates/hp-control/Cargo.toml
        pnpm check
+
+   Warnings are errors in both crates and the compiler is pinned, so a warning is a failed gate here exactly as it is in CI.
 
 7. Commit in the repo's voice: subject `<milestone or area>: <what changed> (#<n>)`, the *why* in the body. Several commits when the work has several steps; one when it does not.
 8. A decision made along the way went through `/decide` (the owner's call); cite the D-number in the commit body.
