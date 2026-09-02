@@ -1,11 +1,14 @@
 # Gates on every pull request and on main. Windows only: this is a Windows-first
 # project (O7) and the platform layer does not compile anywhere else.
 #
-# These are exactly the gates /land runs locally. There is no Tauri build here:
-# the three sidecars are 230 MB and gitignored, and tauri-build only checks that
-# each bundle.externalBin path exists before copying it, so zero-byte stand-ins
-# are enough to compile and run the library tests. The shipping exe is a
-# separate, on-demand workflow: release-exe.yml.
+# These are exactly the gates /land runs locally, and they agree by construction:
+# warnings are errors through [lints] in each Cargo.toml, and the compiler is
+# pinned by rust-toolchain.toml, so nothing here carries a flag the skills lack.
+#
+# There is no Tauri build here: the three sidecars are 230 MB and gitignored,
+# and tauri-build only checks that each bundle.externalBin path exists before
+# copying it, so zero-byte stand-ins are enough to compile and run the tests.
+# The shipping exe is a separate, on-demand workflow: release-exe.yml.
 name: checks
 
 on:
@@ -31,11 +34,11 @@ jobs:
           mkdir -p src-tauri/binaries
           for t in yt-dlp deno ffmpeg; do : > "src-tauri/binaries/$t-x86_64-pc-windows-msvc.exe"; done
 
-      - name: Rust toolchain
+      - name: Rust toolchain (pinned by rust-toolchain.toml)
         run: |
-          rustup update stable
-          rustup default stable
-          rustup component add rustfmt clippy
+          rustup show
+          cargo --version
+          cargo clippy --version
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -45,7 +48,7 @@ jobs:
             ~/.cargo/git
             src-tauri/target
             crates/hp-control/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'crates/hp-control/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock', 'crates/hp-control/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
       - name: rustfmt (app)
@@ -53,12 +56,21 @@ jobs:
       - name: rustfmt (hp-control)
         run: cargo fmt --manifest-path crates/hp-control/Cargo.toml --check
 
-      - name: clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings
+      # Warnings are errors via [lints]; --all-targets includes the test modules.
+      # hp-control gets its own step: as a path dependency of the app it is
+      # compiled with lints capped, so the app's clippy run never lints it.
+      - name: clippy (app)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: clippy (hp-control)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
 
+      # Still run after a lint failure, so one push answers both questions.
       - name: cargo test (app)
+        if: ${{ !cancelled() }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - name: cargo test (hp-control)
+        if: ${{ !cancelled() }}
         run: cargo test --manifest-path crates/hp-control/Cargo.toml
 
       - uses: actions/setup-node@v4
