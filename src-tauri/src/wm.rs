@@ -644,7 +644,7 @@ pub fn drag_frame(
             };
             if let Some(snap) = bond::probe(mr, fr, threshold) {
                 let cost = snap.dx.abs() + snap.dy.abs();
-                if best.map_or(true, |(c, _, _)| cost < c) {
+                if best.is_none_or(|(c, _, _)| cost < c) {
                     best = Some((cost, snap.dx, snap.dy));
                 }
             }
@@ -1939,6 +1939,19 @@ mod tests {
             out[&MAIN].x,
             origin[&PLAYLIST].right(),
             "snapped to the far one"
+        );
+
+        // Again with the two distances swapped. `others` is walked in order, so
+        // above the winner also happened to be the last one probed and "keep
+        // whichever came last" would pass too. Here the nearer window is probed
+        // first, which is what actually pins the comparison.
+        origin.insert(EQ, Rect::new(278, 0, 275, 116)); // 3 px to the right
+        origin.insert(PLAYLIST, Rect::new(-283, 0, 275, 116)); // 8 px to the left
+        let out = drag_frame(&origin, &[MAIN], (0, 0), &[EQ, PLAYLIST], 10, None);
+        assert_eq!(
+            out[&MAIN].right(),
+            origin[&EQ].x,
+            "a later, dearer candidate overwrote the best one"
         );
     }
 

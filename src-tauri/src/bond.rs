@@ -262,7 +262,7 @@ pub fn probe(moving: Rect, fixed: Rect, threshold: Px) -> Option<Snap> {
                         dx,
                         dy,
                     };
-                    if best.map_or(true, |(c, _)| cost < c) {
+                    if best.is_none_or(|(c, _)| cost < c) {
                         best = Some((cost, snap));
                     }
                 }
@@ -294,7 +294,7 @@ pub fn probe(moving: Rect, fixed: Rect, threshold: Px) -> Option<Snap> {
                         dx,
                         dy,
                     };
-                    if best.map_or(true, |(c, _)| cost < c) {
+                    if best.is_none_or(|(c, _)| cost < c) {
                         best = Some((cost, snap));
                     }
                 }
@@ -656,6 +656,25 @@ mod tests {
         let moving = Rect::new(W + 3, 60, W, H); // far out of alignment but still overlapping
         let s = probe(moving, fixed, T).unwrap();
         assert_eq!(s.dy, 0, "should not teleport a deliberately offset window");
+    }
+
+    #[test]
+    fn near_a_corner_the_nearer_seam_wins() {
+        // Dragged toward a corner, both a vertical and a horizontal seam are in
+        // range at once. Cheapest wins, and both orders matter: the vertical
+        // seam is probed first, so "keep the newest candidate" would take the
+        // horizontal one every time and "keep the first" would never take it.
+        let fixed = Rect::new(0, 0, W, H);
+
+        // 5 px from the right edge, 6 px from the bottom: the vertical seam.
+        let s = probe(Rect::new(W - 5, H - 6, W, H), fixed, T).expect("should bond");
+        assert_eq!(s.edge, Edge::Right, "took the dearer horizontal seam");
+        assert_eq!((s.dx, s.dy), (5, 0));
+
+        // 6 px from the right edge, 5 px from the bottom: the horizontal seam.
+        let s = probe(Rect::new(W - 6, H - 5, W, H), fixed, T).expect("should bond");
+        assert_eq!(s.edge, Edge::Bottom, "took the dearer vertical seam");
+        assert_eq!((s.dx, s.dy), (0, 5));
     }
 
     #[test]
