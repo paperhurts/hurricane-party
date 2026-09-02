@@ -33,6 +33,6 @@ Issue: $ARGUMENTS
 
    Warnings are errors in both crates and the compiler is pinned, so a warning is a failed gate here exactly as it is in CI.
 
-7. Commit in the repo's voice: subject `<milestone or area>: <what changed> (#<n>)`, the *why* in the body. Several commits when the work has several steps; one when it does not.
+7. Commit in the repo's voice: subject `<milestone or area>: <what changed> (#<n>)`, the *why* in the body. Several commits when the work has several steps; one when it does not. End each message with the `Co-Authored-By` line only: no `Claude-Session:` trailer, no session URL, no machine paths or personal data, in commits or in the PR. The repo is public.
 8. A decision made along the way went through `/decide` (the owner's call); cite the D-number in the commit body.
 9. Finish by following `.claude/skills/land/SKILL.md` step by step: it pushes and opens the PR with the hand-test checklist. The hand test is the owner's, on a real screen, before merge.
