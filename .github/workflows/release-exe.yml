@@ -22,10 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rust toolchain
+      - name: Rust toolchain (pinned by rust-toolchain.toml)
         run: |
-          rustup update stable
-          rustup default stable
+          rustup show
+          cargo --version
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -34,7 +34,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
           restore-keys: cargo-release-${{ runner.os }}-
 
       - name: Fetch the pinned sidecars

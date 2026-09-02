@@ -57,7 +57,7 @@ These have burned into the design. Don't quietly relax them.
 
 Work one at a time. Don't build ahead.
 
-**v0.0 through v0.4a are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` and 34 tests **have been ported byte-identical**, and the spike repo has been archived. Currently starting **v0.4b** — the skin renderer, EQ and analyser, briefed in `docs/v0.4-brief.md` and tracked as the v0.4b milestone on GitHub.
+**v0.0 through v0.4a are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). Currently starting **v0.4b** — the skin renderer, EQ and analyser, briefed in `docs/v0.4-brief.md` and tracked as the v0.4b milestone on GitHub.
 
 ---
 
@@ -81,7 +81,7 @@ GitHub issues are the work list; the decision log is not. Every unit of work is 
 | Review | planning session | `/audit <pr>` posts the decision-auditor's verdict on the PR |
 | Hand test and merge | the owner | On a real screen, then merge on GitHub. Nothing merges from a session |
 
-Gates: `cargo fmt --check` and `cargo test` on both crates, `cargo clippy`, `pnpm check`. `/land` runs them; CI (`.github/workflows/ci.yml`) repeats them on every PR. A shipping exe comes from the `release-exe` workflow on demand.
+Gates: `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on both crates, then `pnpm check`. Warnings are errors in both crates (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI agree by construction; a new Rust release reaches the build only when the pin is bumped. `/land` runs them; CI (`.github/workflows/ci.yml`) repeats them on every PR. A shipping exe comes from the `release-exe` workflow on demand.
 
 Hooks in `.claude/settings.json` refuse a hardcoded colour under `src/` (a `tokens-exempt: <why>` comment on the line is the escape hatch), a `#[cfg(windows)]` outside `platform/`, and a whole-file rewrite of `decisions.md`. They load at session start; restart after changing them.
 
