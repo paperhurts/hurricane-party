@@ -294,9 +294,14 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
     })
 }
 
+/// The five fields of one progress line, in template order: bytes downloaded,
+/// total bytes, speed in bytes/s, ETA in seconds, status. A tuple rather than a
+/// struct because every call site destructures it on the spot.
+type ProgressLine = (u64, Option<u64>, Option<f64>, Option<u64>, String);
+
 /// One `--progress-template` line. Pipe-delimited and parsed positionally —
 /// never scrape the human-readable bar (D4), which changes between releases.
-fn parse_progress(line: &str) -> Option<(u64, Option<u64>, Option<f64>, Option<u64>, String)> {
+fn parse_progress(line: &str) -> Option<ProgressLine> {
     let rest = line.strip_prefix("HPPROG|")?;
     let f: Vec<&str> = rest.split('|').collect();
     if f.len() < 5 {
