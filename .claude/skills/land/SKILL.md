@@ -16,15 +16,16 @@ Issue: $ARGUMENTS (when omitted, the number in the branch name `<type>/<n>-...`)
 
        cargo fmt --manifest-path src-tauri/Cargo.toml
        cargo fmt --manifest-path crates/hp-control/Cargo.toml
-       cargo clippy --manifest-path src-tauri/Cargo.toml --lib
+       cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+       cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
        cargo test --manifest-path src-tauri/Cargo.toml --lib
        cargo test --manifest-path crates/hp-control/Cargo.toml
        pnpm check
 
-   If fmt changed files, commit that on its own: `chore: rustfmt`.
+   Warnings are errors in both crates (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so this list is exactly what CI runs; no flags. If fmt changed files, commit that on its own: `chore: rustfmt`.
 3. **Commit** uncommitted work in the repo's voice, `<area>: <what> (#n)`, the why in the body.
 4. `git push -u origin <branch>`.
-5. **Pull request.** None open yet: `gh pr create --title "<subject>" --body-file <tmp> --label needs-hand-test`, plus `--milestone` from the issue. The body follows `.github/pull_request_template.md`: `Closes #n`; what changed, outcome first; the gates ticked, because you ran them; the **Hand test** copied from the issue's brief as an unticked checklist; the decisions relied on; a `## Noticed` list of what was seen and left alone. A PR already open: the push is enough; comment only if the hand-test steps changed.
+5. **Pull request.** None open yet: `gh pr create --title "<subject>" --body-file <tmp>`, plus `--milestone` from the issue, and `--label needs-hand-test` only when the brief's hand test names something to perform on a screen; a brief whose hand test is "None" gets no label. The body follows `.github/pull_request_template.md`: `Closes #n`; what changed, outcome first; the gates ticked, because you ran them; the **Hand test** copied from the issue's brief as an unticked checklist; the decisions relied on; a `## Noticed` list of what was seen and left alone. A PR already open: the push is enough; comment only if the hand-test steps changed.
 6. Print the PR URL and one line of state: "gates green; awaiting hand test and merge on GitHub".
 
 Never `gh pr merge`. Never `git push origin main`.

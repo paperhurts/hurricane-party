@@ -56,10 +56,11 @@ pnpm tauri dev                                              # run it
 pnpm check                                                  # svelte-check + tsc
 pnpm tauri build --no-bundle                                # release binary, no installer
 
-cargo test --manifest-path src-tauri/Cargo.toml --lib       # app tests
-cargo test --manifest-path crates/hp-control/Cargo.toml     # protocol tests
-cargo clippy --manifest-path src-tauri/Cargo.toml --lib     # lint
-cargo fmt --manifest-path src-tauri/Cargo.toml --check      # format check; CI runs this
+cargo test --manifest-path src-tauri/Cargo.toml --lib               # app tests
+cargo test --manifest-path crates/hp-control/Cargo.toml             # protocol tests
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets     # lint; warnings are errors
+cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
+cargo fmt --manifest-path src-tauri/Cargo.toml --check              # format check; CI runs this
 ```
 
 ## Workflow
@@ -90,7 +91,7 @@ Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.d
 
 | | |
 |---|---|
-| v0.0 | Window engine spike. All six stages passed, bond model is **GO** (D45). `bond.rs` and its 34 tests were ported byte-identical; the spike repo is archived |
+| v0.0 | Window engine spike. All six stages passed, bond model is **GO** (D45). `bond.rs` was ported byte-identical and now evolves under its own tests (D66); the spike repo is archived |
 | v0.1 | URL → MP3 → list → plays |
 | v0.2 | SQLite, persistent queue with byte-level resume, playlists |
 | v0.3 | Video window, local folder import, control API handshake + transport |
