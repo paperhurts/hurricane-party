@@ -4,6 +4,10 @@ version = "0.3.0"
 description = "Offline-first media library and player."
 authors = ["paperhurts"]
 edition = "2021"
+# The real floor is set by lofty 0.25 (rust-version 1.89). Declaring it here
+# turns a too-old toolchain into one clear message instead of an E0599 deep
+# in bond.rs. The compiler actually used is pinned by rust-toolchain.toml.
+rust-version = "1.89"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -40,3 +44,10 @@ windows = { version = "0.61", features = [
   "Win32_UI_HiDpi",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Warnings are errors everywhere this crate compiles: cargo build, cargo test,
+# cargo clippy, rust-analyzer. This is what keeps /land and CI honest with each
+# other without a flag anyone has to remember. New lints arrive only when
+# rust-toolchain.toml is bumped, on purpose.
+[lints.rust]
+warnings = "deny"

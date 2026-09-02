@@ -3,8 +3,16 @@ name = "hp-control"
 version = "0.3.0"
 edition = "2021"
 description = "The public control protocol for hurricane-party. Unstable until v1.0."
+# Matches the app: both crates build with the one toolchain rust-toolchain.toml pins.
+rust-version = "1.89"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# Warnings are errors, as in the app. This crate is a path dependency of the
+# app, not a workspace member, so cargo caps its lints when the app builds it;
+# it gets its own `cargo clippy --all-targets` in /land and CI for that reason.
+[lints.rust]
+warnings = "deny"
