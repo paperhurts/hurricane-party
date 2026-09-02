@@ -54,9 +54,7 @@ jobs:
         run: cargo fmt --manifest-path crates/hp-control/Cargo.toml --check
 
       - name: clippy
-        # Warnings do not fail the build yet. Once the "clear clippy warnings"
-        # issue lands, append `-- -D warnings` here and they will.
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --lib
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings
 
       - name: cargo test (app)
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
