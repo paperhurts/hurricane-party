@@ -82,7 +82,10 @@
     flex: 1 1 auto;
     min-height: 0;
     width: 100%;
-    background: #000;
+    /* The letterbox bars around a video that doesn't fill the window follow the
+       theme rather than being a literal black (D65). `well` is the deepest
+       colour in the palette, so this still reads as black in practice. */
+    background: var(--well);
   }
   footer {
     flex: 0 0 auto;
