@@ -119,7 +119,7 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(LABEL) {
         // Already open on a different track: point it at the new one rather
         // than stacking up windows.
-        let _ = w.eval(&format!("location.search = '?id={id}'"));
+        let _ = w.eval(format!("location.search = '?id={id}'"));
         let _ = w.set_focus();
         return Ok(());
     }
