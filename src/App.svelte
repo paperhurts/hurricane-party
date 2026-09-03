@@ -156,10 +156,17 @@
   }
 
   function play(t: MediaRow) {
+    // A new attempt clears the last verdict, whichever kind it was. Clearing
+    // only inside the video branch left a video failure sitting over a later
+    // audio play that worked.
+    error = null;
     // Video gets its own decorated OS window (D13) — it is deliberately not
     // part of the bond group, and the audio element here can't show it.
     if (t.kind === "video") {
-      invoke("open_video", { id: t.id });
+      // Resolves when the window confirms the switch, rejects when it does
+      // not (D68). Before this the call could not fail (D67), so a dead
+      // window read as success.
+      invoke("open_video", { id: t.id }).catch((e) => (error = String(e)));
       return;
     }
     playing = t;
