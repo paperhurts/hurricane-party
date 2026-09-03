@@ -119,7 +119,16 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(LABEL) {
         // Already open on a different track: point it at the new one rather
         // than stacking up windows.
-        let _ = w.eval(format!("location.search = '?id={id}'"));
+        //
+        // Re-pointing it *is* the command, so a failure here is the caller's
+        // business (#25). The label outlives the webview — the manager only
+        // forgets it on Destroyed — so this window can resolve with its
+        // dispatcher already gone, and discarding the error told the user the
+        // track had switched while they watched the old one play on.
+        w.eval(format!("location.search = '?id={id}'"))
+            .map_err(|e| e.to_string())?;
+        // Best-effort on purpose: the track did switch, and failing to raise
+        // the window is not failing to do what was asked.
         let _ = w.set_focus();
         return Ok(());
     }

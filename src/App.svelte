@@ -159,7 +159,12 @@
     // Video gets its own decorated OS window (D13) — it is deliberately not
     // part of the bond group, and the audio element here can't show it.
     if (t.kind === "video") {
-      invoke("open_video", { id: t.id });
+      // Propagated from Rust now (#25): a failed re-point of an existing
+      // video window has to reach the error strip, not vanish. Cleared first,
+      // the way every other operation here does — a stale failure must not
+      // sit over a switch that worked.
+      error = null;
+      invoke("open_video", { id: t.id }).catch((e) => (error = String(e)));
       return;
     }
     playing = t;
