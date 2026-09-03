@@ -16,7 +16,8 @@
     the same turn.
 
     A line that must carry a literal colour says why with a marker and is skipped:
-        background: #000; /* tokens-exempt: letterbox black is not a theme colour */
+        outline: #FF00FF; /* tokens-exempt: debug overlay, never shipped */
+    (The video letterbox is not an example: D65 made it a theme token.)
 
     Windows PowerShell 5.1. Invoked from .claude/settings.json with the project
     root as the working directory.

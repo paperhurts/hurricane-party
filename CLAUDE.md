@@ -65,6 +65,7 @@ Work one at a time. Don't build ahead.
 
 - **Branch per issue, pull request, merge commit on GitHub.** Never commit straight to `main`; `tools/git-hooks/pre-push` refuses it. Squash and rebase are disabled on the repo, so the merge bubble is still the record of what changed together. The owner merges, after the hand test
 - **Nothing lives only in a conversation.** Decisions go in `decisions.md`, findings go in a doc, working agreements go here. A session should be disposable
+- **Nothing personal and no session links in git.** The repo is public. Commits end with the `Co-Authored-By` line only, never a `Claude-Session:` trailer; PR and issue text carries no session URL and no generated-with footer; paths are repo-relative, never a machine path; no emails or account details anywhere
 - **Test the interaction the way a user performs it, at least once per stage.** The v0.0 spike's scripted sweeps passed at 0 px error while the real interaction was dead, because an invisible window was eating the clicks (D43). Scripted paths and real input are not the same test
 - **Verify against the real binary before believing a flag.** `--embed-thumbnail` looked right and hard-errors on webm; the fix only surfaced by running it
 - `.sid/` is a scratch folder for screenshots. Gitignored, never referenced by code
