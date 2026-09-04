@@ -40,7 +40,14 @@
   let playlists = $state<Playlist[]>([]);
   let selectedList = $state<number | null>(null);
   let listItems = $state<MediaRow[]>([]);
-  let playing = $state<MediaRow | null>(null);
+  // Two different things, kept apart on purpose. `current` is this window's
+  // cursor: the row the user last played, audio or video, and the one next
+  // and prev step from. `nowId` is which audio track Main holds and whether
+  // it is sounding, for the row's ‖ glyph. Merging them is how skipping onto
+  // a video got stuck: Main paused, reported the MP3, and the cursor snapped
+  // back to it.
+  let current = $state<MediaRow | null>(null);
+  let nowId = $state<number | null>(null);
   let isPlaying = $state(false);
   let libraryPath = $state("");
   let concurrency = $state(2);
@@ -90,10 +97,8 @@
       // ...and says what it is playing, so the row can light up and its
       // button can show pause.
       listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
-        const { id, playing: p } = e.payload;
-        isPlaying = p;
-        playing =
-          id == null ? null : (shown.find((t) => t.id === id) ?? tracks.find((t) => t.id === id) ?? null);
+        nowId = e.payload.id;
+        isPlaying = e.payload.playing;
       }),
     ];
     // The DB is the source of truth for progress, and it's written throttled
@@ -157,6 +162,9 @@
     // only inside the video branch left a video failure sitting over a later
     // audio play that worked.
     error = null;
+    // The cursor moves for either kind, so next and prev walk on from a video
+    // as well as from a track.
+    current = t;
     // Video gets its own decorated OS window (D13) — it is deliberately not
     // part of the bond group, and the audio element here can't show it.
     if (t.kind === "video") {
@@ -169,8 +177,6 @@
       emitTo("main", "player:pause").catch(() => {});
       return;
     }
-    // Optimistic: Main confirms with player:now once it has the track.
-    playing = t;
     emitTo("main", "player:load", t).catch((e) => (error = String(e)));
   }
 
@@ -180,8 +186,8 @@
   }
 
   function step(delta: number) {
-    if (!playing) return;
-    const i = shown.findIndex((t) => t.id === playing!.id);
+    if (!current) return;
+    const i = shown.findIndex((t) => t.id === current!.id);
     const next = shown[i + delta];
     if (next) play(next);
   }
@@ -313,10 +319,10 @@
 
     <ul class="tracks">
       {#each shown as t, i (t.id + ":" + (t.position ?? "l"))}
-        <li class:current={playing?.id === t.id}>
+        <li class:current={current?.id === t.id}>
           {#if t.kind === "video"}
             <button class="play" onclick={() => play(t)}>▣</button>
-          {:else if playing?.id === t.id}
+          {:else if nowId === t.id}
             <button class="play" onclick={toggle}>{isPlaying ? "‖" : "▶"}</button>
           {:else}
             <button class="play" onclick={() => play(t)}>▶</button>

@@ -1241,6 +1241,32 @@ pub fn focus_group(app: &AppHandle, focused: Option<WindowId>) {
     emit_state(app);
 }
 
+/// Bring a window's whole group to the front of our own stack without taking
+/// focus. The library asked Main to play something and the user wants to see
+/// it happen, but they are still working in the library, so activating Main
+/// would be rude. Restores a minimized member first, because `set_focus`
+/// never does (#39, D59). Leaves `focused` alone: the chrome should render
+/// active only where the OS focus actually is.
+pub fn raise_group(app: &AppHandle, id: WindowId) {
+    let (plan, handles) = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        let comp = s.graph.component(id);
+        (
+            plan_ownership(&s, Some(id)),
+            comp.iter().map(|w| s.handle(*w)).collect::<Vec<_>>(),
+        )
+    }; // D54: the lock is gone before any Win32 call.
+    let p = platform::platform();
+    for w in handles
+        .iter()
+        .filter(|w| !w.is_none() && p.is_minimized(**w))
+    {
+        p.restore_no_activate(*w);
+    }
+    apply_ownership(&plan);
+}
+
 // ---- rescue -----------------------------------------------------------------
 
 /// Does this rect put any of itself on a display?
