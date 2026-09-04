@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { invoke } from "@tauri-apps/api/core";
+  import { emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
 
@@ -47,7 +47,6 @@
   let roots = $state<Root[]>([]);
   let scanning = $state(false);
   let notice = $state<string | null>(null);
-  let audio: HTMLAudioElement;
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let shown = $derived(selectedList == null ? tracks : listItems);
@@ -83,20 +82,15 @@
     const subs = [
       listen("jobs-changed", refreshJobs),
       listen("library-changed", refreshLibrary),
-      // Transport arriving from the control pipe. Rust relays rather than
-      // executes, because the audio is here.
-      listen<{ cmd: string; arg: unknown }>("control-command", (e) => {
-        const { cmd, arg } = e.payload;
-        if (!audio) return;
-        if (cmd === "play") audio.play();
-        else if (cmd === "pause") audio.pause();
-        else if (cmd === "toggle") audio.paused ? audio.play() : audio.pause();
-        else if (cmd === "stop") { audio.pause(); audio.currentTime = 0; playing = null; }
-        else if (cmd === "next") step(1);
-        else if (cmd === "prev") step(-1);
-        else if (cmd === "seek") audio.currentTime = Number(arg) || 0;
-        else if (cmd === "volume") audio.volume = Math.min(1, Math.max(0, Number(arg)));
-        pushState();
+      // Playback lives in the Main window (D5); this window is the remote.
+      // Main asks for the next or previous track because the play order —
+      // which list is showing — is known only here.
+      listen<number>("player:step", (e) => step(e.payload)),
+      // ...and says what it is playing, so the row can light up.
+      listen<number | null>("player:now", (e) => {
+        const id = e.payload;
+        playing =
+          id == null ? null : (shown.find((t) => t.id === id) ?? tracks.find((t) => t.id === id) ?? null);
       }),
     ];
     // The DB is the source of truth for progress, and it's written throttled
@@ -169,26 +163,9 @@
       invoke("open_video", { id: t.id }).catch((e) => (error = String(e)));
       return;
     }
+    // Optimistic: Main confirms with player:now once it has the track.
     playing = t;
-    audio.src = convertFileSrc(t.path);
-    audio.play();
-    pushState();
-  }
-
-  /// Mirror playback state into Rust so the control channel can answer
-  /// `status` truthfully — the audio graph lives here, not there (D5).
-  function pushState() {
-    invoke("report_state", {
-      state: {
-        state: !playing ? "stopped" : audio?.paused ? "paused" : "playing",
-        media_id: playing?.id ?? null,
-        title: playing?.title ?? null,
-        uploader: playing?.uploader ?? null,
-        duration_s: playing?.duration_s ?? null,
-        pos_s: audio?.currentTime ?? null,
-        volume: audio?.volume ?? 1,
-      },
-    }).catch(() => {});
+    emitTo("main", "player:load", t).catch((e) => (error = String(e)));
   }
 
   function step(delta: number) {
@@ -352,11 +329,6 @@
     </ul>
   </section>
 
-  <!-- svelte-ignore a11y_media_has_caption -->
-  <audio bind:this={audio} controls
-         onplay={pushState} onpause={pushState} onended={() => step(1)}
-         onvolumechange={pushState}></audio>
-
   <footer><span>Library</span><code>{libraryPath}</code></footer>
 </main>
 
@@ -433,7 +405,6 @@
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); flex: 0 0 auto; }
 
-  audio { width: 100%; }
   footer { display: flex; gap: 8px; align-items: baseline; font-size: 11px;
            color: color-mix(in srgb, var(--filament) 35%, transparent); }
   footer code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
