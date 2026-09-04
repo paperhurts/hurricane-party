@@ -19,7 +19,3 @@ body:
     attributes:
       label: Decisions implicated
       placeholder: D21, D31
-  - type: markdown
-    attributes:
-      value: |
-        Set the milestone on the issue. The brief (scope, acceptance, hand test) is added with `/brief` before anyone implements.
