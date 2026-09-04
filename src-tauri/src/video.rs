@@ -4,11 +4,13 @@
 //! window received the switch: `emit_to`, like `eval`, is fire-and-forget in
 //! this build, and a dead webview drops the message silently (D67). So the
 //! window says so itself, with a `video_ready` command, and the absence of
-//! that ack within [`ACK_TIMEOUT`] is the failure signal.
+//! that ack within [`ACK_TIMEOUT`] is the failure signal. A freshly built
+//! window acks the same way once it is up and listening, within
+//! [`MOUNT_TIMEOUT`], and [`OpenLock`] holds every later click until it has.
 //!
 //! This module is the registry of waits in flight. There is no webview in it,
 //! which is what makes it testable: the command layer in `lib.rs` is two
-//! calls, `expect` before the emit and `wait` after it.
+//! calls, `expect` before the emit or the build and `wait` after it.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -29,10 +31,35 @@ pub const SWITCH_EVENT: &str = "hp://switch-track";
 /// margin rather than trust this comment.
 pub const ACK_TIMEOUT: Duration = Duration::from_millis(1000);
 
+/// How long `open_video` waits for a freshly built window to say it is up.
+///
+/// The cold path is the native window, WebView2, the navigation, the bundle,
+/// the mount, the listener registration and one `list_tracks`: hundreds of
+/// milliseconds under Vite, more on the first WebView2 spin-up of a process.
+/// Five seconds is headroom for a slow disk at launch; past it the window was
+/// built and has not come up, which is worth a message rather than a longer
+/// wait. Logged on every open so the hand test can check the margin.
+pub const MOUNT_TIMEOUT: Duration = Duration::from_millis(5000);
+
+/// One `open_video` at a time (issue #42).
+///
+/// `build()` returns the instant the window is *requested*: the label goes
+/// into the map before the native window exists, let alone the page. Two
+/// clicks in the microseconds between the label check and that insert both
+/// build; a click in the hundreds of milliseconds after it takes the switch
+/// branch and emits to a page that has not registered its listener, so the
+/// event is dropped (D67) and the click reports a timeout over a working
+/// window. Same gap, two faces. Holding this across the whole command, ack
+/// wait included, means the second click always sees a window that has said
+/// it is listening. Async because the wait is an await; a `std` mutex here
+/// would park a runtime thread for up to `MOUNT_TIMEOUT`.
+#[derive(Default)]
+pub struct OpenLock(pub tokio::sync::Mutex<()>);
+
 #[derive(Debug, thiserror::Error)]
 pub enum SwitchError {
     #[error(
-        "the video window did not confirm the switch to track {} within {} ms",
+        "the video window did not confirm track {} within {} ms",
         .id,
         .timeout.as_millis()
     )]

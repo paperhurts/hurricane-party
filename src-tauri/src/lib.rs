@@ -117,6 +117,11 @@ fn report_state(app: AppHandle, state: hp_control::PlayerState) {
 async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     const LABEL: &str = "video";
 
+    // Serialized, ack wait included: see `video::OpenLock` for the gap this
+    // closes. Held to the end of the function on every path.
+    let lock = app.state::<video::OpenLock>();
+    let _one_at_a_time = lock.0.lock().await;
+
     if let Some(w) = app.get_webview_window(LABEL) {
         // Already open: tell it to switch, and wait for it to say it has.
         //
@@ -139,6 +144,13 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
         return Ok(());
     }
 
+    // D68 applied to creation. The label is in the map the instant `build()`
+    // returns, long before the page exists, so without this a click in that
+    // window would take the branch above and lose its event (D67). Register,
+    // build, then wait for the page to say it is up and listening; only then
+    // does the lock release and let the next click through.
+    let pending = app.state::<video::SwitchAcks>().expect(id);
+    let started = std::time::Instant::now();
     tauri::WebviewWindowBuilder::new(
         &app,
         LABEL,
@@ -151,6 +163,12 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     .decorations(true)
     .build()
     .map_err(|e| e.to_string())?;
+    pending
+        .wait(video::MOUNT_TIMEOUT)
+        .await
+        .map_err(|e| e.to_string())?;
+    // Measured so the hand test can judge MOUNT_TIMEOUT's margin.
+    eprintln!("video: window up on {id} in {:?}", started.elapsed());
     Ok(())
 }
 
@@ -423,6 +441,7 @@ pub fn run() {
         .manage(control::Broadcaster::default())
         .manage(wm::Wm::default())
         .manage(video::SwitchAcks::default())
+        .manage(video::OpenLock::default())
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this
             // process computes after this line depends on the answer, so there

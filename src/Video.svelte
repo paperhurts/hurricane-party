@@ -28,8 +28,13 @@
       return;
     }
     // Re-clicking the track already showing is not a switch. Returning here is
-    // what keeps it playing from where it was instead of restarting (D68).
-    if (track?.id === id) return;
+    // what keeps it playing from where it was instead of restarting (D68). A
+    // failed switch since then may have left its message over the video, and
+    // this click is the user asking for the track back.
+    if (track?.id === id) {
+      error = null;
+      return;
+    }
     try {
       const rows = await invoke<MediaRow[]>("list_tracks");
       const found = rows.find((r) => r.id === id);
@@ -64,7 +69,7 @@
 
   onMount(() => {
     applyTheme("eyewall");
-    load(Number(new URLSearchParams(location.search).get("id")));
+    const id = Number(new URLSearchParams(location.search).get("id"));
 
     // A switch arrives as an event and is acked with a command, because the
     // emit that carries it cannot tell Rust whether this window was alive to
@@ -74,6 +79,19 @@
       await load(e.payload);
       await invoke("video_ready", { id: e.payload });
     });
+
+    // The first load runs after the listener is registered, and acks the same
+    // way. Rust holds every later click until this ack arrives, so this order
+    // is what makes "up" mean "and listening" (D68). A listen that fails is
+    // logged and the load still runs: the window can show its track even if
+    // it can never be switched.
+    sub
+      .catch((e) => console.warn("couldn't listen for switches:", e))
+      .then(async () => {
+        await load(id);
+        if (Number.isFinite(id)) await invoke("video_ready", { id });
+      });
+
     return () => {
       sub.then((unlisten) => unlisten());
     };
