@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { emitTo, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { applyTheme } from "./lib/theme";
 
@@ -116,6 +116,7 @@
       controls
       autoplay
       onerror={() => (error = "Can't open this file. Moved or deleted?")}
+      onended={() => emitTo("library", "player:step", 1).catch(() => {})}
     ></video>
     <footer>
       <span class="title">{track.title}</span>

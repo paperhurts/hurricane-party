@@ -74,6 +74,8 @@
     stopped = false;
     pos = 0;
     dur = t.duration_s ?? 0;
+    // Come forward so the user sees it start, without taking their focus.
+    invoke("wm_raise", { label: "main" }).catch(() => {});
     ensureGraph();
     audio.src = convertFileSrc(t.path);
     // One transport (D69): starting a track pauses a video that is playing.
