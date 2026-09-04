@@ -1,6 +1,6 @@
 ---
 name: decision-auditor
-description: Reviews a diff against docs/decisions.md, the numbered decisions this repo treats as law, and reports violations, advisory decisions the change bends, and choices no decision covers. Read-only. Use on any pull request before merge, and on a plan before implementing.
+description: Reviews a diff against docs/decisions.md, the numbered decisions this repo treats as law, and reports violations, advisory decisions the change bends, and choices no decision covers. Read-only. On request, for a large or decision-heavy pull request or a plan; not a step on every PR.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
