@@ -41,6 +41,7 @@
   let selectedList = $state<number | null>(null);
   let listItems = $state<MediaRow[]>([]);
   let playing = $state<MediaRow | null>(null);
+  let isPlaying = $state(false);
   let libraryPath = $state("");
   let concurrency = $state(2);
   let wantVideo = $state(false);
@@ -86,9 +87,11 @@
       // Main asks for the next or previous track because the play order —
       // which list is showing — is known only here.
       listen<number>("player:step", (e) => step(e.payload)),
-      // ...and says what it is playing, so the row can light up.
-      listen<number | null>("player:now", (e) => {
-        const id = e.payload;
+      // ...and says what it is playing, so the row can light up and its
+      // button can show pause.
+      listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
+        const { id, playing: p } = e.payload;
+        isPlaying = p;
         playing =
           id == null ? null : (shown.find((t) => t.id === id) ?? tracks.find((t) => t.id === id) ?? null);
       }),
@@ -161,11 +164,19 @@
       // not (D68). Before this the call could not fail (D67), so a dead
       // window read as success.
       invoke("open_video", { id: t.id }).catch((e) => (error = String(e)));
+      // One transport (D69): a video starting pauses the audio. It does not
+      // resume when the video ends or closes; the user restarts it.
+      emitTo("main", "player:pause").catch(() => {});
       return;
     }
     // Optimistic: Main confirms with player:now once it has the track.
     playing = t;
     emitTo("main", "player:load", t).catch((e) => (error = String(e)));
+  }
+
+  // The row that is playing toggles instead of restarting.
+  function toggle() {
+    emitTo("main", "player:toggle").catch(() => {});
   }
 
   function step(delta: number) {
@@ -303,7 +314,13 @@
     <ul class="tracks">
       {#each shown as t, i (t.id + ":" + (t.position ?? "l"))}
         <li class:current={playing?.id === t.id}>
-          <button class="play" onclick={() => play(t)}>{t.kind === "video" ? "▣" : "▶"}</button>
+          {#if t.kind === "video"}
+            <button class="play" onclick={() => play(t)}>▣</button>
+          {:else if playing?.id === t.id}
+            <button class="play" onclick={toggle}>{isPlaying ? "‖" : "▶"}</button>
+          {:else}
+            <button class="play" onclick={() => play(t)}>▶</button>
+          {/if}
           <span class="title">{t.title}</span>
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
           {#if selectedList == null}

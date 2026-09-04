@@ -51,7 +51,15 @@
       graph = new AudioGraph(audio);
       analyser = graph.analyser;
     }
-    graph.resume().catch(() => {});
+    graph.resume().catch((e) => (error = `Audio engine: ${String(e)}`));
+    // A resume the browser refuses (no gesture in this document yet) leaves
+    // the promise pending rather than rejecting it, so the context has to be
+    // asked directly. Say so instead of playing silence.
+    setTimeout(() => {
+      if (graph && graph.ctx.state !== "running" && !audio.paused) {
+        error = "Audio engine is suspended. Click Play in this window once.";
+      }
+    }, 400);
   }
 
   async function load(t: Track) {
@@ -68,6 +76,9 @@
     dur = t.duration_s ?? 0;
     ensureGraph();
     audio.src = convertFileSrc(t.path);
+    // One transport (D69): starting a track pauses a video that is playing.
+    // Nothing resumes it; the video window stays on its paused frame.
+    emitTo("video", "hp://pause").catch(() => {});
     await play();
     tell();
   }
@@ -117,7 +128,7 @@
 
   /** Tell the library what is playing so its list can highlight the row. */
   function tell() {
-    emitTo("library", "player:now", track?.id ?? null).catch(() => {});
+    emitTo("library", "player:now", { id: track?.id ?? null, playing }).catch(() => {});
   }
 
   /** Mirror into Rust so the control channel answers `status` truthfully. */
@@ -145,6 +156,7 @@
         : `Playback failed (${audio.error?.message || code || "unknown"})`;
     playing = false;
     push();
+    tell();
   }
 
   $effect(() => {
@@ -153,6 +165,9 @@
     push();
     const subs = [
       listen<Track>("player:load", (e) => load(e.payload)),
+      // The library opened a video (D69), or clicked the row that is playing.
+      listen("player:pause", () => pause()),
+      listen("player:toggle", () => (audio.paused ? play() : pause())),
       listen<{ cmd: string; arg: unknown }>("control-command", (e) => {
         const { cmd, arg } = e.payload;
         if (cmd === "play") play();
@@ -254,17 +269,26 @@
       </div>
     </div>
 
+    <!-- crossorigin is load-bearing. The file comes from the asset protocol,
+         which is another origin, and a media element inside a Web Audio graph
+         outputs SILENCE for a cross-origin resource fetched without CORS: the
+         element plays, the clock runs, and nothing reaches the speakers or
+         the analyser. Tauri's asset handler answers with Access-Control-Allow-
+         Origin for the app's origin, so anonymous mode is enough. -->
     <!-- svelte-ignore a11y_media_has_caption -->
     <audio
       bind:this={audio}
+      crossorigin="anonymous"
       hidden
       onplay={() => {
         playing = true;
         push();
+        tell();
       }}
       onpause={() => {
         playing = false;
         push();
+        tell();
       }}
       onended={() => step(1)}
       ontimeupdate={() => {
