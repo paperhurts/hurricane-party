@@ -6,11 +6,12 @@ mod localimport;
 mod pipeline;
 pub mod platform;
 mod playlist;
+mod video;
 pub mod wm;
 
 use db::Db;
 use jobs::{Job, RunnerHandle};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ---- import -----------------------------------------------------------------
 
@@ -116,14 +117,40 @@ fn report_state(app: AppHandle, state: hp_control::PlayerState) {
 async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     const LABEL: &str = "video";
 
+    // Serialized, ack wait included: see `video::OpenLock` for the gap this
+    // closes. Held to the end of the function on every path.
+    let lock = app.state::<video::OpenLock>();
+    let _one_at_a_time = lock.0.lock().await;
+
     if let Some(w) = app.get_webview_window(LABEL) {
-        // Already open on a different track: point it at the new one rather
-        // than stacking up windows.
-        let _ = w.eval(format!("location.search = '?id={id}'"));
+        // Already open: tell it to switch, and wait for it to say it has.
+        //
+        // D67: the emit cannot report a dead webview, so the ack's absence is
+        // the only failure signal there is. D68: an event rather than a
+        // navigation, so the bundle does not reload and a re-click of the
+        // track already showing does not rewind it. Register before the emit
+        // so an ack that beats the wait is already in the channel.
+        let pending = app.state::<video::SwitchAcks>().expect(id);
+        let started = std::time::Instant::now();
+        app.emit_to(LABEL, video::SWITCH_EVENT, id)
+            .map_err(|e| e.to_string())?;
+        pending
+            .wait(video::ACK_TIMEOUT)
+            .await
+            .map_err(|e| e.to_string())?;
+        // Measured so the hand test can judge ACK_TIMEOUT's margin.
+        eprintln!("video: switch to {id} acked in {:?}", started.elapsed());
         let _ = w.set_focus();
         return Ok(());
     }
 
+    // D68 applied to creation. The label is in the map the instant `build()`
+    // returns, long before the page exists, so without this a click in that
+    // window would take the branch above and lose its event (D67). Register,
+    // build, then wait for the page to say it is up and listening; only then
+    // does the lock release and let the next click through.
+    let pending = app.state::<video::SwitchAcks>().expect(id);
+    let started = std::time::Instant::now();
     tauri::WebviewWindowBuilder::new(
         &app,
         LABEL,
@@ -136,7 +163,22 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     .decorations(true)
     .build()
     .map_err(|e| e.to_string())?;
+    pending
+        .wait(video::MOUNT_TIMEOUT)
+        .await
+        .map_err(|e| e.to_string())?;
+    // Measured so the hand test can judge MOUNT_TIMEOUT's margin.
+    eprintln!("video: window up on {id} in {:?}", started.elapsed());
     Ok(())
+}
+
+/// The video window confirming it has switched to `id` (D68). Completes the
+/// wait in `open_video`; an ack that arrives after the timeout finds nobody and
+/// is dropped, which is right, because that click has already reported
+/// failure. Internal: not part of the control protocol (D15).
+#[tauri::command]
+fn video_ready(app: AppHandle, id: i64) {
+    app.state::<video::SwitchAcks>().complete(id);
 }
 
 // ---- window manager ---------------------------------------------------------
@@ -398,6 +440,8 @@ pub fn run() {
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
         .manage(wm::Wm::default())
+        .manage(video::SwitchAcks::default())
+        .manage(video::OpenLock::default())
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this
             // process computes after this line depends on the answer, so there
@@ -474,6 +518,7 @@ pub fn run() {
             add_local_folder,
             list_roots,
             open_video,
+            video_ready,
             report_state,
             wm_drag_start,
             wm_drag_move,
