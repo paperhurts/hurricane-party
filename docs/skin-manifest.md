@@ -35,6 +35,11 @@ So this schema is deliberately closer to Winamp's model than to the web's — ab
     "pledit":  "pledit.png"
   },
 
+  "art":  "mask",              // "final": full-colour pixels drawn as they are;
+                               // "mask": alpha, tinted from the palette (D73)
+  "glow": "renderer",          // "baked": the halo is in the pixels, none added;
+                               // "renderer": painted from `arc`, user-toggleable (D73)
+
   "palette": {                 // the six tokens. imported from design/tokens.json,
     "void":     "#0C0A14",     // never hardcoded in a component
     "well":     "#05040A",
@@ -161,9 +166,11 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 
 `action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns.
 
-### Glow is baked, not computed
+### Glow is declared, not assumed
 
-Per `theme.md`: for the three classic windows, the glow is **pre-rendered into the sprite art**. No CSS filters anywhere near the 60 Hz visualizer, and it means native and imported skins take an identical rendering path. The modern decorated windows compute glow in CSS, but they aren't described by this manifest at all.
+Two top-level fields say what kind of art this is (D73). **`glow`** is `"baked"` — the halo is in the pixels and the renderer adds none — or `"renderer"`, where the renderer paints a halo from the palette's `arc` behind glow-eligible chrome and the user's glow toggle applies. **`art`** is `"final"` — full-colour pixels, drawn as they are — or `"mask"`, alpha masks the renderer tints from the palette, so a theme change reaches the whole chrome rather than only its halo. Both importers produce `art: final, glow: baked`, which is what their source art is, so an imported skin never double-glows and native and imported skins take one rendering path.
+
+What no manifest can change: **no CSS filter on the visualizer surface or any ancestor of it.** That is the 60 Hz path, a filter on a parent runs the child through it every frame, and the analyser's own glow is pre-rendered into its ramp art for that reason. The renderer scopes the toggle per chrome element and does not consult the skin about the exemption — the same status as `prefers-reduced-motion` on the seam below. The modern decorated windows compute glow in CSS and aren't described by this manifest at all.
 
 ---
 
