@@ -96,7 +96,7 @@ Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.d
 | v0.2 | SQLite, persistent queue with byte-level resume, playlists |
 | v0.3 | Video window, local folder import, control API handshake + transport |
 | v0.4a | The window system: bonding, splitter, shade modes, grouped z-order, layout persistence, stranded-group rescue |
-| **v0.4b** | **Next.** Eyewall skin from sprites, EQ, analyser, viz stream. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
+| **v0.4b** | **Next.** Eyewall chrome drawn from tokens in CSS (D72), EQ, analyser, viz stream. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
 
 The canonical milestone table is in `docs/decisions.md` (D27).
 

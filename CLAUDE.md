@@ -57,7 +57,7 @@ These have burned into the design. Don't quietly relax them.
 
 Work one at a time. Don't build ahead.
 
-**v0.0 through v0.4a are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). Currently starting **v0.4b** — the skin renderer, EQ and analyser, briefed in `docs/v0.4-brief.md` and tracked as the v0.4b milestone on GitHub.
+**v0.0 through v0.4a are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). Currently starting **v0.4b** — chrome drawn from tokens in CSS (D72), EQ and analyser, briefed in `docs/v0.4-brief.md` and tracked as the v0.4b milestone on GitHub.
 
 ---
 
