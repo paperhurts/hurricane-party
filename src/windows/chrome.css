@@ -74,6 +74,14 @@ body {
 
 .body {
   flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A window with nothing in it yet says so, centred. */
+.placeholder {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: center;

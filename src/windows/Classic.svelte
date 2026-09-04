@@ -1,13 +1,19 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { applyTheme } from "../lib/theme";
 
   // Shared shell for the three classic 275px windows. They differ only in what
-  // is inside them, and in v0.4b that becomes the sprite renderer — the drag,
-  // seam and focus wiring is identical for all three and belongs in one file.
-  let { label, title, body }: { label: string; title: string; body: string } =
-    $props();
+  // is inside them — the drag, seam and focus wiring is identical for all three
+  // and belongs in one file. A window with real contents passes them as
+  // children; one that has none yet shows the placeholder label.
+  let {
+    label,
+    title,
+    body = "",
+    children,
+  }: { label: string; title: string; body?: string; children?: Snippet } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
   // a handful of custom properties on :root, from design/tokens.json.
@@ -207,7 +213,13 @@
   <div class="titlebar" onpointerdown={titleDown}>
     {title}
   </div>
-  <div class="body">{body}</div>
+  <div class="body">
+    {#if children}
+      {@render children()}
+    {:else}
+      <span class="placeholder">{body}</span>
+    {/if}
+  </div>
 
   {#each SIDES as side (side)}
     {#if edges[side] !== null}
