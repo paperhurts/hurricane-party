@@ -6,17 +6,15 @@ Windows-first. Tauri v2 + Svelte 5 + Vite. SQLite. yt-dlp, ffmpeg, and deno as s
 
 ---
 
-## Precedence — read this before resolving any ambiguity
+## Precedence — when sources disagree
 
-When sources disagree, this order wins:
-
-1. **`docs/decisions.md`** — the decision log. Authoritative. If something contradicts it, the other thing is wrong or stale
+1. **`docs/decisions.md`** — the decision log. If something contradicts it, the other thing is wrong or stale
 2. **`docs/*.md`** — the specs
 3. **`design/`** — visual reference **only**
 
-**The prototype is not the spec.** Design exports show intent, not contract. If the prototype has a control the specs don't mention, ask rather than implement. If a measurement conflicts, the spec wins.
+The prototype is not the spec. Design exports show intent, not contract. If the prototype has a control the specs don't mention, say so rather than building it unasked. If a measurement conflicts, the spec wins.
 
-If a decision genuinely hasn't been made, **stop and ask.** Don't infer one and proceed — the decision log exists specifically so choices get made once, on purpose, and stay made.
+If no decision covers a choice, make the obvious call, write it down (a row in `decisions.md`, in the same PR), and say so in the PR. Ask only when the options lead to materially different work, or when it's a taste call that's the owner's: what it looks like, what it's called, what it's for. A decision that turns out wrong gets superseded by a new row in the PR that changes course. That's the whole procedure.
 
 ---
 
@@ -34,7 +32,7 @@ If a decision genuinely hasn't been made, **stop and ask.** Don't infer one and 
 | `docs/theme.md` | Eyewall and Cone themes, palette rationale, glow rendering |
 | `docs/purricane.md` | Kaleidoscope theme + desktop kittens. v0.5 and v0.7. Not needed before then |
 | `design/tokens.json` | Machine-readable palette. **Import this; never hardcode a hex value** |
-| `.claude/skills/*/SKILL.md` | Before running a workflow command. `/brief`, `/implement`, `/delegate`, `/land`, `/audit`, `/decide`; the table under Workflow says which does what |
+| `.claude/skills/*/SKILL.md` | `/land` runs the gates and opens the PR; `/decide` appends a decision row. Those are the only workflow commands |
 
 ---
 
@@ -61,32 +59,33 @@ Work one at a time. Don't build ahead.
 
 ---
 
-## Working agreements
+## How we work
 
-- **Branch per issue, pull request, merge commit on GitHub.** Never commit straight to `main`; `tools/git-hooks/pre-push` refuses it. Squash and rebase are disabled on the repo, so the merge bubble is still the record of what changed together. The owner merges, after the hand test
-- **Nothing lives only in a conversation.** Decisions go in `decisions.md`, findings go in a doc, working agreements go here. A session should be disposable
-- **Nothing personal and no session links in git.** The repo is public. Commits end with the `Co-Authored-By` line only, never a `Claude-Session:` trailer; PR and issue text carries no session URL and no generated-with footer; paths are repo-relative, never a machine path; no emails or account details anywhere
-- **Test the interaction the way a user performs it, at least once per stage.** The v0.0 spike's scripted sweeps passed at 0 px error while the real interaction was dead, because an invisible window was eating the clicks (D43). Scripted paths and real input are not the same test
+Say what you want. The session builds it and lands it.
+
+1. **Branch off `main`.** `<type>/<n>-<slug>` when there's an issue, `<type>/<slug>` when there isn't. Never commit to `main`; `tools/git-hooks/pre-push` refuses it anyway
+2. **Build it.** Make the routine calls yourself and note them in the PR. A call worth keeping past this PR gets a row in `docs/decisions.md` (`/decide` appends it; it ships in the same PR as the code)
+3. **Land it.** `/land` runs the gates, pushes, and opens the PR. The body says what changed and, when there's something to see on a screen, how to hand-test it
+4. **The owner hand-tests and merges** on GitHub. Nothing merges from a session. Squash and rebase are disabled, so the merge bubble is the record of what changed together
+
+Any session, any model. There is no planning session and no execution session; a session is disposable and the branch and PR carry everything.
+
+**Gates:** `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on both crates, then `pnpm check`. Warnings are errors in both crates (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI (`.github/workflows/ci.yml`) agree by construction. A shipping exe comes from the `release-exe` workflow on demand.
+
+**Issues** are the list of work that isn't happening yet. An issue body is the spec; there is no brief format to fill in first. Work that's happening now doesn't need an issue; the PR is enough.
+
+**Hooks** in `.claude/settings.json` refuse a hardcoded colour under `src/` (a `tokens-exempt: <why>` comment on the line is the escape hatch), a `#[cfg(windows)]` outside `platform/`, and a whole-file rewrite of `decisions.md`. They load at session start; restart after changing them.
+
+**Reviewers on request, not on schedule.** For a large or decision-heavy change, ask for the `decision-auditor` agent on the PR. For anything under `skins/`, `design/`, or the skin renderer, `skin-reviewer`. Neither is a step; a bug fix doesn't need an audit.
+
+### Things that have burned us
+
+- **Test the interaction the way a user performs it** for anything on screen. The v0.0 spike's scripted sweeps passed at 0 px error while the real interaction was dead, because an invisible window was eating the clicks (D43). Scripted paths and real input are not the same test
 - **Verify against the real binary before believing a flag.** `--embed-thumbnail` looked right and hard-errors on webm; the fix only surfaced by running it
+- **Leave the tree on the PR branch and say so** before a hand test. There's no worktree: `src-tauri/binaries/` and `node_modules/` aren't in git, and a hand test on the wrong branch tests nothing
+- **Nothing lives only in a conversation.** A decision goes in `decisions.md`, a finding in a doc or on the issue. The next session starts cold
+- **Nothing personal and no session links in git.** The repo is public. Commits end with the `Co-Authored-By` line only, never a `Claude-Session:` trailer; PR and issue text carries no session URL and no generated-with footer; paths are repo-relative, never a machine path; no emails or account details anywhere
 - `.sid/` is a scratch folder for screenshots. Gitignored, never referenced by code
-
-## Workflow
-
-GitHub issues are the work list; the decision log is not. Every unit of work is an issue, briefed before it is built, and merged through a pull request the owner reviews on GitHub. Planning happens in one session (Fable), execution in another (Opus) or in a delegated subagent, so a session stays disposable and the issue carries the contract.
-
-| Step | Who | How |
-|---|---|---|
-| Plan and scope | planning session | `/brief <n>` writes the contract into the issue: outcome, scope, decisions implicated, acceptance, hand test |
-| Decide | the owner | `/decide` appends to `docs/decisions.md`. A choice the brief needs but nobody has made stops the work |
-| Build | an execution session, or `/delegate <n>` from the planning session | `/implement <n>`: branch `<type>/<n>-<slug>`, code, tests, gates, then `/land` opens the PR |
-| Review | planning session | `/audit <pr>` posts the decision-auditor's verdict on the PR |
-| Hand test and merge | the owner | On a real screen, then merge on GitHub. Nothing merges from a session |
-
-Gates: `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on both crates, then `pnpm check`. Warnings are errors in both crates (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI agree by construction; a new Rust release reaches the build only when the pin is bumped. `/land` runs them; CI (`.github/workflows/ci.yml`) repeats them on every PR. A shipping exe comes from the `release-exe` workflow on demand.
-
-Hooks in `.claude/settings.json` refuse a hardcoded colour under `src/` (a `tokens-exempt: <why>` comment on the line is the escape hatch), a `#[cfg(windows)]` outside `platform/`, and a whole-file rewrite of `decisions.md`. They load at session start; restart after changing them.
-
-Decisions carry provenance. A **(req)** row is the owner's business requirement; an **(adv)** row is advice the owner accepted. A requirement the owner states beats an (adv) row, and the fix is a superseding row via `/decide`, never a silent contradiction in code. `decision-auditor` raises these instead of failing them.
 
 ## Conventions
 

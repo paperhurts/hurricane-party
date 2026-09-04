@@ -1,6 +1,6 @@
 ---
 name: land
-description: Run every gate, push the branch, and open or update the pull request with the hand-test checklist. Never merges; that happens on GitHub after the hand test. Usage: /land [issue number]
+description: Run the gates, push the branch, and open or update the pull request. Never merges; that happens on GitHub after the hand test. Usage: /land [issue number]
 disable-model-invocation: true
 ---
 
@@ -9,10 +9,10 @@ disable-model-invocation: true
 - Changes: !`git status --short`
 - Ahead of main: !`git log --oneline main..HEAD`
 
-Issue: $ARGUMENTS (when omitted, the number in the branch name `<type>/<n>-...`)
+Issue: $ARGUMENTS (when omitted, the number in the branch name `<type>/<n>-...`, if there is one)
 
-1. **Refuse on main.** Refuse if there are changes you did not make in this session and cannot explain.
-2. **Gates**, in this order, stopping at the first failure and fixing it. Formatting is applied, not only checked:
+1. **Refuse on main.**
+2. **Gates**, stopping at the first failure and fixing it. Formatting is applied, not only checked:
 
        cargo fmt --manifest-path src-tauri/Cargo.toml
        cargo fmt --manifest-path crates/hp-control/Cargo.toml
@@ -22,10 +22,10 @@ Issue: $ARGUMENTS (when omitted, the number in the branch name `<type>/<n>-...`)
        cargo test --manifest-path crates/hp-control/Cargo.toml
        pnpm check
 
-   Warnings are errors in both crates (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so this list is exactly what CI runs; no flags. If fmt changed files, commit that on its own: `chore: rustfmt`.
-3. **Commit** uncommitted work in the repo's voice, `<area>: <what> (#n)`, the why in the body. End the message with the `Co-Authored-By` line only: no `Claude-Session:` trailer, no session URL, no machine paths or personal data. The repo is public.
+   Warnings are errors in both crates and the compiler is pinned, so this list is exactly what CI runs. A docs-only diff skips the Rust gates.
+3. **Commit** in the repo's voice: `<area>: <what> (#n)`, the why in the body. End the message with the `Co-Authored-By` line only: no `Claude-Session:` trailer, no session URL, no machine paths or personal data. The repo is public.
 4. `git push -u origin <branch>`.
-5. **Pull request.** None open yet: `gh pr create --title "<subject>" --body-file <tmp>`, plus `--milestone` from the issue, and `--label needs-hand-test` only when the brief's hand test names something to perform on a screen; a brief whose hand test is "None" gets no label. The body follows `.github/pull_request_template.md`: `Closes #n`; what changed, outcome first; the gates ticked, because you ran them; the **Hand test** copied from the issue's brief as an unticked checklist; the decisions relied on; a `## Noticed` list of what was seen and left alone. No session link and no generated-with footer in the body, and paths are repo-relative. A PR already open: the push is enough; comment only if the hand-test steps changed.
-6. Print the PR URL and one line of state: "gates green; awaiting hand test and merge on GitHub".
+5. **Pull request.** None open yet: `gh pr create --title "<subject>" --body-file <tmp>`, `--milestone` from the issue when there is one, `--label needs-hand-test` when there is something to see on a screen. The body follows `.github/pull_request_template.md`: what changed, outcome first; `Closes #n` when there is an issue; the hand test as an unticked checklist when there is one; any decision made along the way, by D-number. No session link, no generated-with footer, repo-relative paths. A PR already open: the push is enough; comment only if the hand-test steps changed.
+6. Print the PR URL. Leave the tree on this branch so the owner can hand-test, and say so.
 
 Never `gh pr merge`. Never `git push origin main`.
