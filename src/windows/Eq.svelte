@@ -16,6 +16,7 @@
     PRESETS,
     presetName,
     saveEq,
+    shadeBarPx,
     trimDb,
     type EqState,
   } from "../lib/eq";
@@ -145,7 +146,21 @@
   }}
 />
 
-<Classic label="eq" title="EQUALIZER">
+<!-- The EQ's shade: on or off, the curve as ten bars, the preset (D79). -->
+{#snippet shade()}
+  <div class="shade">
+    <span class="stag">EQ</span>
+    <span class="stag" class:lit={eq.on}>{eq.on ? "ON" : "OFF"}</span>
+    <div class="sbars" class:off={!eq.on} title={preset}>
+      {#each eq.bands as db, i (i)}
+        <i style:height="{shadeBarPx(db)}px"></i>
+      {/each}
+    </div>
+    <span class="stag">{preset}</span>
+  </div>
+{/snippet}
+
+<Classic label="eq" title="EQUALIZER" {shade}>
   <div class="eqw" class:off={!eq.on}>
     <div class="top">
       <div class="side">

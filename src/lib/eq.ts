@@ -44,6 +44,16 @@ export function clampDb(v: number): number {
   return Math.min(DB_MAX, Math.max(DB_MIN, v));
 }
 
+/**
+ * Height of one bar in the EQ window's shade, in px: 1 at `DB_MIN`, `max`
+ * at `DB_MAX`, so a flat EQ reads as a level row halfway up and a cut band
+ * is still a visible pixel rather than a gap.
+ */
+export function shadeBarPx(db: number, max = 9): number {
+  const t = (clampDb(db) - DB_MIN) / (DB_MAX - DB_MIN);
+  return Math.max(1, Math.round(t * max));
+}
+
 /** Amplitude ratio for a dB figure: 0 dB is unity, +6 is about double. */
 export function dbToGain(db: number): number {
   return Math.pow(10, db / 20);
