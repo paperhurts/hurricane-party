@@ -100,5 +100,62 @@ if (Test-Path $shots) {
 $missing = @("step1.png", "step2.png", "step3.png", "windows.png", "windowshade.png") | Where-Object { -not (Test-Path (Join-Path $dist "shots\$_")) }
 if ($missing) { Write-Warning ("screenshots missing from site/shots: " + ($missing -join ", ")) }
 
+# ---- the social preview ---------------------------------------------------------
+#
+# 1280 x 640, what a pasted link shows in a chat (og:image) and, uploaded by
+# hand in the repo's Settings, the GitHub social preview. The Florida truck
+# with the whole crew (#62) on the void, the name beside it. Text is drawn
+# with Iosevka where it is installed and Consolas where it is not (the CI
+# runner), so the file is honest either way.
+
+function Find-Font([string[]]$Names, [single]$Size, [System.Drawing.FontStyle]$Style) {
+    foreach ($n in $Names) {
+        try { return New-Object System.Drawing.Font $n, $Size, $Style, ([System.Drawing.GraphicsUnit]::Pixel) } catch {}
+    }
+    New-Object System.Drawing.Font ([System.Drawing.FontFamily]::GenericMonospace), $Size, $Style, ([System.Drawing.GraphicsUnit]::Pixel)
+}
+
+function Build-Social([string]$Out) {
+    $W = 1280; $H = 640
+    $bmp = New-Object System.Drawing.Bitmap $W, $H, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+        $g.Clear([System.Drawing.ColorTranslator]::FromHtml($colors.void))
+
+        # The art takes the right 600 px; the words keep the left 640 clear.
+        $art = [System.Drawing.Bitmap]::FromFile((Join-Path $root "design\icon\capybara-florida-1254.png"))
+        try {
+            $ah = 600; $aw = [int]($art.Width * ($ah / $art.Height))
+            $g.DrawImage($art, $W - $aw, 20, $aw, $ah)
+        } finally { $art.Dispose() }
+
+        $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.filament))
+        $arc = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.arc))
+        $strike = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.strike))
+        $dim = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, [System.Drawing.ColorTranslator]::FromHtml($colors.filament)))
+        $mono = @("Iosevka", "Consolas", "Cascadia Mono")
+        $eyebrow = Find-Font $mono 18 ([System.Drawing.FontStyle]::Regular)
+        $title = Find-Font $mono 92 ([System.Drawing.FontStyle]::Bold)
+        $tag = Find-Font @("Iosevka Aile", "Segoe UI", "Consolas") 26 ([System.Drawing.FontStyle]::Regular)
+        $url = Find-Font $mono 20 ([System.Drawing.FontStyle]::Regular)
+
+        # The dot as a code point: PowerShell 5.1 reads this file as ANSI, and
+        # a literal middle dot comes out as two characters.
+        $g.DrawString(("OFFLINE MEDIA PLAYER  {0}  WINDOWS" -f [char]0xB7), $eyebrow, $strike, 72, 150)
+        $g.DrawString("hurricane-", $title, $ink, 60, 185)
+        $g.DrawString("party", $title, $ink, 60, 280)
+        $g.DrawString("Save YouTube videos and MP3s to disk." + [Environment]::NewLine + "Play them when the internet is down.", $tag, $dim, 72, 400)
+        $g.DrawString("paperhurts.github.io/hurricane-party", $url, $arc, 72, 520)
+    } finally {
+        $g.Dispose()
+    }
+    $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+}
+Build-Social (Join-Path $dist "social.png")
+
 $total = (Get-ChildItem $dist -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ("built site/dist: {0} {1}, {2:0.0} MB" -f $Version, $sizeLabel, ($total / 1MB))
