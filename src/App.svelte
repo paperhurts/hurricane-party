@@ -338,7 +338,7 @@
 <main>
   <header>
     <h1>hurricane-party</h1>
-    <span class="ver">v0.3 — video window, local folders, control API</span>
+    <span class="ver">v0.4 — the classic windows play: analyser, EQ, playlist, bonds that glow</span>
     <label class="conc">
       concurrent
       <select value={concurrency} onchange={(e) => setConc(+e.currentTarget.value)}>
