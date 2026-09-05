@@ -356,7 +356,9 @@
 </main>
 
 <style>
-  main { max-width: 900px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  /* No max-width and a small gutter: the list is the point of this window, and
+     a centred 900px box just put a margin on both sides of it (#48). */
+  main { margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
   header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   h1 { margin: 0; font-size: 19px; font-weight: 400; letter-spacing: 2px; text-transform: uppercase;
        color: var(--arc); text-shadow: 0 0 10px color-mix(in srgb, var(--arc) 45%, transparent); }
@@ -407,7 +409,10 @@
            border: 1px solid color-mix(in srgb, var(--ember) 45%, transparent);
            background: color-mix(in srgb, var(--ember) 8%, transparent); white-space: pre-wrap; }
 
-  .body { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: start; }
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), and the track
+     rows' nowrap titles make the list's minimum width the longest title, so the
+     column grew past the window and the page scrolled sideways (#48). */
+  .body { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; align-items: start; }
   nav { display: flex; flex-direction: column; gap: 3px; }
   nav button { text-align: left; border-color: transparent; color: var(--filament);
                padding: 5px 8px; font-size: 12px; display: flex; justify-content: space-between; gap: 6px; }
