@@ -4,12 +4,14 @@
 // every other window is a remote.
 //
 //   <audio> -> source -> preamp -> lowshelf -> peaking x8 -> highshelf
-//           -> trim -> analyser -> destination
+//           -> trim -> stream -> analyser -> destination
 //
 // The order is the architecture doc's "Equalizer spec" (D21). The trim sits
-// after the filters so it can pay for their boost; the analyser sits after
+// after the filters so it can pay for their boost; the analysers sit after
 // the trim so the spectrum shows what the speakers get and the clip check
-// sees the real ceiling.
+// sees the real ceiling. There are two of them on purpose: `analyser` smooths
+// for the eye, and `stream` does not smooth at all, because smoothing is
+// latency and the viz channel (control-api.md) is measured on it.
 //
 // Once createMediaElementSource has been called the element's sound reaches the
 // speakers only through this graph, so it must be built before the first play.
@@ -23,6 +25,8 @@ const RAMP_S = 0.02;
 export class AudioGraph {
   readonly ctx: AudioContext;
   readonly analyser: AnalyserNode;
+  /** The viz channel's unsmoothed tap; see the constructor. */
+  readonly stream: AnalyserNode;
   private readonly source: MediaElementAudioSourceNode;
   private readonly preamp: GainNode;
   private readonly filters: BiquadFilterNode[];
@@ -52,8 +56,17 @@ export class AudioGraph {
     this.analyser.minDecibels = -85;
     this.analyser.maxDecibels = -15;
 
+    // The viz channel's tap: same bins, same dB window, no smoothing. A rig
+    // that wants the screen's decay applies it on its side; one that wants
+    // the beat on time cannot undo it here.
+    this.stream = this.ctx.createAnalyser();
+    this.stream.fftSize = this.analyser.fftSize;
+    this.stream.smoothingTimeConstant = 0;
+    this.stream.minDecibels = this.analyser.minDecibels;
+    this.stream.maxDecibels = this.analyser.maxDecibels;
+
     let node: AudioNode = this.source;
-    for (const next of [this.preamp, ...this.filters, this.trim, this.analyser]) {
+    for (const next of [this.preamp, ...this.filters, this.trim, this.stream, this.analyser]) {
       node.connect(next);
       node = next;
     }
