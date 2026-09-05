@@ -13,6 +13,10 @@ on:
   push:
     tags: ['v*']
 
+# Creating the Release needs write on contents; everything else reads.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -69,3 +73,24 @@ jobs:
           name: hurricane-party-${{ env.SAFE_REF }}-${{ github.sha }}
           path: out/
           retention-days: 14
+
+      # A tag is a release (#66): the same zip, under a name that never
+      # changes, attached to a GitHub Release so releases/latest/download/…
+      # is a permanent link that needs no login. The notes are the tag's
+      # annotation, then the two lines a stranger needs.
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd out && 7z a -tzip ../hurricane-party-windows.zip . > /dev/null)
+          ls -la hurricane-party-windows.zip
+          {
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed '/^$/d'
+            echo
+            echo '**To run it:** unzip anywhere and start `hurricane-party.exe`. No installer. Windows 11 already has the WebView2 runtime it needs.'
+            echo
+            echo 'The first time, Windows shows "Windows protected your PC": the exe is not code-signed. Click **More info**, then **Run anyway**. It asks once.'
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" hurricane-party-windows.zip \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
