@@ -21,7 +21,26 @@
 
   let track = $state<MediaRow | null>(null);
   let error = $state<string | null>(null);
+  // The error is the file not opening (#43), the one case where "remove it"
+  // is the right offer (#78).
+  let missing = $state(false);
   let video = $state<HTMLVideoElement | undefined>();
+
+  /** Take the row out of the library (#78). The window stays (D69), and says so. */
+  function removeMissing() {
+    if (!track) return;
+    invoke("remove_from_library", { id: track.id })
+      .then(() => letGo("Removed from the library."))
+      .catch((e) => (error = String(e)));
+  }
+
+  /** The track is no longer ours to show. */
+  function letGo(why: string) {
+    track = null;
+    missing = false;
+    error = why;
+    report();
+  }
 
   /**
    * Mirror into Rust as the video transport (D70), the same call Main makes
@@ -91,6 +110,7 @@
       }
       track = found;
       error = null;
+      missing = false;
     } catch (e) {
       error = String(e);
       return;
@@ -143,6 +163,16 @@
     // The window stays open on its frame; nothing resumes it.
     const pauseSub = listen("hp://pause", () => video?.pause());
 
+    // The library removed a row (#78). If it is the one showing, let go of
+    // it; the window stays, as it always does (D69).
+    const removedSub = listen<number>(
+      "hp://removed",
+      (e) => {
+        if (track?.id === e.payload) letGo("That track is no longer in the library.");
+      },
+      { target: { kind: "WebviewWindow", label: "video" } },
+    );
+
     // Transport over the control pipe (D70). Targeted at this window: Rust
     // sends a command to whichever window is the transport, and a listener
     // with no target would also hear the ones meant for Main.
@@ -155,6 +185,7 @@
     return () => {
       sub.then((unlisten) => unlisten());
       pauseSub.then((unlisten) => unlisten()).catch(() => {});
+      removedSub.then((unlisten) => unlisten()).catch(() => {});
       cmdSub.then((unlisten) => unlisten()).catch(() => {});
     };
   });
@@ -165,6 +196,11 @@
     <div class="oops">
       <img src={cooler} alt="" draggable="false" width="200" height="200">
       <p class="error">{error}</p>
+      {#if missing && track}
+        <!-- The way out, on the message (#78). The file is gone; nothing to
+             offer to delete. -->
+        <button class="act" onclick={removeMissing}>Remove from library</button>
+      {/if}
     </div>
   {:else if track}
     <!-- svelte-ignore a11y_media_has_caption -->
@@ -187,6 +223,7 @@
       onvolumechange={report}
       onerror={() => {
         error = "Can't open this file. Moved or deleted?";
+        missing = true;
         report();
       }}
       onended={() => {
@@ -257,4 +294,8 @@
   .oops { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .oops img { width: 200px; height: 200px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--ember) 25%, transparent)); }
   .oops .error { margin: 0; }
+  .oops .act { margin-top: 6px; font: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+               padding: 3px 10px; color: var(--ember); background: transparent; cursor: pointer;
+               border: 1px solid color-mix(in srgb, var(--ember) 55%, transparent); }
+  .oops .act:hover { background: color-mix(in srgb, var(--ember) 18%, transparent); border-color: var(--ember); }
 </style>
