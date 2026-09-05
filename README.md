@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="design/icon/capybara-boombox-1254.png" width="340" alt="A capybara in a yellow rain jacket holding a boombox over his head">
+</p>
+
 # hurricane-party
 
 Offline-first media library and player. Save YouTube playlists, videos, and MP3s to disk
