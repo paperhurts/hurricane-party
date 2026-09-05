@@ -98,26 +98,34 @@ Lands at v1.0 with the protocol freeze, since it's part of the public commitment
 
 Server allocates a per-subscriber pipe and starts pushing. Multiple subscribers at different band counts and rates is explicitly supported — the LED wall wants 32 bands at 30 Hz, someone's desktop toy wants 128 at 60.
 
+**As built (v0.4b).** Every field is optional and the values above are the defaults. Out-of-range values are refused by field name (`"subscribe_viz": bands must be 8..=128, not 4`), never clamped: a frame shaped differently from what a rig asked for is worse than an error it can read. The pipe is `\\.\pipe\hurricane-party-viz-<id>` with a four-hex-digit id, it exists before the reply goes out, and the client has ten seconds to open it. **The subscription belongs to the viz pipe, not to the control connection:** close the control pipe and the frames keep coming; close the viz pipe and the subscription ends. The player captures only while someone is subscribed, at the highest rate any subscriber asked for; the others take every second or fourth frame, which is why the rates are 15, 30, 60 and nothing between. `include` leaves the frame's shape alone — a part left out is zeroed (`n_bands = 0` for the spectrum) rather than removed.
+
+A harness that does all of this from a second process and prints what it measured: `tools\viz-client.ps1` (`-Bands`, `-Rate`, `-Depth`, `-Seconds`, `-Show` for live bars, `-StallSeconds` to test the drop policy).
+
 ### Frame format (little-endian)
 
 ```
 offset  size  field
-0       4     magic          0x48505631  ("HPV1")
-4       8     timestamp_us   monotonic, source clock
+0       4     magic          the ASCII bytes "HPV1" (as a little-endian u32, 0x31565048)
+4       8     timestamp_us   microseconds since the UNIX epoch, source clock, when the analyser was read
 12      1     n_bands
 13      1     depth          0 = u8, 1 = f32
 14      1     flags          bit0 = beat detected
-15      1     reserved
+15      1     reserved       0
 16      1     level_peak     0–255
 17      1     level_rms      0–255
-18      n     spectrum       n_bands × (1 or 4 bytes)
+18      n     spectrum       n_bands × (1 or 4 bytes), 0..1 full scale
 ```
 
 Fixed header, self-describing length. A client can resync on the magic after a dropped connection.
 
+**What the fields carry (v0.4b).** The timestamp is wall-clock, not an arbitrary monotonic origin, so a client on the same machine subtracts it from its own clock and has the latency without a handshake; it is taken in the webview the instant the analyser is read. The spectrum is the same log-spaced 50 Hz–16 kHz bands the Main window draws, loudest bin per band, from an analyser tap with **no smoothing** (the on-screen bars decay at 0.72; smoothing is latency, and a rig can add its own but cannot remove ours). `f32` today carries the analyser's 8-bit resolution scaled to 0..1; finer resolution would be additive. `level_peak` and `level_rms` are the last FFT window's time-domain peak and RMS, 1.0 = 255. `beat` is an onset heuristic on 40–160 Hz energy against the last second's average with a 200 ms hold — good enough to blink to, not a tempo tracker; a client that wants better runs its own on the spectrum.
+
 ### Backpressure
 
 **If a subscriber can't keep up, drop frames — never buffer.** Stale visualization data is worse than missing data; a laggy LED wall reads as broken. Non-blocking writes, drop on `WouldBlock`, done.
+
+As built: each subscriber's writer reads from a slot that holds only the newest frame, its pipe's outbound buffer is two frames deep rather than the 64 KB default (which would bank a thousand stale frames in the kernel), and the source drops a tick rather than queueing it while the previous frame's IPC is still out. `tools\viz-client.ps1 -StallSeconds 2` stops reading for two seconds and counts the stale frames that arrive when it resumes.
 
 ---
 
@@ -133,6 +141,24 @@ Your audio lives in the webview (Web Audio `AnalyserNode`), not in Rust. So the 
 That's an extra hop compared to tapping audio natively in Rust. At 60 Hz with ~40-byte payloads it's fine — Tauri IPC handles that comfortably — but **measure the end-to-end latency before you publish the API**, because once someone's LED rig is calibrated against it you can't quietly change the timing.
 
 Target: under 20 ms from speaker to socket. If it comes in worse, the fix is moving the analysis into Rust with `symphonia` decoding in parallel, which is a bigger change and better to know about early.
+
+### Measured (v0.4b, dev machine, Windows 11, WebView2)
+
+Ten-second runs of `tools\viz-client.ps1` with music playing, the client in a second process reading the frame's wall-clock timestamp against its own clock (D77). `HP_VIZ_TRACE=1` on the app prints the same path as seen from Rust, once a second.
+
+| | 15 Hz, 128 bands, f32 | 30 Hz, 32 bands, u8 | 60 Hz, 19 bands, u8 |
+|---|---|---|---|
+| Analyser read → client process, p50 | 1.35 ms | 1.2 ms | 1.1 ms |
+| p95 | 1.7 ms | 1.6 ms | 1.5 ms |
+| max | 8 ms | 8 ms | 7.5 ms |
+| Cadence, p50 / p95 / max | 67.4 / 68.9 / 69.4 ms | 32.7 / 36.6 / 37.7 ms | 16.2 / 20.2 / 21.6 ms |
+| Frames delivered | 15.0 Hz | 30.0 Hz | 60.0 Hz |
+
+Of that, the webview-to-Rust IPC hop is about 1.0 ms median and under 2 ms at p95; the rest is the pipe. Two subscribers at once (30 and 60 Hz) each got their own rate from one capture loop. Three quarters of the Main window under another window changed nothing. After a client stopped reading for two seconds, four stale frames arrived before live ones, not sixty.
+
+**The speaker is the other way round.** `AudioContext.outputLatency + baseLatency` is **50 ms** on this machine, and the analyser sits at the render end of the graph, so a frame describes audio the speaker will play about 50 ms *after* the frame reached the client. The socket does not lag the speaker; it leads it by roughly 49 ms, plus the analyser's own window (2048 samples, 43 ms at 48 kHz, so a transient is fully in the FFT some 20 ms after it starts). A rig that wants its lights on the beat delays frames by about the output latency; one that wants them a hair early does nothing. The value is not on the wire yet; if a client needs it, it is an additive field on `subscribe_viz`'s reply.
+
+So the design stands, and the `symphonia` path is not needed for latency. What would move the number is not the hop but the source: the 4 ms timer's ±4 ms phase, and the FFT window.
 
 This is the one place my earlier "use HTML5 audio" recommendation costs you something. I still think it's right — the in-app EQ and analyser are worth far more than the hop — but I don't want to pretend the tradeoff isn't there.
 

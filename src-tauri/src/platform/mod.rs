@@ -12,6 +12,11 @@
 //!
 //! All handles are `NativeWindow`, an opaque integer. On Windows it is an HWND;
 //! nothing above this module is allowed to know that.
+//!
+//! The control API's transport (D9) is the other non-portable thing in the
+//! app and lives in `pipe`, so the rule covers it too (#20).
+
+pub mod pipe;
 
 /// An opaque OS window handle. HWND on Windows.
 ///
