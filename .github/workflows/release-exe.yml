@@ -80,6 +80,9 @@ jobs:
       # changes, attached to a GitHub Release so releases/latest/download/…
       # is a permanent link that needs no login. The notes are the tag's
       # annotation, then the two lines a stranger needs.
+      # The awk keeps one blank line between paragraphs and drops the rest:
+      # the earlier `sed '/^$/d'` deleted every blank line, and Markdown ran
+      # v0.4.1's five paragraphs into one.
       - name: Publish the release
         if: github.ref_type == 'tag'
         env:
