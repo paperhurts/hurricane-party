@@ -4,6 +4,10 @@
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
+  // The library's empty state (#62): the surfer, boombox on his shoulder,
+  // riding the warning flag. The art is the one place a literal colour is
+  // allowed; everything around him is tokens.
+  import surfer from "./assets/capybara-surfing.png";
 
   type Job = {
     id: number;
@@ -465,11 +469,19 @@
           {/if}
         </li>
       {:else}
-        <li class="empty">
-          {selectedList == null
-            ? "Nothing saved yet. Paste a link above to keep it on disk."
-            : "Empty playlist. Add tracks from the library."}
-        </li>
+        {#if selectedList == null}
+          <!-- First run. An invitation, not an apology (design brief), and
+               the surfer's home (#62). -->
+          <li class="empty hangten">
+            <img src={surfer} alt="A capybara surfing a red board with the hurricane warning's black square, boombox on his shoulder" width="220" height="220">
+            <div class="say">
+              <div class="big">Hang ten. Nothing but surf ahead.</div>
+              <div>Paste a link above to keep it on disk, or add a folder of MP3s you already own.</div>
+            </div>
+          </li>
+        {:else}
+          <li class="empty">Empty playlist. Add tracks from the library.</li>
+        {/if}
       {/each}
     </ul>
   </section>
@@ -549,6 +561,12 @@
   .tracks li:last-child { border-bottom: none; }
   .tracks li.current .title { color: var(--strike); text-shadow: 0 0 8px color-mix(in srgb, var(--strike) 45%, transparent); }
   .tracks li.empty { color: color-mix(in srgb, var(--filament) 45%, transparent); font-size: 13px; }
+  /* The surfer's home. The image sits on the well; the words beside it. */
+  .tracks li.hangten { gap: 22px; padding: 28px 24px; align-items: center; }
+  .tracks li.hangten img { flex: 0 0 auto; width: 220px; height: 220px;
+                           filter: drop-shadow(0 0 18px color-mix(in srgb, var(--arc) 22%, transparent)); }
+  .tracks li.hangten .say { display: flex; flex-direction: column; gap: 8px; max-width: 420px; line-height: 1.5; }
+  .tracks li.hangten .big { font-size: 17px; color: var(--filament); }
   .play { padding: 1px 7px; font-size: 10px; }
   .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--arc) 30%, transparent); }
   /* Drag-to-reorder: the grip, the lifted row, and the insertion line. */
