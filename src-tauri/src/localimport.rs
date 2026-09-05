@@ -47,6 +47,9 @@ pub struct ScanReport {
     pub added: usize,
     pub updated: usize,
     pub skipped: usize,
+    /// The media ids this scan created, so a caller can put the new tracks
+    /// somewhere (the playlist window's ADD appends them to the list showing).
+    pub added_ids: Vec<i64>,
 }
 
 /// `"audio"`, `"video"`, or `None` for a file the library should not claim.
@@ -149,6 +152,7 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
         added: 0,
         updated: 0,
         skipped: 0,
+        added_ids: Vec::new(),
     };
 
     let state = app.state::<Db>();
@@ -213,6 +217,9 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
             report.updated += 1;
         } else {
             report.added += 1;
+            // Only on a real insert: after the UPDATE arm of the upsert,
+            // last_insert_rowid still names whatever was inserted last.
+            report.added_ids.push(tx.last_insert_rowid());
         }
     }
 
