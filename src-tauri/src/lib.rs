@@ -105,6 +105,20 @@ fn report_state(app: AppHandle, state: hp_control::PlayerState) {
     control::update_state(&app, state);
 }
 
+/// Main's own buttons, seek bar and volume, through the same router as the
+/// pipe (D81): whatever is playing gets the command.
+#[tauri::command]
+fn transport(app: AppHandle, cmd: String, arg: Option<f64>) -> Result<(), String> {
+    control::route(&app, &cmd, arg)
+}
+
+/// What the channel says is playing, for Main's display on mount (D81);
+/// after that Rust pushes every change as `player:current`.
+#[tauri::command]
+fn transport_state(app: AppHandle) -> hp_control::PlayerState {
+    control::current(&app)
+}
+
 // ---- viz stream (D15, #6) ---------------------------------------------------
 
 /// One source frame from Main's stream analyser: scalars in the headers, the
@@ -592,6 +606,8 @@ pub fn run() {
             open_video,
             video_ready,
             report_state,
+            transport,
+            transport_state,
             viz_frame,
             viz_demand,
             wm_drag_start,
