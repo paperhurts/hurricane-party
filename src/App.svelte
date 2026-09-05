@@ -117,6 +117,7 @@
         if (t) play(t);
       }),
       listen<number>("queue:remove", (e) => removeAt(e.payload)),
+      listen<{ from: number; to: number }>("queue:move", (e) => move(e.payload.from, e.payload.to)),
     ];
     // The DB is the source of truth for progress, and it's written throttled
     // to ~4Hz. Polling it while work is in flight beats trying to reconcile a

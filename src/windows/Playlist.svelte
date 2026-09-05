@@ -156,6 +156,12 @@
   let lastTapAt = 0;
   let lastTapId = -1;
 
+  // Drag-to-reorder, on a real playlist: the lifted row and the insertion
+  // index (0..n) it would land at. A press that moves a few pixels becomes
+  // a drag; one that does not stays a click, so double-click still works.
+  let dragId = $state<number | null>(null);
+  let dropAt = $state<number | null>(null);
+
   function rowDown(e: PointerEvent, t: Item) {
     if (e.button !== 0) return;
     const now = Date.now();
@@ -164,7 +170,55 @@
     lastTapId = dbl ? -1 : t.id;
     selected = t.id;
     rowsEl?.focus();
-    if (dbl) play(t);
+    if (dbl) {
+      play(t);
+      return;
+    }
+    if (queue.listId == null || t.position == null) return;
+
+    const row = e.currentTarget as HTMLElement;
+    const startY = e.clientY;
+    const i = queue.items.indexOf(t);
+    let dragging = false;
+    // Capture at the press, not at the threshold: the rows are ten pixels
+    // tall, so the pointer has usually left the pressed row before it has
+    // moved the four pixels that make this a drag, and an uncaptured row
+    // never sees the move that would have started it. Capturing here does
+    // not break double-click, which is read from press timing above.
+    row.setPointerCapture(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientY - startY) < 4) return;
+        dragging = true;
+        dragId = t.id;
+      }
+      const rows = Array.from(rowsEl.querySelectorAll<HTMLElement>(".row[data-idx]"));
+      let at = rows.length;
+      for (const r of rows) {
+        const b = r.getBoundingClientRect();
+        if (ev.clientY < b.top + b.height / 2) {
+          at = Number(r.dataset.idx);
+          break;
+        }
+      }
+      dropAt = at;
+    };
+    const onUp = () => {
+      row.removeEventListener("pointermove", onMove);
+      row.removeEventListener("pointerup", onUp);
+      row.removeEventListener("pointercancel", onUp);
+      if (!dragging) return;
+      const at = dropAt ?? i;
+      dragId = null;
+      dropAt = null;
+      // The row leaves first, so a target below it shifts up by one.
+      const dest = at > i ? at - 1 : at;
+      if (dest !== i) emitTo("library", "queue:move", { from: t.position, to: dest }).catch(() => {});
+    };
+    row.addEventListener("pointermove", onMove);
+    row.addEventListener("pointerup", onUp);
+    row.addEventListener("pointercancel", onUp);
   }
 
   function onKey(e: KeyboardEvent) {
@@ -201,6 +255,10 @@
           class="row"
           class:now={t.id === nowId}
           class:sel={t.id === selected}
+          class:lifted={dragId === t.id}
+          class:drop-before={dragId != null && dropAt === i}
+          class:drop-after={dragId != null && dropAt === queue.items.length && i === queue.items.length - 1}
+          data-idx={i}
           role="option"
           aria-selected={t.id === selected}
           tabindex="-1"
@@ -293,6 +351,18 @@
   .row.sel {
     background: color-mix(in srgb, var(--arc) 13%, transparent);
     color: var(--filament);
+  }
+  .row {
+    touch-action: none;
+  }
+  .row.lifted {
+    opacity: 0.4;
+  }
+  .row.drop-before {
+    box-shadow: inset 0 1px 0 var(--arc);
+  }
+  .row.drop-after {
+    box-shadow: inset 0 -1px 0 var(--arc);
   }
   /* Now-playing is `strike` (theme.md), with a static halo: not the viz. */
   .row.now {
