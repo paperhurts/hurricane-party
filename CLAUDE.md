@@ -55,7 +55,7 @@ These have burned into the design. Don't quietly relax them.
 
 Work one at a time. Don't build ahead.
 
-**v0.0 through v0.4a are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). Currently starting **v0.4b** — chrome drawn from tokens in CSS (D72), EQ and analyser, briefed in `docs/v0.4-brief.md` and tracked as the v0.4b milestone on GitHub.
+**v0.0 through v0.4a are built, and most of v0.4b.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). v0.4b so far: chrome drawn from tokens in CSS (D72), Main owns playback and shows the spectrum on the radar ramp (D74), the 10-band EQ (D75), the playlist window, seams that glow and discharge (#9), 2x chrome (D76), the playlist's corner grip. Left in v0.4b: the viz stream (#6, #7), the windowshade contents (#8), and the sprite renderer (#3), which waits on the hand-drawn sheet (D73). Tracked as the v0.4b milestone on GitHub.
 
 ---
 
@@ -80,7 +80,8 @@ Any session, any model. There is no planning session and no execution session; a
 
 ### Things that have burned us
 
-- **Test the interaction the way a user performs it** for anything on screen. The v0.0 spike's scripted sweeps passed at 0 px error while the real interaction was dead, because an invisible window was eating the clicks (D43). Scripted paths and real input are not the same test
+- **Test the interaction the way a user performs it** for anything on screen. The v0.0 spike's scripted sweeps passed at 0 px error while the real interaction was dead, because an invisible window was eating the clicks (D43). Scripted paths and real input are not the same test. `tools/shot.ps1` screenshots a running window and `tools/input.ps1` clicks, double-clicks and drags at physical coordinates; a real double-click is how the dead bottom seams were found after every scripted check passed
+- **Leave the app running from the session, on the PR branch.** A background `pnpm tauri dev` on the branch means the owner tests the build the PR describes; hot reload carries frontend edits in and a Rust change rebuilds and relaunches. Never two dev servers: the second fails on the port but still starts a second exe on top of the first, sharing the database
 - **Verify against the real binary before believing a flag.** `--embed-thumbnail` looked right and hard-errors on webm; the fix only surfaced by running it
 - **Leave the tree on the PR branch and say so** before a hand test. There's no worktree: `src-tauri/binaries/` and `node_modules/` aren't in git, and a hand test on the wrong branch tests nothing
 - **Nothing lives only in a conversation.** A decision goes in `decisions.md`, a finding in a doc or on the issue. The next session starts cold
@@ -93,6 +94,7 @@ Any session, any model. There is no planning session and no execution session; a
 - Scripts are Windows PowerShell 5.1, run as `powershell -NoProfile -ExecutionPolicy Bypass -File`. `pwsh` is not installed on the dev machine and nothing may assume it
 - Snap and bond math is in **physical pixels**, converted at the boundaries. Mixing logical and physical here produces bugs that only appear on a second monitor
 - Parse yt-dlp with `--progress-template`. Never scrape the human-readable progress bar
+- Tauri events: a `listen()` with no target receives **every** emit, including an `emitTo` aimed at another window. Any event that more than one window listens to is listened to with `{ target: { kind: "WebviewWindow", label } }`. Main once wore the playlist's seam edges because of this
 - Every sensitive path (library roots, sidecar dirs) is configurable, never assumed
 
 ## Anti-scope
