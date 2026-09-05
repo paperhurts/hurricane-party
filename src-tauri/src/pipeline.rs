@@ -437,8 +437,21 @@ async fn download_media(
 
     // Deterministic path is why the probe ran first: scan for <id>.* rather
     // than parsing the filename back out of yt-dlp's chatter.
-    find_by_id(&root, &probed.id)
+    downloaded_output(&root, &probed.id, want_video)
         .ok_or_else(|| PipelineError::MissingOutput(format!("{} [{}]", root.display(), probed.id)))
+}
+
+/// The file a download just produced, by the kind it was asked for. The
+/// video path must find its MP4 even when an earlier audio import left an
+/// MP3 with the same id beside it (#22): the general lookup prefers the MP3,
+/// and reporting that path made the video's row collide with the audio's,
+/// leaving the MP4 on disk with no row in the library.
+fn downloaded_output(root: &Path, id: &str, want_video: bool) -> Option<PathBuf> {
+    if want_video {
+        find_video_by_id(root, id)
+    } else {
+        find_by_id(root, id)
+    }
 }
 
 /// Locate a downloaded file by the `[id]` yt-dlp writes into its name.
@@ -1088,6 +1101,34 @@ mod tests {
             "the audio intermediate goes"
         );
         assert!(!tmp.join("Clip [abc123].jpg").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Found by hand test: the video downloaded, then the job reported the
+    /// MP3's path, because the general lookup prefers it. The row collided
+    /// with the audio row and the MP4 never reached the library.
+    #[test]
+    fn a_video_download_reports_its_mp4_even_beside_an_older_mp3() {
+        let tmp = std::env::temp_dir().join("hp-downloaded-output-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("Song [abc123].mp3"), b"x").unwrap();
+        std::fs::write(tmp.join("Song [abc123].mp4"), b"x").unwrap();
+        assert_eq!(
+            downloaded_output(&tmp, "abc123", true)
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "Song [abc123].mp4"
+        );
+        assert_eq!(
+            downloaded_output(&tmp, "abc123", false)
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "Song [abc123].mp3"
+        );
+        assert!(downloaded_output(&tmp, "nope", true).is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
