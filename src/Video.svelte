@@ -4,6 +4,9 @@
   import { emitTo, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { applyTheme } from "./lib/theme";
+  // The video window's "Loading…" moment (#62): waiting with the boombox,
+  // a seagull on his head. Brief, but a home is a home.
+  import waiting from "./assets/capybara-seagull-boombox.png";
 
   type MediaRow = {
     id: number;
@@ -191,7 +194,10 @@
       {#if track.uploader}<span class="by">{track.uploader}</span>{/if}
     </footer>
   {:else}
-    <p class="loading">Loading…</p>
+    <div class="wait">
+      <img src={waiting} alt="" draggable="false" width="160" height="160">
+      <p class="loading">Loading…</p>
+    </div>
   {/if}
 </main>
 
@@ -237,5 +243,9 @@
     font-size: 13px;
     color: color-mix(in srgb, var(--filament) 55%, transparent);
   }
+  /* Waiting: the capybara above the word, centred, briefly. */
+  .wait { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .wait img { width: 160px; height: 160px; }
+  .wait .loading { margin: 0; }
   .error { color: var(--ember); }
 </style>
