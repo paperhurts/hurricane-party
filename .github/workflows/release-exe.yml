@@ -58,8 +58,14 @@ jobs:
           cp src-tauri/target/release/*.exe out/
           ls -la out
 
+      # An artifact name may not contain a slash, and every branch here has
+      # one (chore/61-…). Tags and main never did, which is why a manual run
+      # on a branch was the first to hit it.
+      - name: Artifact name without slashes
+        run: echo "SAFE_REF=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: hurricane-party-${{ github.ref_name }}-${{ github.sha }}
+          name: hurricane-party-${{ env.SAFE_REF }}-${{ github.sha }}
           path: out/
           retention-days: 14
