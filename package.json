@@ -1,7 +1,7 @@
 {
   "name": "hurricane-party",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Offline-first media library and player. Grab it before the storm, play it when the grid's down.",
   "type": "module",
   "scripts": {
