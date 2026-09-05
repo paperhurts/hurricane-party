@@ -167,7 +167,13 @@
       src={convertFileSrc(track.path)}
       controls
       autoplay
-      onplay={report}
+      onplay={() => {
+        // One transport (D69), the other way round: this window's own
+        // controls resuming the video pauses the track in Main, not only the
+        // library's click that opened it.
+        emitTo("main", "player:pause").catch(() => {});
+        report();
+      }}
       onpause={report}
       ontimeupdate={report}
       onvolumechange={report}
