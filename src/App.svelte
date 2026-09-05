@@ -55,6 +55,13 @@
   let roots = $state<Root[]>([]);
   let scanning = $state(false);
   let notice = $state<string | null>(null);
+  // Drag-to-reorder within a playlist: the lifted row, and the insertion
+  // index in `shown` (0..n) it would land at.
+  let dragId = $state<number | null>(null);
+  let dropAt = $state<number | null>(null);
+  let rowsEl: HTMLUListElement;
+  // Which row's "+" menu is open, by track id. One at a time.
+  let addMenuFor = $state<number | null>(null);
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let shown = $derived(selectedList == null ? tracks : listItems);
@@ -171,6 +178,58 @@
     refreshLibrary();
   }
 
+  /** From a row's "+" menu: make the list and put this track in it, one step. */
+  async function newListWith(mediaId: number) {
+    const name = prompt("Playlist name")?.trim();
+    if (!name) return;
+    const id = await invoke<number>("create_playlist", { name });
+    await invoke("add_to_playlist", { playlistId: id, mediaId });
+    refreshLibrary();
+  }
+
+  // Reorder by dragging the grip. Pointer events rather than HTML5 drag and
+  // drop: on Windows the webview's own drop handler eats HTML5 drags unless
+  // it is switched off for the window, and this needs no such switch. The
+  // grip captures the pointer, every move re-reads the rows' midpoints to
+  // find the insertion index, and release asks Rust to move the row.
+  function gripDown(e: PointerEvent, i: number) {
+    if (e.button !== 0 || selectedList == null) return;
+    e.preventDefault();
+    const t = shown[i];
+    const grip = e.currentTarget as HTMLElement;
+    grip.setPointerCapture(e.pointerId);
+    dragId = t.id;
+    dropAt = i;
+
+    const onMove = (ev: PointerEvent) => {
+      const rows = Array.from(rowsEl.querySelectorAll<HTMLElement>("li[data-idx]"));
+      let at = rows.length;
+      for (const r of rows) {
+        const b = r.getBoundingClientRect();
+        if (ev.clientY < b.top + b.height / 2) {
+          at = Number(r.dataset.idx);
+          break;
+        }
+      }
+      dropAt = at;
+    };
+    const onUp = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.removeEventListener("pointercancel", onUp);
+      const at = dropAt ?? i;
+      dragId = null;
+      dropAt = null;
+      // `at` is an index among the rows as they are; the row itself leaves
+      // first, so a target below it shifts up by one.
+      const dest = at > i ? at - 1 : at;
+      if (dest !== i) move(t.position!, dest);
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+    grip.addEventListener("pointercancel", onUp);
+  }
+
   async function addTo(playlistId: number, mediaId: number) {
     await invoke("add_to_playlist", { playlistId, mediaId });
     refreshLibrary();
@@ -268,6 +327,13 @@
   }
 </script>
 
+<svelte:window
+  onpointerdown={() => (addMenuFor = null)}
+  onkeydown={(e) => {
+    if (e.key === "Escape") addMenuFor = null;
+  }}
+/>
+
 <main>
   <header>
     <h1>hurricane-party</h1>
@@ -348,9 +414,19 @@
       {/if}
     </nav>
 
-    <ul class="tracks">
+    <ul class="tracks" bind:this={rowsEl}>
       {#each shown as t, i (t.id + ":" + (t.position ?? "l"))}
-        <li class:current={current?.id === t.id}>
+        <li
+          class:current={current?.id === t.id}
+          class:lifted={dragId === t.id}
+          class:drop-before={dragId != null && dropAt === i}
+          class:drop-after={dragId != null && dropAt === shown.length && i === shown.length - 1}
+          data-idx={i}
+        >
+          {#if selectedList != null}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span class="grip" onpointerdown={(e) => gripDown(e, i)} title="Drag to reorder">⋮⋮</span>
+          {/if}
           {#if t.kind === "video"}
             <button class="play" onclick={() => play(t)}>▣</button>
           {:else if nowId === t.id}
@@ -361,16 +437,30 @@
           <span class="title">{t.title}</span>
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
           {#if selectedList == null}
-            {#if playlists.length}
-              <select class="addto" onchange={(e) => { addTo(+e.currentTarget.value, t.id); e.currentTarget.selectedIndex = 0; }}>
-                <option>add to…</option>
-                {#each playlists as p}<option value={p.id}>{p.name}</option>{/each}
-              </select>
-            {/if}
+            <!-- Pointerdowns inside stay inside, so the window-level
+                 "click anywhere else closes the menu" does not close it
+                 under a click on one of its own items. -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span class="addwrap" onpointerdown={(e) => e.stopPropagation()}>
+              <button
+                class="add"
+                class:open={addMenuFor === t.id}
+                onclick={() => (addMenuFor = addMenuFor === t.id ? null : t.id)}
+                title="Add to a playlist">+</button
+              >
+              {#if addMenuFor === t.id}
+                <div class="menu" role="menu">
+                  {#each playlists as p (p.id)}
+                    <button role="menuitem" onclick={() => { addTo(p.id, t.id); addMenuFor = null; }}>{p.name}</button>
+                  {:else}
+                    <div class="none">No playlists yet</div>
+                  {/each}
+                  <button role="menuitem" class="new" onclick={() => { addMenuFor = null; newListWith(t.id); }}>+ New playlist…</button>
+                </div>
+              {/if}
+            </span>
           {:else}
-            <button class="mini" disabled={i === 0} onclick={() => move(t.position!, i - 1)}>↑</button>
-            <button class="mini" disabled={i === shown.length - 1} onclick={() => move(t.position!, i + 1)}>↓</button>
-            <button class="mini" onclick={() => removeAt(t.position!)}>×</button>
+            <button class="mini" onclick={() => removeAt(t.position!)} title="Remove from this playlist">×</button>
           {/if}
         </li>
       {:else}
@@ -460,7 +550,31 @@
   .tracks li.empty { color: color-mix(in srgb, var(--filament) 45%, transparent); font-size: 13px; }
   .play { padding: 1px 7px; font-size: 10px; }
   .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--arc) 30%, transparent); }
-  .addto { font-size: 10px; }
+  /* Drag-to-reorder: the grip, the lifted row, and the insertion line. */
+  .grip { flex: 0 0 auto; padding: 0 2px; font-size: 12px; letter-spacing: -3px; line-height: 1;
+          color: color-mix(in srgb, var(--filament) 30%, transparent); cursor: grab; user-select: none; touch-action: none; }
+  .grip:hover { color: var(--arc); }
+  .tracks li.lifted { opacity: 0.4; }
+  .tracks li.lifted .grip { cursor: grabbing; }
+  .tracks li.drop-before { box-shadow: inset 0 2px 0 var(--arc); }
+  .tracks li.drop-after { box-shadow: inset 0 -2px 0 var(--arc); }
+
+  /* "+" opens a menu of playlists, anchored to the row. */
+  .addwrap { position: relative; flex: 0 0 auto; }
+  .add { width: 22px; height: 22px; padding: 0; display: grid; place-items: center;
+         font-size: 16px; line-height: 1; color: var(--arc);
+         border: 1px solid color-mix(in srgb, var(--arc) 35%, transparent); background: transparent; }
+  .add:hover, .add.open { background: color-mix(in srgb, var(--arc) 14%, transparent); border-color: var(--arc);
+                          box-shadow: 0 0 8px color-mix(in srgb, var(--arc) 35%, transparent); }
+  .menu { position: absolute; right: 0; top: 26px; z-index: 5; min-width: 160px; padding: 4px 0;
+          display: flex; flex-direction: column; background: var(--void); border: 1px solid var(--arc);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--arc) 40%, transparent), 0 0 12px color-mix(in srgb, var(--arc) 25%, transparent); }
+  .menu button { text-align: left; border: 0; color: var(--filament); padding: 6px 10px; font-size: 12px;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .menu button:hover { background: color-mix(in srgb, var(--arc) 14%, transparent); color: var(--arc); }
+  .menu .new { color: color-mix(in srgb, var(--filament) 55%, transparent); margin-top: 2px;
+               border-top: 1px solid color-mix(in srgb, var(--arc) 15%, transparent); }
+  .menu .none { padding: 6px 10px; font-size: 11px; color: color-mix(in srgb, var(--filament) 40%, transparent); }
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); flex: 0 0 auto; }
 
