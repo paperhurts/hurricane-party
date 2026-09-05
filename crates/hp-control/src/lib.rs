@@ -98,6 +98,12 @@ impl Response {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlayerState {
     pub state: String, // "playing" | "paused" | "stopped"
+    /// Which transport this describes: `"audio"` or `"video"` (D70). One
+    /// thing plays at a time (D69), so `status` is always one of these, and a
+    /// client that never looks still gets the right `state`. Additive: absent
+    /// on the wire means audio.
+    #[serde(default = "kind_audio")]
+    pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,12 +117,19 @@ pub struct PlayerState {
     pub volume: f64,
 }
 
+fn kind_audio() -> String {
+    "audio".into()
+}
+
 /// Unsolicited. No `id`, which is how a client tells them from replies.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event")]
 pub enum Event {
     #[serde(rename = "now_playing_changed")]
     NowPlaying {
+        /// `"audio"` or `"video"` (D70), so a client can tell a track from a
+        /// video without a second call.
+        kind: String,
         media_id: Option<i64>,
         title: Option<String>,
         uploader: Option<String>,
@@ -344,6 +357,31 @@ mod tests {
         assert_eq!(j["event"], "state_changed");
         assert_eq!(j["state"], "paused");
         assert!(j.get("id").is_none());
+    }
+
+    /// `kind` is additive (D70): a report or a client that never says it
+    /// means audio, and the wire always carries it so a client can rely on it.
+    #[test]
+    fn kind_defaults_to_audio_and_is_always_written() {
+        let s: PlayerState = serde_json::from_str(r#"{"state":"playing","volume":1.0}"#).unwrap();
+        assert_eq!(s.kind, "audio");
+        let v: PlayerState =
+            serde_json::from_str(r#"{"state":"playing","kind":"video","volume":0.5}"#).unwrap();
+        assert_eq!(v.kind, "video");
+        let j: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(j["kind"], "audio");
+        let e = Event::NowPlaying {
+            kind: "video".into(),
+            media_id: Some(7),
+            title: None,
+            uploader: None,
+            duration_s: None,
+        };
+        let j: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        assert_eq!(j["kind"], "video");
+        assert_eq!(j["media_id"], 7);
     }
 
     #[test]

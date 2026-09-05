@@ -169,7 +169,7 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     // does the lock release and let the next click through.
     let pending = app.state::<video::SwitchAcks>().expect(id);
     let started = std::time::Instant::now();
-    tauri::WebviewWindowBuilder::new(
+    let window = tauri::WebviewWindowBuilder::new(
         &app,
         LABEL,
         tauri::WebviewUrl::App(format!("video.html?id={id}").into()),
@@ -181,6 +181,14 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     .decorations(true)
     .build()
     .map_err(|e| e.to_string())?;
+    // The window reports its own playback while it lives (D70); when the user
+    // closes it, nothing is left to report, so Rust says so on its behalf.
+    let gone = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            control::video_gone(&gone);
+        }
+    });
     pending
         .wait(video::MOUNT_TIMEOUT)
         .await

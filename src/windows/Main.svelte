@@ -163,6 +163,7 @@
     invoke("report_state", {
       state: {
         state: !track || stopped ? "stopped" : audio.paused ? "paused" : "playing",
+        kind: "audio",
         media_id: track?.id ?? null,
         title: track?.title ?? null,
         uploader: track?.uploader ?? null,
@@ -202,20 +203,27 @@
         eq = e.payload;
         graph?.applyEq(eq);
       }),
-      listen<{ cmd: string; arg: unknown }>("control-command", (e) => {
-        const { cmd, arg } = e.payload;
-        if (cmd === "play") play();
-        else if (cmd === "pause") pause();
-        else if (cmd === "toggle") audio.paused ? play() : pause();
-        else if (cmd === "stop") stop();
-        else if (cmd === "next") step(1);
-        else if (cmd === "prev") step(-1);
-        else if (cmd === "seek") {
-          audio.currentTime = Number(arg) || 0;
-          pos = audio.currentTime;
-          push();
-        } else if (cmd === "volume") setVol(Number(arg));
-      }),
+      // Targeted at this window: Rust routes a transport command to whichever
+      // window is the transport (D70), and a listener with no target would
+      // also receive the ones aimed at the video window.
+      listen<{ cmd: string; arg: unknown }>(
+        "control-command",
+        (e) => {
+          const { cmd, arg } = e.payload;
+          if (cmd === "play") play();
+          else if (cmd === "pause") pause();
+          else if (cmd === "toggle") audio.paused ? play() : pause();
+          else if (cmd === "stop") stop();
+          else if (cmd === "next") step(1);
+          else if (cmd === "prev") step(-1);
+          else if (cmd === "seek") {
+            audio.currentTime = Number(arg) || 0;
+            pos = audio.currentTime;
+            push();
+          } else if (cmd === "volume") setVol(Number(arg));
+        },
+        { target: { kind: "WebviewWindow", label: "main" } },
+      ),
     ];
     return () => {
       for (const s of subs) s.then((off) => off());
@@ -408,6 +416,11 @@
       hidden
       onplay={() => {
         playing = true;
+        // One transport (D69), on the element's own event so it holds for
+        // every way of starting: this window's button, the pipe, a key. The
+        // library's row click already did this; this window's play did not,
+        // and a video kept running under a resumed track.
+        emitTo("video", "hp://pause").catch(() => {});
         push();
         tell();
       }}
