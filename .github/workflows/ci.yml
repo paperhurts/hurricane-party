@@ -82,3 +82,6 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: svelte-check + tsc
         run: pnpm check
+      - name: vitest
+        if: ${{ !cancelled() }}
+        run: pnpm test
