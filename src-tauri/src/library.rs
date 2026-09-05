@@ -65,6 +65,9 @@ fn remove_in(tx: &Transaction, id: i64) -> Result<Removed, DbError> {
     for pid in lists {
         playlist::compact(tx, pid)?;
     }
+    // Every row that leaves is on the record. A library is the user's, and
+    // "where did that row go?" deserves an answer from the log, not a guess.
+    eprintln!("library: removed {id} ({title}) at {path}");
     Ok(Removed { id, title, path })
 }
 
@@ -74,6 +77,17 @@ pub fn remove(conn: &mut Connection, id: i64) -> Result<Removed, DbError> {
     let removed = remove_in(&tx, id)?;
     tx.commit()?;
     Ok(removed)
+}
+
+/// Remove a checked selection, all or nothing (D84). The files stay.
+pub fn remove_many(conn: &mut Connection, ids: &[i64]) -> Result<Vec<Removed>, DbError> {
+    let tx = conn.transaction()?;
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        out.push(remove_in(&tx, *id)?);
+    }
+    tx.commit()?;
+    Ok(out)
 }
 
 /// Ids of the rows under `root_id` whose files are not on disk.
@@ -233,6 +247,61 @@ mod tests {
         // would have left it.
         assert_eq!(list_titles(&conn, pid), ["track 0", "track 2"]);
         assert_eq!(positions(&conn, pid), [0, 1]);
+    }
+
+    /// A prune is scoped to the root that was rescanned. Another root's rows
+    /// are not looked at, whether or not their files exist: the storm drive
+    /// being unplugged while the download folder is rescanned must not cost
+    /// the drive's rows.
+    #[test]
+    fn prune_never_reaches_another_root() {
+        let dir = scratch("prune-scope");
+        std::fs::write(dir.join("0.mp3"), b"x").unwrap();
+        let (mut conn, _) = fixture(&dir.to_string_lossy(), 2); // 0.mp3 present, 1.mp3 not
+        conn.execute(
+            "INSERT INTO library_roots (id, label, path) VALUES (2, 'drive', '/definitely/not/mounted')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO media (root_id, relpath, kind, title, added_at)
+             VALUES (2, 'gone.mp3', 'audio', 'on the drive', 0)",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(missing(&conn, 1).unwrap().len(), 1);
+        assert_eq!(prune(&mut conn, 1).unwrap(), 1);
+        assert_eq!(titles(&conn), ["on the drive", "track 0"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A checked selection goes together (D84): one transaction, so an id
+    /// that is not there leaves the others in place too.
+    #[test]
+    fn remove_many_is_all_or_nothing() {
+        let (mut conn, pid) = fixture("/tmp", 4);
+        let ids: Vec<i64> = conn
+            .prepare("SELECT id FROM media WHERE title IN ('track 1', 'track 3') ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let gone = remove_many(&mut conn, &ids).unwrap();
+        assert_eq!(gone.len(), 2);
+        assert_eq!(titles(&conn), ["track 0", "track 2"]);
+        assert_eq!(positions(&conn, pid), [0, 1]);
+
+        let mut with_stranger = ids.clone();
+        with_stranger.push(99);
+        assert!(remove_many(&mut conn, &with_stranger).is_err());
+        assert_eq!(
+            titles(&conn),
+            ["track 0", "track 2"],
+            "nothing went with the stranger"
+        );
     }
 
     #[test]

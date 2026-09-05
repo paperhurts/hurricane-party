@@ -112,6 +112,20 @@ fn remove_from_library(app: AppHandle, id: i64) -> Result<library::Removed, db::
     Ok(removed)
 }
 
+/// A checked selection goes together (D84), in one transaction.
+#[tauri::command]
+fn remove_tracks(app: AppHandle, ids: Vec<i64>) -> Result<Vec<library::Removed>, db::DbError> {
+    let removed = {
+        let state = app.state::<Db>();
+        let mut conn = state.0.lock().unwrap();
+        library::remove_many(&mut conn, &ids)?
+    };
+    if !removed.is_empty() {
+        let _ = app.emit("library-changed", ());
+    }
+    Ok(removed)
+}
+
 /// Drop the rows under one root whose files are gone. Returns how many.
 #[tauri::command]
 fn prune_root(app: AppHandle, root_id: i64) -> Result<usize, db::DbError> {
@@ -652,6 +666,7 @@ pub fn run() {
             add_local_folder,
             list_roots,
             remove_from_library,
+            remove_tracks,
             prune_root,
             delete_media_file,
             open_video,
