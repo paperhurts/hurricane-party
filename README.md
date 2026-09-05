@@ -76,6 +76,27 @@ cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
 cargo fmt --manifest-path src-tauri/Cargo.toml --check              # format check; CI runs this
 ```
 
+## Driving it from outside
+
+The app listens on a named pipe, `\\.\pipe\hurricane-party`, while it runs. Anything that
+can open a pipe can drive the transport and read what is playing, and a second pipe
+streams the spectrum analyser as binary frames for things like an LED wall. There is no
+plugin loader and never will be (D8): this is the whole external surface, and it runs in
+your process, not the app's.
+
+The protocol is **unstable until v1.0**. Build a toy against it, not a product.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\control-client.ps1            # handshake, then status
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\control-client.ps1 toggle     # play/pause whatever is playing
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\control-client.ps1 listen     # watch now_playing_changed and friends
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\viz-client.ps1 -Show          # live spectrum bars, 30 Hz, and a latency summary
+```
+
+Both scripts are harnesses, not the example client; they show the shape of a session
+in a few dozen lines each. The contract (handshake, commands, events, the viz frame
+layout, and the measured latency) is `docs/control-api.md`.
+
 ## Workflow
 
 Say what you want. The session branches off `main`, builds it, and opens a pull request;
@@ -110,7 +131,7 @@ Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.d
 | v0.2 | SQLite, persistent queue with byte-level resume, playlists |
 | v0.3 | Video window, local folder import, control API handshake + transport |
 | v0.4a | The window system: bonding, splitter, shade modes, grouped z-order, layout persistence, stranded-group rescue |
-| **v0.4b** | **In progress.** Chrome from tokens (D72), Main plays with the analyser on the radar ramp, 10-band EQ, the playlist window, seams that glow and discharge, 2x chrome, the playlist's corner grip, an oscilloscope, the viz stream on its own pipe (`hello` advertises `viz`; measured in `docs/control-api.md`), the windowshade as a mini-player. Left: the sprite renderer, which waits on the sheet. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
+| **v0.4b** | **In progress.** Chrome from tokens (D72), Main plays with the analyser on the radar ramp, 10-band EQ, the playlist window, seams that glow and discharge, 2x chrome, the playlist's corner grip, an oscilloscope, the viz stream on its own pipe (`hello` advertises `viz`; measured in `docs/control-api.md`), the windowshade as a mini-player, Main as the one transport (D81), the download page and tagged Releases (D82), the capybaras in their homes (#62), removing a track from the library (D83). Left: the sprite renderer, which waits on the sheet. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
 
 The canonical milestone table is in `docs/decisions.md` (D27).
 
