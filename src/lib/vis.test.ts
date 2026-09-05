@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isVisMode, loadVisMode, nextVisMode, saveVisMode, scopeColorIndex, STORAGE_KEY } from "./vis";
+import { isVisMode, loadVisMode, nextVisMode, saveVisMode, SCOPE_FLOOR, scopeColorIndex, STORAGE_KEY } from "./vis";
 
 function mem(): Storage & { data: Record<string, string> } {
   const data: Record<string, string> = {};
@@ -51,11 +51,17 @@ describe("vis mode", () => {
 });
 
 describe("scope colour", () => {
-  it("is the floor of the ramp at silence and the top at full swing", () => {
-    expect(scopeColorIndex(128, 24)).toBe(0);
+  it("starts at a visible green at silence and reaches the top at full swing", () => {
+    expect(scopeColorIndex(128, 24)).toBe(SCOPE_FLOOR);
     expect(scopeColorIndex(0, 24)).toBe(23);
     expect(scopeColorIndex(255, 24)).toBe(23);
-    expect(scopeColorIndex(192, 24)).toBe(12);
-    expect(scopeColorIndex(64, 24)).toBe(12);
+    expect(scopeColorIndex(192, 24)).toBe(SCOPE_FLOOR + 9);
+    expect(scopeColorIndex(64, 24)).toBe(SCOPE_FLOOR + 9);
+  });
+
+  it("never goes below the floor or past the ramp", () => {
+    expect(scopeColorIndex(129, 24)).toBe(SCOPE_FLOOR);
+    expect(scopeColorIndex(0, 24, 0)).toBe(23);
+    expect(scopeColorIndex(128, 24, 0)).toBe(0);
   });
 });
