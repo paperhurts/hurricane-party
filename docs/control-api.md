@@ -51,10 +51,12 @@ Clients check `protocol_version` and refuse to proceed on mismatch. Server rejec
 
 Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `queue_playlist` `search`
 
+**Video (D69, D70).** One thing plays at a time: starting a video pauses the track, starting a track pauses the video, and nothing resumes. `status` and `now_playing_changed` carry **`kind`**, `"audio"` or `"video"`, and describe whichever last started playing; a pause from the other side does not take the channel back. `play` `pause` `toggle` `stop` `seek` `volume` act on whatever is playing (`stop` on a video is pause-and-rewind; the window stays open on its first frame). `next` and `prev` step the library's list, which walks over videos and tracks alike. Closing the video window reports `stopped` for it. `kind` is additive; absent means audio.
+
 ### Events (unsolicited, no `id`)
 
 ```jsonc
-{"event":"now_playing_changed", "media_id":89, "title":"…", "uploader":"…", "duration_s":240}
+{"event":"now_playing_changed", "kind":"audio", "media_id":89, "title":"…", "uploader":"…", "duration_s":240}
 {"event":"state_changed", "state":"paused"}
 {"event":"palette_changed", "viscolor":["#000000","#0f0f0f", "…24 entries…"]}
 ```
