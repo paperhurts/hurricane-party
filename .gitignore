@@ -32,6 +32,9 @@ src-tauri/binaries/
 # screenshots dropped in by hand
 .sid/
 
+# a browser automation scratch folder, never source
+.playwright-mcp/
+
 # Claude Code: the skills are shared, the local settings are not.
 # settings.local.json holds per-machine choices (which plugins this checkout
 # has enabled) and would fight between machines if it were tracked.
