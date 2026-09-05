@@ -53,17 +53,46 @@
   let vol = $state(1);
   let error = $state<string | null>(null);
 
+  // Main is the one transport (D81). When the video window is the thing
+  // playing, Rust mirrors its state here as `player:current` (the same state
+  // the pipe's `status` reports, D70), and this window's clock, title, tags,
+  // seek bar, volume and buttons follow it. `remote` is that mirror while the
+  // video is the transport, and null while the track here is.
+  type Remote = {
+    state: string;
+    kind: string;
+    title?: string | null;
+    uploader?: string | null;
+    duration_s?: number | null;
+    pos_s?: number | null;
+    volume: number;
+  };
+  let remote = $state<Remote | null>(null);
+  function absorbCurrent(s: Remote) {
+    remote = s.kind === "video" ? s : null;
+  }
+
   const mmss = (s: number) =>
     `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-  let elapsed = $derived(mmss(pos));
-  let posPct = $derived(dur > 0 ? Math.min(100, (pos / dur) * 100) : 0);
-  let title = $derived(
-    track ? (track.uploader ? `${track.uploader} — ${track.title}` : track.title) : "hurricane-party",
-  );
+  const nameOf = (t: { title?: string | null; uploader?: string | null } | null) =>
+    t?.title ? (t.uploader ? `${t.uploader} — ${t.title}` : t.title) : "hurricane-party";
+
+  // What the window shows: the video's state while it is the transport, this
+  // element's otherwise. Everything below the fold reads these, never the raw
+  // audio state directly.
+  let uiPlaying = $derived(remote ? remote.state === "playing" : playing);
+  let uiPaused = $derived(remote ? remote.state === "paused" : !!track && !stopped && !playing);
+  let uiStopped = $derived(remote ? remote.state === "stopped" : !!track && stopped);
+  let uiPos = $derived(remote ? (remote.pos_s ?? 0) : pos);
+  let uiDur = $derived(remote ? (remote.duration_s ?? 0) : dur);
+  let uiVol = $derived(remote ? remote.volume : vol);
+  let elapsed = $derived(mmss(uiPos));
+  let posPct = $derived(uiDur > 0 ? Math.min(100, (uiPos / uiDur) * 100) : 0);
+  let title = $derived(remote ? nameOf(remote) : nameOf(track));
   // Scroll only when there is something to scroll and something happening.
-  let marquee = $derived(playing && title.length > 34);
+  let marquee = $derived(uiPlaying && title.length > 34);
   // The shade's line is narrower: three buttons and the clock share it.
-  let shadeMarquee = $derived(playing && title.length > 28);
+  let shadeMarquee = $derived(uiPlaying && title.length > 28);
   // A control in the title strip: neither a drag nor a double-tap (Classic).
   const eat = (e: Event) => e.stopPropagation();
 
@@ -153,6 +182,21 @@
     push();
   }
 
+  // The buttons, seek bar and volume act on whatever is playing (D81). With
+  // the video as the transport they go through Rust's router, the same one
+  // the pipe uses, so a press here and a `pause` over the pipe are the same
+  // thing; otherwise they act on the element here directly.
+  function remoteCmd(cmd: string, arg?: number) {
+    invoke("transport", { cmd, arg: arg ?? null }).catch(() => {});
+  }
+  const uiPlay = () => (remote ? remoteCmd("play") : play());
+  const uiPause = () => (remote ? remoteCmd("pause") : pause());
+  const uiToggle = () => (remote ? remoteCmd("toggle") : audio.paused ? play() : pause());
+  const uiStop = () => (remote ? remoteCmd("stop") : stop());
+  const uiSeek = (frac: number) =>
+    remote ? remoteCmd("seek", frac * (remote.duration_s ?? 0)) : seekTo(frac);
+  const uiVolume = (frac: number) => (remote ? remoteCmd("volume", frac) : setVol(frac));
+
   /** Tell every window what is playing, so the library's and the playlist's rows can light up. */
   function tell() {
     emit("player:now", { id: track?.id ?? null, playing }).catch(() => {});
@@ -194,7 +238,14 @@
     // effect re-ran on every timeupdate, tearing down and re-subscribing
     // every listener below four times a second. timeupdate pushes itself.
     untrack(push);
+    // What the channel says is playing (D81): pulled once here, pushed on
+    // every change after. A reload of this window while a video plays must
+    // come back showing the video, not a blank clock.
+    invoke<Remote>("transport_state").then(absorbCurrent).catch(() => {});
     const subs = [
+      listen<Remote>("player:current", (e) => absorbCurrent(e.payload), {
+        target: { kind: "WebviewWindow", label: "main" },
+      }),
       listen<Track>("player:load", (e) => load(e.payload)),
       // The library opened a video (D69), or clicked the row that is playing.
       listen("player:pause", () => pause()),
@@ -310,10 +361,10 @@
     <button class="sb" onpointerdown={eat} onclick={() => step(-1)} title="Previous">◀◀</button>
     <button
       class="sb"
-      class:lit={playing}
+      class:lit={uiPlaying}
       onpointerdown={eat}
-      onclick={() => (audio.paused ? play() : pause())}
-      title={playing ? "Pause" : "Play"}>{playing ? "‖" : "▶"}</button
+      onclick={uiToggle}
+      title={uiPlaying ? "Pause" : "Play"}>{uiPlaying ? "‖" : "▶"}</button
     >
     <button class="sb" onpointerdown={eat} onclick={() => step(1)} title="Next">▶▶</button>
     <span class="sep"></span>
@@ -338,9 +389,9 @@
       <div class="clock">
         <div class="time">{elapsed}</div>
         <div class="tags">
-          <span class:lit={playing}>PLAY</span>
-          <span class:lit={!!track && !stopped && !playing}>PAUSE</span>
-          <span class:lit={!!track && stopped} class="strike">STOP</span>
+          <span class:lit={uiPlaying}>PLAY</span>
+          <span class:lit={uiPaused}>PAUSE</span>
+          <span class:lit={uiStopped} class="strike">STOP</span>
         </div>
       </div>
       <div
@@ -377,7 +428,7 @@
       {/if}
     </div>
 
-    <div class="seek" use:slider={seekTo}>
+    <div class="seek" use:slider={uiSeek}>
       <div class="fill" style:width="{posPct}%"></div>
       <div class="thumb" style:left="{posPct}%"></div>
     </div>
@@ -385,21 +436,16 @@
     <div class="bottom">
       <div class="transport">
         <button class="tb" onclick={() => step(-1)} title="Previous">◀◀</button>
-        <button class="tb" class:lit={playing} onclick={play} title="Play">▶</button>
-        <button
-          class="tb"
-          class:lit={!!track && !stopped && !playing}
-          onclick={pause}
-          title="Pause">‖</button
-        >
-        <button class="tb stop" class:lit={!!track && stopped} onclick={stop} title="Stop">■</button>
+        <button class="tb" class:lit={uiPlaying} onclick={uiPlay} title="Play">▶</button>
+        <button class="tb" class:lit={uiPaused} onclick={uiPause} title="Pause">‖</button>
+        <button class="tb stop" class:lit={uiStopped} onclick={uiStop} title="Stop">■</button>
         <button class="tb" onclick={() => step(1)} title="Next">▶▶</button>
       </div>
       <div class="volume">
-        <div class="vbar" use:slider={setVol}>
-          <div class="fill" style:width="{vol * 100}%"></div>
+        <div class="vbar" use:slider={uiVolume}>
+          <div class="fill" style:width="{uiVol * 100}%"></div>
         </div>
-        <div class="vlabel">VOL {Math.round(vol * 100)}</div>
+        <div class="vlabel">VOL {Math.round(uiVol * 100)}</div>
       </div>
     </div>
 

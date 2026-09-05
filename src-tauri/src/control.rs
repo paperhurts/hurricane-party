@@ -100,34 +100,76 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
             Err(e) => Response::err(req.id, e),
         },
         other => {
-            // D70: a transport command goes to whichever window is the
-            // transport. Next and prev always go to Main, which asks the
-            // library to step: the library's cursor walks over videos and
-            // tracks alike, so they work from either. Targeted, not broadcast,
-            // or both windows would obey and D69's one transport becomes two.
-            let steps = matches!(other, Command::Next | Command::Prev);
-            let to_video = !steps
-                && state.0.lock().unwrap().active_video
-                && app.get_webview_window("video").is_some();
             let (name, arg) = match other {
-                Command::Play => ("play", serde_json::Value::Null),
-                Command::Pause => ("pause", serde_json::Value::Null),
-                Command::Toggle => ("toggle", serde_json::Value::Null),
-                Command::Stop => ("stop", serde_json::Value::Null),
-                Command::Next => ("next", serde_json::Value::Null),
-                Command::Prev => ("prev", serde_json::Value::Null),
-                Command::Seek(p) => ("seek", serde_json::json!(p)),
-                Command::Volume(v) => ("volume", serde_json::json!(v)),
+                Command::Play => ("play", None),
+                Command::Pause => ("pause", None),
+                Command::Toggle => ("toggle", None),
+                Command::Stop => ("stop", None),
+                Command::Next => ("next", None),
+                Command::Prev => ("prev", None),
+                Command::Seek(p) => ("seek", Some(p)),
+                Command::Volume(v) => ("volume", Some(v)),
                 _ => unreachable!("handled above"),
             };
-            let _ = app.emit_to(
-                if to_video { "video" } else { "main" },
-                "control-command",
-                serde_json::json!({ "cmd": name, "arg": arg }),
-            );
-            Response::ok(req.id, serde_json::json!({ "accepted": name }))
+            match route(app, name, arg) {
+                Ok(()) => Response::ok(req.id, serde_json::json!({ "accepted": name })),
+                Err(e) => Response::err(req.id, e),
+            }
         }
     }
+}
+
+/// Send a transport command to whichever window is the transport.
+///
+/// D70: `play` `pause` `toggle` `stop` `seek` `volume` go to the video window
+/// while it is the transport, otherwise to Main. `next` and `prev` always go
+/// to Main, which asks the library to step: the library's cursor walks over
+/// videos and tracks alike, so they work from either. Targeted, not
+/// broadcast, or both windows would obey and D69's one transport becomes two.
+///
+/// One router for two callers: the pipe, and Main's own buttons (D81), so a
+/// press in Main and a `pause` over the pipe do exactly the same thing.
+pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>) -> Result<(), String> {
+    let needs_arg = matches!(cmd, "seek" | "volume");
+    match cmd {
+        "play" | "pause" | "toggle" | "stop" | "next" | "prev" | "seek" | "volume" => {}
+        other => return Err(format!("unknown transport command {other:?}")),
+    }
+    let arg = match (needs_arg, arg) {
+        (true, None) => return Err(format!("{cmd:?} needs a value")),
+        (true, Some(v)) if cmd == "volume" => Some(v.clamp(0.0, 1.0)),
+        (_, a) => a,
+    };
+    let steps = matches!(cmd, "next" | "prev");
+    // Read what the lock knows, then drop it: the raise below is a Win32
+    // call on another thread's window, never made under the state lock (D54).
+    let (to_video, video_paused) = {
+        let st = app.state::<ControlState>();
+        let m = st.0.lock().unwrap();
+        let to_video = !steps && m.active_video && app.get_webview_window("video").is_some();
+        (to_video, m.video.state != "playing")
+    };
+    app.emit_to(
+        if to_video { "video" } else { "main" },
+        "control-command",
+        serde_json::json!({ "cmd": cmd, "arg": arg }),
+    )
+    .map_err(|e| e.to_string())?;
+    // A resume brings the video forward, as a switch does (`open_video`): the
+    // user pressed play to watch it, and it may have gone behind something
+    // while it sat paused. Only when the command would start it, so a toggle
+    // that pauses does not pull a window forward on its way to stopping.
+    if to_video && (cmd == "play" || (cmd == "toggle" && video_paused)) {
+        if let Some(w) = app.get_webview_window("video") {
+            let _ = w.set_focus();
+        }
+    }
+    Ok(())
+}
+
+/// The one state the channel reports, for Main's display (D81).
+pub fn current(app: &AppHandle) -> PlayerState {
+    app.state::<ControlState>().0.lock().unwrap().current()
 }
 
 /// Accept clients on the control pipe, one task each, forever.
@@ -232,6 +274,10 @@ pub fn video_gone(app: &AppHandle) {
             volume,
             ..Default::default()
         };
+        // Hand the channel back to the track (D81): what `status` describes,
+        // and what Main displays and its buttons act on, is now the paused
+        // or stopped track, which is what a press of play would resume.
+        m.active_video = false;
     });
 }
 
@@ -249,6 +295,10 @@ fn apply(app: &AppHandle, change: impl FnOnce(&mut Mirror)) {
         m.told = now.clone();
         (sc, tc, now)
     };
+
+    // Main displays and drives whatever is playing (D81), so it hears the
+    // same state the pipe would: every change, position ticks included.
+    let _ = app.emit_to("main", "player:current", &now);
 
     let bc = app.state::<Broadcaster>();
     if track_changed {

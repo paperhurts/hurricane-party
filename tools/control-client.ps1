@@ -36,8 +36,13 @@ Write-Host "<- $hello" -ForegroundColor DarkGray
 
 if ($Cmd -eq "listen") {
     Write-Host "watching for events (ctrl-c to stop)" -ForegroundColor Cyan
+    # A blocking ReadLine never returns control to PowerShell, so Ctrl-C did
+    # nothing until the next event arrived. Read asynchronously and wait in
+    # short slices; the engine checks for Ctrl-C between them.
     while ($true) {
-        $line = $r.ReadLine()
+        $task = $r.ReadLineAsync()
+        while (-not $task.Wait(200)) { }
+        $line = $task.Result
         if ($null -eq $line) { break }
         Write-Host "<- $line" -ForegroundColor Green
     }
