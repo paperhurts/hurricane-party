@@ -162,25 +162,72 @@ body {
 .seam.left { left: 0; }
 .seam.right { right: 0; }
 
-/* The one animated moment in the interface (v0.4-brief). Idle is a hairline,
- * hover lifts it. Opacity on a pre-composited layer, never box-shadow -- and
- * nothing else in the chrome moves. */
+/* ---- the seam's four states (#9, theme.md "bonds are visible") ----
+ *
+ * Idle: a hairline in `arc` along the bond, brighter than any other edge, so
+ * you can see at a glance which windows are joined. Hover: brighter and a
+ * pixel thicker. Dragging: full. Discharge: below. The line sits at the
+ * window's edge, so the two halves of a bond meet as one line.
+ *
+ * Opacity on a pre-composited layer, never box-shadow, and nothing else in
+ * the chrome moves. */
 .seam::after {
   content: "";
   position: absolute;
-  inset: 0;
   background: var(--arc);
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 90ms linear;
   will-change: opacity;
 }
-.seam:hover::after {
-  opacity: 0.5;
+.seam.top::after    { top: 0;    left: 0; right: 0; height: 1px; }
+.seam.bottom::after { bottom: 0; left: 0; right: 0; height: 1px; }
+.seam.left::after   { left: 0;   top: 0; bottom: 0; width: 1px; }
+.seam.right::after  { right: 0;  top: 0; bottom: 0; width: 1px; }
+
+.seam:hover::after,
+.seam.dragging::after {
+  opacity: 1;
+}
+.seam.top:hover::after,    .seam.top.dragging::after,
+.seam.bottom:hover::after, .seam.bottom.dragging::after { height: 2px; }
+.seam.left:hover::after,   .seam.left.dragging::after,
+.seam.right:hover::after,  .seam.right.dragging::after  { width: 2px; }
+
+/* The discharge: the one animation in the interface. A bond just broke; its
+ * edge blooms to `peakThickness` (4 px) and is gone in ~120 ms, and that is
+ * how you know it existed and that it is now free. The element is separate
+ * from the seam, which has already been removed with the edge, and it is
+ * pre-composited so the fade is an opacity ramp and nothing else. */
+.discharge {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  background: var(--arc);
+  box-shadow: 0 0 6px var(--arc);
+  opacity: 0;
+  will-change: opacity;
+  animation: discharge 120ms ease-out forwards;
+}
+.discharge.top    { top: 0;    left: 0; right: 0; height: 4px; }
+.discharge.bottom { bottom: 0; left: 0; right: 0; height: 4px; }
+.discharge.left   { left: 0;   top: 0; bottom: 0; width: 4px; }
+.discharge.right  { right: 0;  top: 0; bottom: 0; width: 4px; }
+
+@keyframes discharge {
+  0%   { opacity: 0.35; }
+  25%  { opacity: 1; }
+  100% { opacity: 0; }
 }
 
+/* Reduced motion: the discharge is an instant state change. The seam still
+ * disappears; it just does not bloom. Not skin-overridable (skin-manifest). */
 @media (prefers-reduced-motion: reduce) {
   .seam::after {
     transition: none;
+  }
+  .discharge {
+    animation: none;
+    opacity: 0;
   }
 }
 
