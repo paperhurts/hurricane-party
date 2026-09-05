@@ -86,7 +86,8 @@ the two remaining Claude Code commands, are in `CLAUDE.md`.
 | `crates/hp-control/` | The public control protocol. Unstable until v1.0 |
 | `docs/` | Specs. `decisions.md` wins over everything |
 | `design/screens/` | Claude Design prototypes. **Visual reference only** — the prototype is not the spec |
-| `tools/` | Prerequisite check, sidecar fetch, git hooks, control-pipe harness |
+| `tools/` | Prerequisite check, sidecar fetch, git hooks, control-pipe harness, screenshot and real-input helpers, icon background remover |
+| `design/icon/` | The capybara. Icon source and README art |
 | `.github/` | CI, the on-demand release build, issue and PR templates |
 | `.claude/` | Claude Code skills, hooks, and agents for the workflow in `CLAUDE.md` |
 | `.sid/` | Scratch screenshots, gitignored |
@@ -103,7 +104,7 @@ Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.d
 | v0.2 | SQLite, persistent queue with byte-level resume, playlists |
 | v0.3 | Video window, local folder import, control API handshake + transport |
 | v0.4a | The window system: bonding, splitter, shade modes, grouped z-order, layout persistence, stranded-group rescue |
-| **v0.4b** | **Next.** Eyewall chrome drawn from tokens in CSS (D72), EQ, analyser, viz stream. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
+| **v0.4b** | **In progress.** Chrome from tokens (D72), Main plays with the analyser on the radar ramp, 10-band EQ, the playlist window, seams that glow and discharge, 2x chrome, the playlist's corner grip. Left: the viz stream, the windowshade contents, the sprite renderer. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
 
 The canonical milestone table is in `docs/decisions.md` (D27).
 
@@ -117,3 +118,9 @@ Short version; `CLAUDE.md` has the full list.
 - **No in-process plugin loader.** The control API is the only external surface (D8)
 - **Never hardcode a color.** Import `design/tokens.json`
 - **yt-dlp is the only extractor.** No custom scrapers, ever
+
+<p align="center">
+  <img src="design/icon/capybara-lounging-1254.png" width="300" alt="The capybara lying on a hurricane warning flag in sunglasses, boombox beside him">
+  <br>
+  <sub>Hurricane warning. The music is already downloaded.</sub>
+</p>
