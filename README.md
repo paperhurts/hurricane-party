@@ -46,12 +46,18 @@ storm is the wrong failure. Bump them on purpose, test, then commit the new pin.
 | `deno` | JS runtime for yt-dlp's EJS challenges | D46 |
 | `ffmpeg` | MP3 extraction and cover art | D3, D48 |
 
-### Testing a merged build on a machine with no toolchain
+### Getting a build without the toolchain
 
-The `release-exe` workflow (Actions tab → *Run workflow*, or push a `v*` tag) builds the
-release exe with the pinned sidecars and uploads it as an artifact. Download, unzip
-anywhere, run `hurricane-party.exe`. Windows 11 already has the WebView2 runtime.
-Artifacts expire after 14 days; re-run the workflow for a fresh one.
+**To use it:** the download page, [paperhurts.github.io/hurricane-party](https://paperhurts.github.io/hurricane-party/),
+or straight to the [latest release](https://github.com/paperhurts/hurricane-party/releases/latest).
+The zip is the exe and its three sidecars; unzip anywhere and run `hurricane-party.exe`.
+Windows 11 already has the WebView2 runtime. The first run trips SmartScreen because the
+exe is not signed: *More info*, then *Run anyway*.
+
+**To test a branch:** the `release-exe` workflow (Actions tab → *Run workflow* on the
+branch) builds the same zip and uploads it as an artifact, which needs a GitHub login
+and expires after 14 days. Pushing a `v*` tag runs it too and publishes the result as a
+Release with the stable asset name the download page links to (#66).
 
 ## Commands
 
