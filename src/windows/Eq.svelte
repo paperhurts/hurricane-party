@@ -13,7 +13,7 @@
     DB_MIN,
     LABELS,
     loadEq,
-    nextPreset,
+    PRESETS,
     presetName,
     saveEq,
     trimDb,
@@ -50,8 +50,14 @@
     eq.on = !eq.on;
     commit();
   }
-  function cycle() {
-    eq = applyPreset(eq, nextPreset(preset));
+  // The preset button opens a menu. It used to cycle, which is not what a ▼
+  // promises.
+  let menuOpen = $state(false);
+  const presetNames = Object.keys(PRESETS);
+
+  function pick(name: string) {
+    eq = applyPreset(eq, name);
+    menuOpen = false;
     commit();
   }
 
@@ -132,14 +138,38 @@
   </div>
 {/snippet}
 
+<svelte:window
+  onpointerdown={() => (menuOpen = false)}
+  onkeydown={(e) => {
+    if (e.key === "Escape") menuOpen = false;
+  }}
+/>
+
 <Classic label="eq" title="EQUALIZER">
   <div class="eqw" class:off={!eq.on}>
     <div class="top">
       <div class="side">
         <button class="tg" class:lit={eq.on} onclick={toggleOn}>{eq.on ? "EQ ON" : "EQ OFF"}</button>
-        <button class="tg preset" onclick={cycle} title="Next preset">
-          <span class="name">{preset}</span><span class="arrow">▼</span>
-        </button>
+        <!-- Pointerdowns inside stay inside, so the window-level close does
+             not fire under a click on one of the menu's own items. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="presetwrap" onpointerdown={(e) => e.stopPropagation()}>
+          <button
+            class="tg preset"
+            class:open={menuOpen}
+            onclick={() => (menuOpen = !menuOpen)}
+            title="Choose a preset"
+          >
+            <span class="name">{preset}</span><span class="arrow">▼</span>
+          </button>
+          {#if menuOpen}
+            <div class="pmenu" role="menu">
+              {#each presetNames as name (name)}
+                <button role="menuitem" class:on={name === preset} onclick={() => pick(name)}>{name}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
         <div class="curve">
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
             <line x1="0" y1="50" x2="100" y2="50" class="zero" />
@@ -231,6 +261,50 @@
   .tg.preset .arrow {
     color: var(--arc);
     font-size: 5px;
+  }
+  .presetwrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .tg.preset.open {
+    box-shadow: inset 0 0 0 1px var(--arc);
+  }
+  /* The menu overlays the curve box below the button; the window is small. */
+  .pmenu {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 12px;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    padding: 2px 0;
+    background: var(--void);
+    box-shadow:
+      inset 0 0 0 1px var(--arc),
+      0 0 8px color-mix(in srgb, var(--arc) 35%, transparent);
+  }
+  .pmenu button {
+    height: 11px;
+    padding: 0 4px;
+    border: 0;
+    text-align: left;
+    font: inherit;
+    font-size: 6px;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--filament);
+    background: transparent;
+    cursor: pointer;
+  }
+  .pmenu button:hover,
+  .pmenu button.on {
+    color: var(--arc);
+    background: color-mix(in srgb, var(--arc) 14%, transparent);
   }
   .curve {
     flex: 1 1 auto;
