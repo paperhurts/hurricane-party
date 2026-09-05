@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { shadeBarPx } from "./eq";
 import {
   applyPreset,
   BANDS,
@@ -148,5 +149,20 @@ describe("persistence", () => {
     };
     expect(loadEq(boom)).toEqual(defaultEq());
     expect(() => saveEq(boom, defaultEq())).not.toThrow();
+  });
+});
+
+describe("shadeBarPx", () => {
+  it("spans one pixel at the floor to the full height at the ceiling", () => {
+    expect(shadeBarPx(-12)).toBe(1);
+    expect(shadeBarPx(12)).toBe(9);
+    expect(shadeBarPx(0)).toBe(5);
+  });
+
+  it("clamps out-of-range gains and never returns a gap", () => {
+    expect(shadeBarPx(-40)).toBe(1);
+    expect(shadeBarPx(40)).toBe(9);
+    expect(shadeBarPx(Number.NaN)).toBe(5);
+    expect(shadeBarPx(12, 4)).toBe(4);
   });
 });
