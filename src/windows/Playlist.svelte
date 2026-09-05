@@ -240,7 +240,7 @@
   }
 </script>
 
-<Classic label="playlist" {title}>
+<Classic label="playlist" {title} resizable>
   <div class="pl">
     <div
       class="rows"
