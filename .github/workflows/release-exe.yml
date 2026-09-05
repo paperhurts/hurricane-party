@@ -13,9 +13,11 @@ on:
   push:
     tags: ['v*']
 
-# Creating the Release needs write on contents; everything else reads.
+# Creating the Release needs write on contents; kicking the pages workflow
+# afterwards needs write on actions; everything else reads.
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build:
@@ -94,3 +96,13 @@ jobs:
           } > notes.md
           gh release create "$GITHUB_REF_NAME" hurricane-party-windows.zip \
             --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+
+      # The download page prints the version and the zip size of the latest
+      # release, and pages.yml only runs on its own paths, so a new release
+      # used to need a hand-run of it afterwards. Ask for one here instead:
+      # workflow_dispatch is one of the two events GITHUB_TOKEN may raise.
+      - name: Rebuild the download page
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main
