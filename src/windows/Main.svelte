@@ -416,6 +416,11 @@
       hidden
       onplay={() => {
         playing = true;
+        // One transport (D69), on the element's own event so it holds for
+        // every way of starting: this window's button, the pipe, a key. The
+        // library's row click already did this; this window's play did not,
+        // and a video kept running under a resumed track.
+        emitTo("video", "hp://pause").catch(() => {});
         push();
         tell();
       }}
