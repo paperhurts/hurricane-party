@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!--
+  The page's 404 (#62): GitHub Pages serves 404.html from the site root for
+  any path that does not exist. Same template rules as index.html:
+  tools/build-site.ps1 fills {{tokens}}; no hex, no fonts or scripts from
+  anyone else's server.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found — hurricane-party</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/hurricane-party/img/favicon.png">
+<style>
+  :root {
+{{tokens}}
+    --mono: Iosevka, "Iosevka Web", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --ui: "Iosevka Aile", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  html, body { margin: 0; background: var(--void); color: var(--filament); min-height: 100%; }
+  body { font: 400 16px/1.6 var(--ui); display: flex; align-items: center; justify-content: center; min-height: 100vh; text-wrap: pretty; }
+  main { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 40px 24px; text-align: center; max-width: 560px; }
+  img { width: min(360px, 80vw); display: block; filter: drop-shadow(0 0 30px color-mix(in srgb, var(--arc) 18%, transparent)); }
+  .eyebrow { font: 400 12px/1 var(--mono); letter-spacing: 2px; color: var(--strike); }
+  h1 { margin: 0; font: 600 28px/1.2 var(--ui); letter-spacing: -0.5px; }
+  p { margin: 0; color: color-mix(in srgb, var(--filament) 75%, transparent); }
+  a { color: var(--arc); text-decoration: none; }
+  a:hover { color: var(--strike); }
+  .button { display: inline-flex; align-items: center; gap: 12px; padding: 14px 22px; color: var(--arc); font: 700 15px/1 var(--mono); box-shadow: inset 0 0 0 1px var(--arc), 0 0 16px color-mix(in srgb, var(--arc) 25%, transparent); }
+  .button:hover { background: var(--arc); color: var(--well); }
+</style>
+</head>
+<body>
+<main>
+  <img src="/hurricane-party/img/capybara-404.png" alt="The capybara shrugging, a seagull on his head, a crossed-out wifi sign, and a wooden board that says 404 Page Not Found">
+  <div class="eyebrow">404 · NOTHING HERE</div>
+  <h1>That page went out with the power.</h1>
+  <p>The link is wrong or the page moved. The download and everything else are on the front page.</p>
+  <a class="button" href="/hurricane-party/"><span>←</span><span>Back to hurricane-party</span></a>
+</main>
+</body>
+</html>

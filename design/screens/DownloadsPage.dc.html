@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    @font-face { font-family: 'Iosevka Web'; src: local('Iosevka'), url('./fonts/iosevka-400.woff2') format('woff2'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.0.8/files/iosevka-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Web'; src: local('Iosevka Bold'), url('./fonts/iosevka-700.woff2') format('woff2'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.0.8/files/iosevka-latin-700-normal.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+    @font-face { font-family: 'Iosevka Aile Web'; src: local('Iosevka Aile'), url('./fonts/iosevka-aile-400.woff2') format('woff2'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka-aile@5.0.8/files/iosevka-aile-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: 'Iosevka Aile Web'; src: local('Iosevka Aile Semibold'), url('./fonts/iosevka-aile-600.woff2') format('woff2'), url('https://cdn.jsdelivr.net/npm/@fontsource/iosevka-aile@5.0.8/files/iosevka-aile-latin-600-normal.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+    html, body { margin: 0; background: #0C0A14; }
+    a { color: #6FE3FF; text-decoration: none; }
+    a:hover { color: #FF4FD8; }
+    ::selection { background: rgba(255,79,216,0.35); color: #E8F4FF; }
+  </style>
+</helmet>
+
+<div style="background:#0C0A14;color:#E8F4FF;font:400 16px/1.6 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;text-wrap:pretty">
+
+  <nav style="width:100%;max-width:1080px;box-sizing:border-box;padding:22px 32px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font:400 13px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">
+      <span style="width:6px;height:6px;background:#6FE3FF;box-shadow:0 0 8px #6FE3FF;display:inline-block"></span>
+      <span>HURRICANE-PARTY</span>
+    </div>
+    <div style="display:flex;gap:26px;font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.4px">
+      <a href="#first-minute" style="color:rgba(232,244,255,0.6)">FIRST MINUTE</a>
+      <a href="#windows" style="color:rgba(232,244,255,0.6)">THE WINDOWS</a>
+      <a href="#faq" style="color:rgba(232,244,255,0.6)">FAQ</a>
+      <a href="https://github.com/paperhurts/hurricane-party" style="color:rgba(232,244,255,0.6)">GITHUB</a>
+    </div>
+  </nav>
+
+  <header style="width:100%;max-width:1080px;box-sizing:border-box;padding:48px 32px 72px;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(260px,0.85fr);gap:40px;align-items:center">
+    <div style="display:flex;flex-direction:column;gap:26px;min-width:0">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#FF4FD8">OFFLINE MEDIA PLAYER · WINDOWS</div>
+        <h1 style="margin:0;font:700 clamp(44px,6vw,76px)/0.95 'Iosevka Web',ui-monospace,monospace;letter-spacing:-2px;color:#E8F4FF;text-shadow:0 0 18px rgba(111,227,255,0.35),0 0 60px rgba(111,227,255,0.15)">hurricane-<br>party</h1>
+        <p style="margin:0;font-size:20px;line-height:1.45;color:rgba(232,244,255,0.78);max-width:520px">Save YouTube playlists, videos and MP3s to disk. Play them when the internet is down.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;align-items:flex-start">
+        <a href="https://github.com/paperhurts/hurricane-party/releases/latest/download/hurricane-party-windows.zip" style="display:inline-flex;align-items:center;gap:14px;padding:18px 28px;background:#6FE3FF;color:#05040A;font:700 18px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.5px;box-shadow:0 0 0 1px #6FE3FF,0 0 24px rgba(111,227,255,0.45),0 0 70px rgba(111,227,255,0.18)" style-hover="background:#E8F4FF;box-shadow:0 0 0 1px #E8F4FF,0 0 30px rgba(232,244,255,0.5)">
+          <span style="font-size:20px">↓</span>
+          <span>Download for Windows</span>
+        </a>
+        <div style="font:400 12px/1.7 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color:rgba(232,244,255,0.55)">
+          <span style="color:rgba(232,244,255,0.85)">hurricane-party-windows.zip</span> · {{ version }} · {{ sizeLabel }}<br>No installer: unzip anywhere, run the exe.
+        </div>
+      </div>
+    </div>
+    <img src="design/icon/capybara-boombox-1254.png" alt="A capybara in a yellow rain jacket holding a boombox over his head" style="width:100%;max-width:440px;justify-self:center;display:block;filter:drop-shadow(0 0 40px rgba(111,227,255,0.18))">
+  </header>
+
+  <section id="first-minute" style="width:100%;max-width:1080px;box-sizing:border-box;padding:56px 32px;border-top:1px solid rgba(111,227,255,0.14);display:flex;flex-direction:column;gap:32px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF">THE FIRST MINUTE</div>
+      <h2 style="margin:0;font:600 30px/1.2 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.5px">Three things, then it plays.</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="aspect-ratio:4/3;background:repeating-linear-gradient(135deg,#0F0C1B 0 8px,#0C0A14 8px 16px);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);display:grid;place-items:center;font:400 11px/1.5 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:rgba(232,244,255,0.4);text-align:center;padding:16px;box-sizing:border-box">SCREENSHOT<br>Import window, URL pasted,<br>job queued in Downloads</div>
+        <div style="display:flex;gap:12px;align-items:baseline">
+          <span style="font:700 22px/1 'Iosevka Web',ui-monospace,monospace;color:#FF4FD8;text-shadow:0 0 8px rgba(255,79,216,0.5)">1</span>
+          <p style="margin:0;color:rgba(232,244,255,0.8)"><strong style="color:#E8F4FF;font-weight:600">Paste a URL.</strong> A video or a whole playlist. It queues and downloads to a folder you pick.</p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="aspect-ratio:4/3;background:repeating-linear-gradient(135deg,#0F0C1B 0 8px,#0C0A14 8px 16px);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);display:grid;place-items:center;font:400 11px/1.5 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:rgba(232,244,255,0.4);text-align:center;padding:16px;box-sizing:border-box">SCREENSHOT<br>Library window after<br>adding a folder of MP3s</div>
+        <div style="display:flex;gap:12px;align-items:baseline">
+          <span style="font:700 22px/1 'Iosevka Web',ui-monospace,monospace;color:#FF4FD8;text-shadow:0 0 8px rgba(255,79,216,0.5)">2</span>
+          <p style="margin:0;color:rgba(232,244,255,0.8)"><strong style="color:#E8F4FF;font-weight:600">Add a folder of MP3s.</strong> Music you already own goes in the same library.</p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="aspect-ratio:4/3;background:repeating-linear-gradient(135deg,#0F0C1B 0 8px,#0C0A14 8px 16px);box-shadow:inset 0 0 0 1px rgba(111,227,255,0.18);display:grid;place-items:center;font:400 11px/1.5 'Iosevka Web',ui-monospace,monospace;letter-spacing:1px;color:rgba(232,244,255,0.4);text-align:center;padding:16px;box-sizing:border-box">SCREENSHOT<br>Main + EQ + Playlist bonded,<br>analyser lit, track playing</div>
+        <div style="display:flex;gap:12px;align-items:baseline">
+          <span style="font:700 22px/1 'Iosevka Web',ui-monospace,monospace;color:#FF4FD8;text-shadow:0 0 8px rgba(255,79,216,0.5)">3</span>
+          <p style="margin:0;color:rgba(232,244,255,0.8)"><strong style="color:#E8F4FF;font-weight:600">Press play.</strong> Three small windows that snap together. If you remember Winamp, you already know how this works.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="width:100%;max-width:1080px;box-sizing:border-box;padding:56px 32px;border-top:1px solid rgba(111,227,255,0.14);display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,420px);gap:40px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+      <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#FFB347">WHAT WINDOWS WILL SAY</div>
+      <h2 style="margin:0;font:600 30px/1.2 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.5px">The first time you run it, Windows will stop you.</h2>
+      <p style="margin:0;color:rgba(232,244,255,0.8)">A blue panel titled <em>Windows protected your PC</em> appears. That is SmartScreen, and it says the same thing about every program it has not seen before.</p>
+      <p style="margin:0;color:rgba(232,244,255,0.8)">Click <strong style="color:#E8F4FF;font-weight:600">More info</strong>, then <strong style="color:#E8F4FF;font-weight:600">Run anyway</strong>. It asks once.</p>
+      <p style="margin:0;color:rgba(232,244,255,0.6);font-size:15px">Why: hurricane-party is a one-person project and the exe is not code-signed. A signing certificate costs a few hundred dollars a year and would only make this panel go away. The source is public if you want to check what you are running.</p>
+    </div>
+    <div style="background:#05040A;box-shadow:inset 0 0 0 1px rgba(255,179,71,0.4),0 0 24px rgba(255,179,71,0.12);padding:26px 28px;display:flex;flex-direction:column;gap:18px;font-family:'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif">
+      <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#FFB347">WHAT YOU WILL SEE</div>
+      <div style="font-size:19px;font-weight:600;color:#E8F4FF">Windows protected your PC</div>
+      <div style="font-size:14px;color:rgba(232,244,255,0.6);line-height:1.55">Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font:700 12px/1 'Iosevka Web',ui-monospace,monospace;color:#FFB347;width:18px">1</span>
+          <span style="font-size:14px;color:#E8F4FF;text-decoration:underline;text-decoration-color:rgba(232,244,255,0.4)">More info</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font:700 12px/1 'Iosevka Web',ui-monospace,monospace;color:#FFB347;width:18px">2</span>
+          <span style="font-size:14px;color:#05040A;background:#FFB347;padding:8px 16px;font-weight:600;box-shadow:0 0 14px rgba(255,179,71,0.4)">Run anyway</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="width:100%;max-width:1080px;box-sizing:border-box;padding:56px 32px;border-top:1px solid rgba(111,227,255,0.14);display:flex;flex-direction:column;gap:32px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF">WHAT IT IS, AND ISN'T</div>
+      <h2 style="margin:0;font:600 30px/1.2 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.5px">Offline first. Nothing on the network at playback, ever.</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px">
+      <div style="padding:24px 26px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(111,227,255,0.25);display:flex;flex-direction:column;gap:12px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">IT IS</div>
+        <div style="color:rgba(232,244,255,0.85);display:flex;flex-direction:column;gap:8px">
+          <div>A downloader and a player in one small app.</div>
+          <div>Your files, in a folder you chose, as ordinary MP3 and MP4.</div>
+          <div>Built to be used in the dark with the power out. The screen is the only light in the room, so the app is dark only.</div>
+        </div>
+      </div>
+      <div style="padding:24px 26px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(255,79,216,0.3);display:flex;flex-direction:column;gap:12px">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#FF4FD8">IT ISN'T</div>
+        <div style="color:rgba(232,244,255,0.85);display:flex;flex-direction:column;gap:8px">
+          <div>No accounts. No cloud. No sync. No streaming.</div>
+          <div>No telemetry, no update pings. When you press play it cannot reach the network even if it wanted to.</div>
+          <div>Not a product. One engineer's tool for riding out hurricane season, shared as-is.</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin:0;font:400 13px/1.7 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.3px;color:rgba(232,244,255,0.5);max-width:720px">The zip is {{ sizeLabel }} for a 10 MB app because yt-dlp and ffmpeg ride along inside it. Those two do the downloading and the MP3 conversion; hurricane-party is what you look at.</p>
+  </section>
+
+  <section id="windows" style="width:100%;max-width:1080px;box-sizing:border-box;padding:56px 32px;border-top:1px solid rgba(111,227,255,0.14);display:flex;flex-direction:column;gap:40px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF">THE WINDOWS</div>
+      <h2 style="margin:0;font:600 30px/1.2 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.5px">Three small windows that snap together. Drag one, they all come.</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,auto) minmax(240px,1fr);gap:40px;align-items:start">
+      <div style="overflow-x:auto;max-width:100%">
+        <div style="zoom:2;display:flex;flex-direction:column;align-items:flex-start;width:275px">
+          <dc-import name="MainWindow" eq-on="{{ true }}" pl-on="{{ true }}" hint-size="275px,116px"></dc-import>
+          <div style="width:275px;height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)"></div>
+          <dc-import name="EqWindow" preset="ROCK" hint-size="275px,116px"></dc-import>
+          <div style="width:275px;height:1px;background:#6FE3FF;box-shadow:0 0 5px rgba(111,227,255,0.75),0 0 12px rgba(111,227,255,0.28)"></div>
+          <dc-import name="PlaylistWindow" h="{{ 145 }}" hint-size="275px,145px"></dc-import>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:22px;padding-top:6px">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">MAIN</div>
+          <p style="margin:0;color:rgba(232,244,255,0.8)">Transport, time, seek, volume. The analyser runs on a weather radar ramp: green through yellow to red, peaking magenta.</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">EQUALIZER</div>
+          <p style="margin:0;color:rgba(232,244,255,0.8)">Ten bands, a preamp, presets. Auto binds a preset to the track so it comes back when the track does.</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#6FE3FF">PLAYLIST</div>
+          <p style="margin:0;color:rgba(232,244,255,0.8)">Resizes by the corner grip. The lit seam between windows is a bond: drag it to resize both neighbours, double-click to break it.</p>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:32px 40px;align-items:center;padding:28px;background:#05040A;box-shadow:inset 0 0 0 1px rgba(255,79,216,0.3)">
+      <div style="flex:0 0 550px;max-width:100%;overflow:hidden">
+        <div style="zoom:2;width:275px"><dc-import name="MainWindow" shade="{{ true }}" hint-size="275px,14px"></dc-import></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1 1 260px;min-width:0">
+        <div style="font:400 11px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.6px;color:#FF4FD8">WINDOWSHADE</div>
+        <p style="margin:0;color:rgba(232,244,255,0.85)">Collapse Main to a fourteen-pixel bar that stays on top. Title, transport, time. This is the one you live in while working in another app.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="width:100%;max-width:1080px;box-sizing:border-box;padding:24px 32px 56px;display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,0.9fr);gap:32px;align-items:center">
+    <img src="design/icon/capybara-truck-1254.png" alt="The capybara in the bed of a red pickup, boombox on his shoulder, hurricane warning flag flying" style="width:100%;max-width:520px;display:block;justify-self:center">
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF">FOR TINKERERS</div>
+      <h2 style="margin:0;font:600 30px/1.2 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.5px">A control pipe and a viz stream.</h2>
+      <p style="margin:0;color:rgba(232,244,255,0.8)">The player listens on a named pipe. Anything on the machine can ask what is playing, skip, seek, or read the analyser as a stream of frames, which is enough to drive an LED rig from the bass. The protocol is unstable until v1.0. <a href="https://github.com/paperhurts/hurricane-party/blob/main/docs/control-api.md">docs/control-api.md</a> has the handshake and the message table.</p>
+    </div>
+  </section>
+
+  <section id="faq" style="width:100%;max-width:1080px;box-sizing:border-box;padding:56px 32px;border-top:1px solid rgba(111,227,255,0.14);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:40px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div style="font:400 12px/1 'Iosevka Web',ui-monospace,monospace;letter-spacing:2px;color:#6FE3FF">FAQ</div>
+      <h2 style="margin:0;font:600 30px/1.2 'Iosevka Aile Web',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.5px">Questions a stranger asks.</h2>
+      <img src="design/icon/hurricane-party-flag-1254.png" alt="The capybara with his boombox in front of a red hurricane warning flag" style="width:100%;max-width:260px;display:block">
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ faq }}" as="f" hint-placeholder-count="5">
+        <div style="display:flex;flex-direction:column;gap:6px;padding:20px 0;border-top:1px solid rgba(111,227,255,0.12)">
+          <div style="font-weight:600;color:#E8F4FF;font-size:17px">{{ f.q }}</div>
+          <div style="color:rgba(232,244,255,0.72)">{{ f.a }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <footer style="width:100%;max-width:1080px;box-sizing:border-box;padding:56px 32px 64px;border-top:1px solid rgba(111,227,255,0.14);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:32px;align-items:end">
+    <div style="display:flex;flex-direction:column;gap:22px">
+      <a href="https://github.com/paperhurts/hurricane-party/releases/latest/download/hurricane-party-windows.zip" style="align-self:flex-start;display:inline-flex;align-items:center;gap:12px;padding:14px 22px;color:#6FE3FF;font:700 15px/1 'Iosevka Web',ui-monospace,monospace;box-shadow:inset 0 0 0 1px #6FE3FF,0 0 16px rgba(111,227,255,0.25)" style-hover="background:#6FE3FF;color:#05040A"><span>↓</span><span>Download for Windows</span></a>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;font:400 12px/1.6 'Iosevka Web',ui-monospace,monospace;letter-spacing:1.2px">
+        <a href="https://github.com/paperhurts/hurricane-party">GITHUB</a>
+        <a href="https://github.com/paperhurts/hurricane-party/releases">ALL RELEASES</a>
+        <a href="https://github.com/paperhurts/hurricane-party/issues/new">BROKEN DOWNLOAD? OPEN AN ISSUE</a>
+        <a href="https://github.com/paperhurts/hurricane-party/blob/main/LICENSE">LICENSE</a>
+      </div>
+      <div style="font:400 12px/1.6 'Iosevka Web',ui-monospace,monospace;letter-spacing:0.6px;color:rgba(232,244,255,0.4)">No tracking on this page. No fonts from anyone else's server. Hurricane warning. The music is already downloaded.</div>
+    </div>
+    <img src="design/icon/capybara-lounging-1254.png" alt="The capybara lying on a hurricane warning flag in sunglasses, boombox beside him" style="width:220px;display:block">
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;version&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;v0.4.0&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Release&quot;},&quot;sizeMb&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:100,&quot;min&quot;:10,&quot;max&quot;:500,&quot;unit&quot;:&quot;MB&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Release&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const p = this.props;
+    const mb = p.sizeMb ?? 100;
+    return {
+      version: p.version ?? 'v0.4.0',
+      sizeLabel: mb + ' MB',
+      faq: [
+        { q: 'Where did my files go?', a: 'Into the library folder you chose the first time you added something. Change it in Settings. They are plain MP3 and MP4 files; any other player can open them.' },
+        { q: 'Does it need the internet?', a: 'Only to download. Playback never touches the network, by design and by enforcement. Unplug and it keeps going.' },
+        { q: 'Why is it Windows only?', a: 'It was built for one Windows machine in Florida. Nothing in it is Windows-specific on purpose, but nothing has been tested anywhere else either.' },
+        { q: 'Can I use my old Winamp skins?', a: 'Not yet. Classic .wsz skins import at v0.5.' },
+        { q: 'Is my library shared anywhere?', a: 'No. There is no account and no server. The list of what you have lives in a database file next to the music, on your disk.' },
+        { q: 'The download is broken. Who do I tell?', a: 'Open an issue on GitHub. If the link on this page is dead, the release list is the fallback.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
