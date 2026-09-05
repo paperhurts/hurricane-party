@@ -52,6 +52,7 @@ body {
   flex: 0 0 14px;
   display: flex;
   align-items: center;
+  gap: 4px;
   padding: 0 4px;
   font-size: 9px;
   letter-spacing: 0.08em;
@@ -271,4 +272,116 @@ body {
 .chrome[data-shaded="true"] .seam.top,
 .chrome[data-shaded="true"] .seam.bottom {
   height: 2px;
+}
+
+/* ---- windowshade contents (D79) ----
+ *
+ * Each window hands the chrome a `shade` snippet, rendered inside the title
+ * bar, so the strip stays the one move handle and keeps the double-click
+ * that expands it (D60). A button inside it stops pointerdown, so a click
+ * there is neither a drag nor a tap. The pieces below are the vocabulary the
+ * three shades share; the layout of each is the window's own. */
+.shade {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* The title bar's caps and tracking are for a window's name, not a song's. */
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 8px;
+  color: var(--filament);
+}
+.chrome[data-active="false"] .shade {
+  color: color-mix(in srgb, var(--filament) 45%, transparent);
+}
+
+/* A transport button that fits in nine pixels. */
+.shade .sb {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 5px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--filament) 80%, transparent);
+  background: color-mix(in srgb, var(--void) 70%, var(--well));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 22%, transparent);
+  cursor: pointer;
+}
+.shade .sb:hover {
+  color: var(--arc);
+  box-shadow: inset 0 0 0 1px var(--arc);
+}
+.shade .sb.lit {
+  color: var(--arc);
+  background: color-mix(in srgb, var(--arc) 14%, var(--void));
+  box-shadow:
+    inset 0 0 0 1px var(--arc),
+    0 0 6px color-mix(in srgb, var(--arc) 45%, transparent);
+}
+
+.shade .sep {
+  flex: 0 0 1px;
+  height: 8px;
+  background: color-mix(in srgb, var(--arc) 18%, transparent);
+}
+
+/* A small label: the window's initials, a state word, a count. */
+.shade .stag {
+  flex: 0 0 auto;
+  font-size: 6px;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--filament) 45%, transparent);
+}
+.shade .stag.lit {
+  color: var(--arc);
+}
+
+/* The one line of text that takes what is left. */
+.shade .stext {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.shade .stext.err {
+  color: var(--ember);
+}
+.shade .stext.now {
+  color: var(--strike);
+}
+
+/* The time readout: the clock's glow at the clock's size for the strip. */
+.shade .stime {
+  flex: 0 0 auto;
+  color: var(--arc);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 5px color-mix(in srgb, var(--arc) 55%, transparent);
+}
+
+/* Ten band gains as ten bars, the EQ curve at a glance. */
+.shade .sbars {
+  flex: 0 1 auto;
+  height: 9px;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+.shade .sbars i {
+  flex: 0 0 3px;
+  background: var(--arc);
+  opacity: 0.85;
+  box-shadow: 0 0 3px color-mix(in srgb, var(--arc) 70%, transparent);
+}
+.shade .sbars.off i {
+  opacity: 0.25;
+  box-shadow: none;
 }
