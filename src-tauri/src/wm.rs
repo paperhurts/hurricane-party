@@ -11,7 +11,7 @@
 //! forward (D40).
 
 use rusqlite::Connection;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Mutex;
 
 use tauri::{
@@ -23,7 +23,9 @@ use crate::platform::{self, NativeWindow};
 
 // ---- geometry ---------------------------------------------------------------
 
-/// Logical chrome geometry, 1x. `windows.md`'s inventory. Double for 2x mode.
+/// Logical chrome geometry, 1x. `windows.md`'s inventory. 2x mode (#47)
+/// multiplies these before the single rounding to physical (D40); it never
+/// scales a physical number. See `WmState::zoom` and `rezoom_layout`.
 pub const CHROME_W: f64 = 275.0;
 pub const CHROME_H: f64 = 116.0;
 /// Windowshade collapses a window to a 275 x 14 bar.
@@ -230,6 +232,9 @@ pub struct WmState {
     /// Height to restore on expand, per window. The playlist can be at any
     /// legal D30 size, so the base height is not the right answer for it.
     pub unshaded_h: BTreeMap<WindowId, Px>,
+    /// 2x chrome (#47). Integer only: fractional chrome scaling is anti-scope.
+    /// A bool rather than a factor so `Default` is 1x without a custom impl.
+    pub double: bool,
 }
 
 /// A title-bar drag in flight.
@@ -255,6 +260,15 @@ impl WmState {
             .copied()
             .unwrap_or(NativeWindow::NONE)
     }
+
+    /// The chrome zoom the logical constants are multiplied by: 1.0 or 2.0.
+    pub fn zoom(&self) -> f64 {
+        if self.double {
+            2.0
+        } else {
+            1.0
+        }
+    }
 }
 
 /// Tauri-managed wrapper. Separate type so `WmState` itself stays plain data
@@ -269,9 +283,9 @@ pub struct Wm(pub Mutex<WmState>);
 ///
 /// Pure, and computed **before** any window exists. That ordering is the whole
 /// point — see `seed_state`.
-pub fn initial_layout(scale: f64) -> (Layout, WindowGraph) {
-    let w = bond::d40::physical(CHROME_W, scale);
-    let h = bond::d40::physical(CHROME_H, scale);
+pub fn initial_layout(scale: f64, zoom: f64) -> (Layout, WindowGraph) {
+    let w = bond::d40::physical(CHROME_W * zoom, scale);
+    let h = bond::d40::physical(CHROME_H * zoom, scale);
     let x0 = bond::d40::physical(120.0, scale);
     let y0 = bond::d40::physical(120.0, scale);
 
@@ -304,16 +318,26 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     let monitors = read_monitors(app);
     let scale = monitors.first().map(|m| m.scale).unwrap_or(1.0);
 
-    // D33: last session's geometry, bonds and shade state, if there are any.
-    let restored = app.try_state::<crate::db::Db>().and_then(|db| {
-        let conn = db.0.lock().unwrap();
-        load(&conn)
-    });
+    // D33: last session's geometry, bonds and shade state, if there are any,
+    // and the chrome zoom they were saved at (#47). The two are stored
+    // together for a reason: a 2x layout read back as 1x would be a stack of
+    // windows twice the size the model thinks they are.
+    let (restored, double) = match app.try_state::<crate::db::Db>() {
+        Some(db) => {
+            let conn = db.0.lock().unwrap();
+            (
+                load(&conn),
+                crate::db::get_setting(&conn, DOUBLE_SETTING).as_deref() == Some("1"),
+            )
+        }
+        None => (None, false),
+    };
+    let zoom = if double { 2.0 } else { 1.0 };
 
     let (mut layout, graph, shaded, unshaded_h) = match restored {
         Some(r) => (r.layout, r.graph, r.shaded, r.unshaded_h),
         None => {
-            let (l, g) = initial_layout(scale);
+            let (l, g) = initial_layout(scale, zoom);
             (l, g, BTreeSet::new(), BTreeMap::new())
         }
     };
@@ -337,11 +361,17 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
             .and_then(|r| monitor_at(&monitors, r.x, r.y))
             .map(|m| m.scale)
             .unwrap_or(scale);
-        apply_shade(&mut layout, &graph, id, bond::d40::physical(SHADE_H, at));
+        apply_shade(
+            &mut layout,
+            &graph,
+            id,
+            bond::d40::physical(SHADE_H * zoom, at),
+        );
     }
 
     let state = app.state::<Wm>();
     let mut s = state.0.lock().unwrap();
+    s.double = double;
     s.scale = scale;
     s.monitors = monitors;
     s.layout = layout;
@@ -361,10 +391,10 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
 pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
     // Placed from the layout seeded before any window existed, so the model and
     // the screen start out saying the same thing.
-    let seeded = {
+    let (seeded, zoom) = {
         let state = app.state::<Wm>();
         let s = state.0.lock().unwrap();
-        s.layout.clone()
+        (s.layout.clone(), s.zoom())
     };
 
     for id in CLASSIC.iter() {
@@ -398,6 +428,12 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
         let r = seeded[id];
         win.set_position(PhysicalPosition::new(r.x, r.y))?;
         win.set_size(PhysicalSize::new(r.w as u32, r.h as u32))?;
+        // #47: the webview's own zoom factor, not a CSS zoom. The page lays
+        // out at 275 x 116 as always and the browser renders it doubled, so
+        // pointer maths, rects and the canvas backing store all agree.
+        if zoom != 1.0 {
+            win.set_zoom(zoom)?;
+        }
         // Deliberately NOT shown here. See show_classic_windows: the webviews
         // start loading the moment a window exists, and they reach wm_hello
         // before setup has finished registering the graph.
@@ -888,6 +924,7 @@ pub fn emit_state(app: &AppHandle) {
                         edges: edges_for(&s, *id),
                         active: flags.iter().any(|(w, a)| w == id && *a),
                         shaded: s.shaded.contains(id),
+                        double: s.double,
                     },
                 )
             })
@@ -908,12 +945,12 @@ pub fn emit_state(app: &AppHandle) {
 /// a previous physical value: stepping by a rounded increment drifts 5 px after
 /// ten steps and 20 px after forty, which walks the bonded neighbour out of
 /// flush a little more every time.
-pub fn quantize_seam(layout: &Layout, b: &Bond, raw: Px, scale: f64) -> Px {
+pub fn quantize_seam(layout: &Layout, b: &Bond, raw: Px, scale: f64, zoom: f64) -> Px {
     let vertical = b.edge.is_vertical_seam();
     let (base, step) = if vertical {
-        (CHROME_W, PLAYLIST_STEP_W)
+        (CHROME_W * zoom, PLAYLIST_STEP_W * zoom)
     } else {
-        (CHROME_H, PLAYLIST_STEP_H)
+        (CHROME_H * zoom, PLAYLIST_STEP_H * zoom)
     };
     let (Some(ra), Some(rb)) = (layout.get(&b.a).copied(), layout.get(&b.b).copied()) else {
         return raw;
@@ -1002,11 +1039,12 @@ pub fn splitter_move(app: &AppHandle) {
         // D40 again: recompute from the origin layout every frame. Applying the
         // splitter to the *current* layout would compound its own rounding.
         let mut layout = sp.origin_layout.clone();
-        let pos = quantize_seam(&layout, &sp.bond, raw, scale);
+        let zoom = s.zoom();
+        let pos = quantize_seam(&layout, &sp.bond, raw, scale, zoom);
         let min = if vertical {
-            bond::d40::physical(CHROME_W, scale)
+            bond::d40::physical(CHROME_W * zoom, scale)
         } else {
-            bond::d40::physical(CHROME_H, scale)
+            bond::d40::physical(CHROME_H * zoom, scale)
         };
         bond::apply_splitter_in_graph(&mut layout, &s.graph, &sp.bond, pos, &is_resizable, min);
         s.layout = layout.clone();
@@ -1104,7 +1142,7 @@ pub fn height_for(state: &WmState, id: WindowId, shaded: bool) -> Px {
         .map(|m| m.scale)
         .unwrap_or(state.scale);
     if shaded {
-        bond::d40::physical(SHADE_H, scale)
+        bond::d40::physical(SHADE_H * state.zoom(), scale)
     } else {
         // The playlist can be any legal D30 size, so expanding restores the
         // height it had before it was collapsed rather than the base height.
@@ -1114,7 +1152,7 @@ pub fn height_for(state: &WmState, id: WindowId, shaded: bool) -> Px {
             .unshaded_h
             .get(&id)
             .copied()
-            .unwrap_or_else(|| bond::d40::physical(CHROME_H, scale))
+            .unwrap_or_else(|| bond::d40::physical(CHROME_H * state.zoom(), scale))
     }
 }
 
@@ -1204,6 +1242,8 @@ pub struct Hello {
     pub edges: Edges,
     pub active: bool,
     pub shaded: bool,
+    /// 2x chrome (#47), so the title bar's toggle shows the right label.
+    pub double: bool,
 }
 
 pub fn hello(app: &AppHandle, id: WindowId) -> Hello {
@@ -1218,6 +1258,7 @@ pub fn hello(app: &AppHandle, id: WindowId) -> Hello {
             .map(|(_, a)| a)
             .unwrap_or(false),
         shaded: s.shaded.contains(&id),
+        double: s.double,
     }
 }
 
@@ -1265,6 +1306,204 @@ pub fn raise_group(app: &AppHandle, id: WindowId) {
         p.restore_no_activate(*w);
     }
     apply_ownership(&plan);
+}
+
+// ---- chrome zoom (#47) ------------------------------------------------------
+
+/// Settings key for the chrome zoom. "1" is 2x; anything else is 1x.
+pub const DOUBLE_SETTING: &str = "chrome_double";
+
+/// Re-derive a layout for a new chrome zoom.
+///
+/// Every size comes fresh from the logical base times the new zoom, rounded
+/// once (D40); the playlist keeps its step count (D30). Each bonded group is
+/// then re-packed by walking its bonds out from an anchor window whose
+/// top-left corner stays put, so positions are physical arithmetic on the
+/// rounded sizes and never a scaled copy of the old positions. The difference
+/// is real: at 150% two 275-wide windows side by side are 413 + 413, and
+/// scaling the second one's offset would put a third at round(550 x 1.5) =
+/// 825, one pixel out of flush. Walking the bonds says 826. Spans are
+/// recomputed from the result.
+///
+/// `layout` must be the expanded one, with no shaded heights in it: a shaded
+/// strip is a state to reapply, not a size to scale. `set_double` expands
+/// first and collapses after, the same way `save` does.
+pub fn rezoom_layout(
+    layout: &Layout,
+    graph: &WindowGraph,
+    monitors: &[MonitorInfo],
+    fallback_scale: f64,
+    old_zoom: f64,
+    new_zoom: f64,
+) -> (Layout, WindowGraph) {
+    let scale_of = |r: &Rect| {
+        monitor_at(monitors, r.x, r.y)
+            .map(|m| m.scale)
+            .unwrap_or(fallback_scale)
+    };
+
+    let mut sizes: BTreeMap<WindowId, (Px, Px)> = BTreeMap::new();
+    for (id, r) in layout {
+        let scale = scale_of(r);
+        let size = if is_resizable(*id) {
+            let steps = |px: Px, base: f64, step: f64| {
+                (((px as f64 / scale) - base * old_zoom) / (step * old_zoom))
+                    .round()
+                    .max(0.0) as i32
+            };
+            let n = steps(r.w, CHROME_W, PLAYLIST_STEP_W);
+            let m = steps(r.h, CHROME_H, PLAYLIST_STEP_H);
+            (
+                bond::d40::stepped(CHROME_W * new_zoom, PLAYLIST_STEP_W * new_zoom, n, scale),
+                bond::d40::stepped(CHROME_H * new_zoom, PLAYLIST_STEP_H * new_zoom, m, scale),
+            )
+        } else {
+            (
+                bond::d40::physical(CHROME_W * new_zoom, scale),
+                bond::d40::physical(CHROME_H * new_zoom, scale),
+            )
+        };
+        sizes.insert(*id, size);
+    }
+
+    let ids: Vec<WindowId> = layout.keys().copied().collect();
+    let mut out = Layout::new();
+    for comp in graph.components(&ids) {
+        let Some(anchor) = comp
+            .iter()
+            .copied()
+            .filter(|id| layout.contains_key(id))
+            .min_by_key(|id| (layout[id].y, layout[id].x))
+        else {
+            continue;
+        };
+        let ar = layout[&anchor];
+        let (aw, ah) = sizes[&anchor];
+        out.insert(anchor, Rect::new(ar.x, ar.y, aw, ah));
+
+        let mut queue = VecDeque::from([anchor]);
+        while let Some(p) = queue.pop_front() {
+            let p_old = layout[&p];
+            let p_new = out[&p];
+            let scale = scale_of(&p_old);
+            // An offset along the seam, re-derived from the logical base.
+            let along =
+                |old: Px| bond::d40::physical((old as f64 / scale / old_zoom) * new_zoom, scale);
+            for q in graph.neighbours(p) {
+                if out.contains_key(&q) {
+                    continue;
+                }
+                let (Some(b), Some(q_old), Some(&(qw, qh))) =
+                    (graph.bond_between(p, q), layout.get(&q), sizes.get(&q))
+                else {
+                    continue;
+                };
+                // Bonds are canonical: `edge` is the side of `a` that `b`
+                // sits against, and only Right and Bottom occur.
+                let r = match (b.edge, b.a == p) {
+                    (Edge::Right, true) => {
+                        Rect::new(p_new.right(), p_new.y + along(q_old.y - p_old.y), qw, qh)
+                    }
+                    (Edge::Bottom, true) => {
+                        Rect::new(p_new.x + along(q_old.x - p_old.x), p_new.bottom(), qw, qh)
+                    }
+                    (Edge::Right, false) => {
+                        Rect::new(p_new.x - qw, p_new.y + along(q_old.y - p_old.y), qw, qh)
+                    }
+                    (Edge::Bottom, false) => {
+                        Rect::new(p_new.x + along(q_old.x - p_old.x), p_new.y - qh, qw, qh)
+                    }
+                    _ => Rect::new(
+                        p_new.x + along(q_old.x - p_old.x),
+                        p_new.y + along(q_old.y - p_old.y),
+                        qw,
+                        qh,
+                    ),
+                };
+                out.insert(q, r);
+                queue.push_back(q);
+            }
+        }
+    }
+
+    let mut g = WindowGraph::new();
+    for b in &graph.bonds {
+        let (Some(ra), Some(rb)) = (out.get(&b.a), out.get(&b.b)) else {
+            continue;
+        };
+        let span = if b.edge.is_vertical_seam() {
+            (ra.y.max(rb.y), ra.bottom().min(rb.bottom()))
+        } else {
+            (ra.x.max(rb.x), ra.right().min(rb.right()))
+        };
+        g.insert(Bond::new(b.a, b.b, b.edge, span));
+    }
+    (out, g)
+}
+
+/// Switch the chrome between 1x and 2x. The whole layout is re-derived, the
+/// webviews are re-zoomed, the windows are moved and sized (D52: position,
+/// then size), and both the layout and the flag are saved together.
+pub fn set_double(app: &AppHandle, on: bool) {
+    let (layout, zoom) = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        if s.double == on {
+            return;
+        }
+        let old_zoom = s.zoom();
+        let new_zoom = if on { 2.0 } else { 1.0 };
+
+        // Expand, re-derive, re-collapse: the same dance `save` does, because
+        // a shaded height is a state to reapply, not a size to scale.
+        let mut expanded = s.layout.clone();
+        for id in &s.shaded {
+            if let Some(h) = s.unshaded_h.get(id).copied() {
+                apply_shade(&mut expanded, &s.graph, *id, h);
+            }
+        }
+        let (rezoomed, graph) = rezoom_layout(
+            &expanded,
+            &s.graph,
+            &s.monitors,
+            s.scale,
+            old_zoom,
+            new_zoom,
+        );
+        // A group that doubled may now hang off the display; same rescue as a
+        // topology change, so it comes back rigidly with its bonds intact.
+        let mut layout = rescue_layout(&rezoomed, &graph, &s.monitors);
+
+        s.double = on;
+        let shaded: Vec<WindowId> = s.shaded.iter().copied().collect();
+        for id in shaded {
+            let Some(r) = layout.get(&id).copied() else {
+                continue;
+            };
+            s.unshaded_h.insert(id, r.h);
+            let at = monitor_at(&s.monitors, r.x, r.y)
+                .map(|m| m.scale)
+                .unwrap_or(s.scale);
+            apply_shade(
+                &mut layout,
+                &graph,
+                id,
+                bond::d40::physical(SHADE_H * new_zoom, at),
+            );
+        }
+        s.graph = graph;
+        s.layout = layout.clone();
+        (layout, new_zoom)
+    }; // D54: the lock is gone before any window call.
+
+    for id in CLASSIC {
+        if let Some(win) = app.get_webview_window(label_of(id)) {
+            let _ = win.set_zoom(zoom);
+        }
+    }
+    push_to_os(app, &layout, &CLASSIC);
+    emit_state(app);
+    save_now(app);
 }
 
 // ---- rescue -----------------------------------------------------------------
@@ -1567,7 +1806,7 @@ pub fn save_now(app: &AppHandle) {
     let Some(db) = app.try_state::<crate::db::Db>() else {
         return;
     };
-    let (layout, graph, shaded, unshaded_h, monitors) = {
+    let (layout, graph, shaded, unshaded_h, monitors, double) = {
         let state = app.state::<Wm>();
         let s = state.0.lock().unwrap();
         (
@@ -1576,12 +1815,18 @@ pub fn save_now(app: &AppHandle) {
             s.shaded.clone(),
             s.unshaded_h.clone(),
             s.monitors.clone(),
+            s.double,
         )
     }; // The wm lock is released before the db lock is taken -- always in that
        // order, so the two can never be acquired against each other.
     let conn = db.0.lock().unwrap();
     if let Err(e) = save(&conn, &layout, &graph, &shaded, &unshaded_h, &monitors) {
         eprintln!("wm: could not save the window layout: {e}");
+    }
+    // Beside the layout, never apart from it: the rects only mean what they
+    // say at the zoom they were written at (#47).
+    if let Err(e) = crate::db::set_setting(&conn, DOUBLE_SETTING, if double { "1" } else { "0" }) {
+        eprintln!("wm: could not save the chrome zoom: {e}");
     }
 }
 
@@ -1670,6 +1915,120 @@ pub fn load(conn: &Connection) -> Option<Restored> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- chrome zoom (#47) ----
+
+    #[test]
+    fn rezoom_doubles_a_stack_keeps_it_flush_and_round_trips() {
+        let (layout, graph) = initial_layout(1.0, 1.0);
+        let (out, g) = rezoom_layout(&layout, &graph, &[], 1.0, 1.0, 2.0);
+        assert_eq!(out[&MAIN], Rect::new(120, 120, 550, 232));
+        assert_eq!(out[&EQ], Rect::new(120, 352, 550, 232));
+        assert_eq!(out[&PLAYLIST], Rect::new(120, 584, 550, 232));
+        assert!(bond::violations(&g, &out).is_empty());
+        assert_eq!(g.bond_between(MAIN, EQ).unwrap().span, (120, 670));
+
+        let (back, g1) = rezoom_layout(&out, &g, &[], 1.0, 2.0, 1.0);
+        assert_eq!(back, layout);
+        assert_eq!(g1.bond_between(EQ, PLAYLIST).unwrap().span, (120, 395));
+    }
+
+    #[test]
+    fn rezoom_keeps_a_row_flush_at_150_percent() {
+        // 275 x 1.5 = 412.5 -> 413 each. A scaled offset would put the third
+        // window at round(550 x 1.5) = 825, one pixel out of flush; walking
+        // the bonds puts it at 413 + 413 = 826 at 1x and 825 + 825 at 2x.
+        let scale = 1.5;
+        let w = bond::d40::physical(CHROME_W, scale);
+        let h = bond::d40::physical(CHROME_H, scale);
+        assert_eq!(w, 413);
+        let mut layout = Layout::new();
+        layout.insert(MAIN, Rect::new(0, 0, w, h));
+        layout.insert(EQ, Rect::new(w, 0, w, h));
+        layout.insert(PLAYLIST, Rect::new(2 * w, 0, w, h));
+        let mut graph = WindowGraph::new();
+        graph.insert(Bond::new(MAIN, EQ, Edge::Right, (0, h)));
+        graph.insert(Bond::new(EQ, PLAYLIST, Edge::Right, (0, h)));
+
+        let (out, g) = rezoom_layout(&layout, &graph, &[], scale, 1.0, 2.0);
+        let w2 = bond::d40::physical(CHROME_W * 2.0, scale);
+        assert_eq!(w2, 825);
+        assert_eq!(out[&EQ].x, out[&MAIN].right());
+        assert_eq!(out[&PLAYLIST].x, out[&EQ].right());
+        assert_eq!(out[&PLAYLIST].x, 2 * w2);
+        assert!(bond::violations(&g, &out).is_empty());
+
+        let (back, _) = rezoom_layout(&out, &g, &[], scale, 2.0, 1.0);
+        assert_eq!(back, layout);
+    }
+
+    #[test]
+    fn rezoom_keeps_the_playlist_step_count() {
+        let (mut layout, graph) = initial_layout(1.0, 1.0);
+        // Two steps wider, one taller (D30): 325 x 145.
+        let r = layout[&PLAYLIST];
+        layout.insert(PLAYLIST, Rect::new(r.x, r.y, 275 + 50, 116 + 29));
+        let (out, _) = rezoom_layout(&layout, &graph, &[], 1.0, 1.0, 2.0);
+        assert_eq!((out[&PLAYLIST].w, out[&PLAYLIST].h), (550 + 100, 232 + 58));
+        let (back, _) = rezoom_layout(&out, &graph, &[], 1.0, 2.0, 1.0);
+        assert_eq!(back[&PLAYLIST], layout[&PLAYLIST]);
+    }
+
+    #[test]
+    fn rezoom_scales_an_offset_along_the_seam_and_leaves_a_loner_put() {
+        // eq bonded under main, shifted 50 px right; the playlist is on its
+        // own somewhere else. At 2x the shift is 100 and the loner's corner
+        // does not move.
+        let mut layout = Layout::new();
+        layout.insert(MAIN, Rect::new(0, 0, 275, 116));
+        layout.insert(EQ, Rect::new(50, 116, 275, 116));
+        layout.insert(PLAYLIST, Rect::new(900, 900, 275, 116));
+        let mut graph = WindowGraph::new();
+        graph.insert(Bond::new(MAIN, EQ, Edge::Bottom, (50, 275)));
+
+        let (out, g) = rezoom_layout(&layout, &graph, &[], 1.0, 1.0, 2.0);
+        assert_eq!(out[&MAIN], Rect::new(0, 0, 550, 232));
+        assert_eq!(out[&EQ], Rect::new(100, 232, 550, 232));
+        assert_eq!(out[&PLAYLIST], Rect::new(900, 900, 550, 232));
+        assert_eq!(g.bond_between(MAIN, EQ).unwrap().span, (100, 550));
+        assert!(bond::violations(&g, &out).is_empty());
+    }
+
+    #[test]
+    fn rezoom_walks_a_bond_backwards_from_the_anchor() {
+        // The anchor is the top-most window. Here eq is ABOVE main, so the
+        // walk from eq reaches main through a bond where main is `a`.
+        let mut layout = Layout::new();
+        layout.insert(EQ, Rect::new(0, 0, 275, 116));
+        layout.insert(MAIN, Rect::new(0, 116, 275, 116));
+        layout.insert(PLAYLIST, Rect::new(0, 232, 275, 116));
+        let mut graph = WindowGraph::new();
+        graph.insert(Bond::new(EQ, MAIN, Edge::Bottom, (0, 275)));
+        graph.insert(Bond::new(PLAYLIST, MAIN, Edge::Top, (0, 275)));
+
+        let (out, g) = rezoom_layout(&layout, &graph, &[], 1.0, 1.0, 2.0);
+        assert_eq!(out[&EQ], Rect::new(0, 0, 550, 232));
+        assert_eq!(out[&MAIN], Rect::new(0, 232, 550, 232));
+        assert_eq!(out[&PLAYLIST], Rect::new(0, 464, 550, 232));
+        assert!(bond::violations(&g, &out).is_empty());
+    }
+
+    #[test]
+    fn seam_quantises_on_the_doubled_grid_at_2x() {
+        // At 2x the playlist steps are 50 x 58 from a 550 x 232 base.
+        let mut s = state_with(&[(MAIN, EQ), (EQ, PLAYLIST)]);
+        let (l, g) = initial_layout(1.0, 2.0);
+        s.layout = l;
+        s.graph = g;
+        let b = *s.graph.bond_between(EQ, PLAYLIST).unwrap();
+        let bottom = s.layout[&PLAYLIST].bottom();
+        // Ask for 232 + 58 x 3 + a bit: lands on exactly three steps.
+        let raw = bottom - (232 + 58 * 3) - 20;
+        assert_eq!(
+            quantize_seam(&s.layout, &b, raw, 1.0, 2.0),
+            bottom - (232 + 58 * 3)
+        );
+    }
 
     fn nw(n: isize) -> NativeWindow {
         NativeWindow(n)
@@ -2153,7 +2512,7 @@ mod tests {
         let b = eq_playlist_bond();
         let bottom = s.layout[&PLAYLIST].bottom();
         for raw in 150..260 {
-            let pos = quantize_seam(&s.layout, &b, raw, 1.0);
+            let pos = quantize_seam(&s.layout, &b, raw, 1.0, 1.0);
             let height = bottom - pos;
             assert_eq!(
                 (height - 116) % 29,
@@ -2178,7 +2537,7 @@ mod tests {
             // Aim the cursor exactly at the seam position for m steps, plus a
             // pixel of hand tremor in each direction.
             for jitter in [-1, 0, 1] {
-                let pos = quantize_seam(&s.layout, &b, bottom - want + jitter, 1.5);
+                let pos = quantize_seam(&s.layout, &b, bottom - want + jitter, 1.5, 1.0);
                 assert_eq!(bottom - pos, want, "step {m} jitter {jitter} drifted");
             }
         }
@@ -2188,7 +2547,7 @@ mod tests {
     fn a_seam_with_nothing_resizable_is_left_where_it_is() {
         let s = stacked();
         let b = Bond::new(MAIN, EQ, Edge::Bottom, (0, 275));
-        assert_eq!(quantize_seam(&s.layout, &b, 173, 1.0), 173);
+        assert_eq!(quantize_seam(&s.layout, &b, 173, 1.0, 1.0), 173);
     }
 
     // ---- demagnetize --------------------------------------------------------
@@ -2258,7 +2617,7 @@ mod tests {
     #[test]
     fn the_opening_stack_is_flush_and_bonded_at_any_scale() {
         for scale in [1.0, 1.25, 1.5, 2.0] {
-            let (layout, graph) = initial_layout(scale);
+            let (layout, graph) = initial_layout(scale, 1.0);
             assert_eq!(
                 graph.components(&CLASSIC).len(),
                 1,
@@ -2281,7 +2640,7 @@ mod tests {
         // is not evidence. If the OS put a window somewhere else, the bond has
         // to go -- a graph that stays self-consistent while describing a layout
         // existing nowhere is exactly what that decision is about.
-        let (mut layout, graph) = initial_layout(1.0);
+        let (mut layout, graph) = initial_layout(1.0, 1.0);
         assert!(bond::violations(&graph, &layout).is_empty());
         let moved = layout[&PLAYLIST].translated(0, 7);
         layout.insert(PLAYLIST, moved);
