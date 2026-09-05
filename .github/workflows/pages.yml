@@ -1,0 +1,65 @@
+# The download page (#66): site/index.html built by tools/build-site.ps1 and
+# published to GitHub Pages. Runs when the page, the art, the tokens or the
+# script change on main, and on demand. The zip size on the page comes from
+# the latest release, so a new release should re-run this (workflow_dispatch)
+# once its asset is up.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'design/icon/*.png'
+      - 'design/tokens.json'
+      - 'tools/build-site.ps1'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Windows because the build script is Windows PowerShell 5.1 (CLAUDE.md:
+    # every script in tools/ is), and System.Drawing does the image resizing.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Zip size from the latest release
+        id: rel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bytes=$(gh api repos/${{ github.repository }}/releases/latest \
+            --jq '.assets[] | select(.name == "hurricane-party-windows.zip") | .size' 2>/dev/null || echo 0)
+          mb=$(( ${bytes:-0} / 1048576 ))
+          echo "mb=$mb" >> "$GITHUB_OUTPUT"
+          echo "latest release asset: ${mb} MB"
+
+      - name: Build the page
+        shell: powershell
+        run: ./tools/build-site.ps1 -SizeMb ${{ steps.rel.outputs.mb }}
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
