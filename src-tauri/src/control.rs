@@ -17,9 +17,37 @@ use hp_control::{hello_result, Command, Event, PlayerState, Request, Response};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
-/// Last state the webview reported. Not authoritative — a mirror.
+/// What each transport last reported. Not authoritative — a mirror.
+///
+/// Two of them, because two windows report (D70): the Main window for the
+/// `<audio>` element and the video window for its `<video>`. One thing plays
+/// at a time (D69), so `status` answers from whichever kind last said
+/// "playing"; a "paused" from the other side does not take the channel back.
 #[derive(Default)]
-pub struct ControlState(pub Arc<Mutex<PlayerState>>);
+pub struct ControlState(pub Arc<Mutex<Mirror>>);
+
+#[derive(Default)]
+pub struct Mirror {
+    pub audio: PlayerState,
+    pub video: PlayerState,
+    /// The video window is the transport.
+    pub active_video: bool,
+    /// What clients last heard, for deriving events by diff.
+    told: PlayerState,
+}
+
+impl Mirror {
+    /// The one state the channel reports.
+    pub fn current(&self) -> PlayerState {
+        let mut s = if self.active_video {
+            self.video.clone()
+        } else {
+            self.audio.clone()
+        };
+        s.kind = if self.active_video { "video" } else { "audio" }.into();
+        s
+    }
+}
 
 /// Broadcast an event to every connected client.
 #[derive(Default, Clone)]
@@ -62,7 +90,7 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
             Response::ok(req.id, hello_result(env!("CARGO_PKG_VERSION")))
         }
         Command::Status => {
-            let s = state.0.lock().unwrap().clone();
+            let s = state.0.lock().unwrap().current();
             Response::ok(req.id, serde_json::to_value(s).unwrap_or_default())
         }
         // The one command answered here rather than relayed: the pipe is
@@ -72,6 +100,15 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
             Err(e) => Response::err(req.id, e),
         },
         other => {
+            // D70: a transport command goes to whichever window is the
+            // transport. Next and prev always go to Main, which asks the
+            // library to step: the library's cursor walks over videos and
+            // tracks alike, so they work from either. Targeted, not broadcast,
+            // or both windows would obey and D69's one transport becomes two.
+            let steps = matches!(other, Command::Next | Command::Prev);
+            let to_video = !steps
+                && state.0.lock().unwrap().active_video
+                && app.get_webview_window("video").is_some();
             let (name, arg) = match other {
                 Command::Play => ("play", serde_json::Value::Null),
                 Command::Pause => ("pause", serde_json::Value::Null),
@@ -83,7 +120,8 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
                 Command::Volume(v) => ("volume", serde_json::json!(v)),
                 _ => unreachable!("handled above"),
             };
-            let _ = app.emit(
+            let _ = app.emit_to(
+                if to_video { "video" } else { "main" },
                 "control-command",
                 serde_json::json!({ "cmd": name, "arg": arg }),
             );
@@ -166,27 +204,63 @@ use tauri::Manager;
 /// unsolicited events are derived — by diffing against the previous mirror,
 /// so a client isn't spammed with a state_changed on every position tick.
 pub fn update_state(app: &AppHandle, incoming: PlayerState) {
-    let (state_changed, track_changed) = {
+    let video = incoming.kind == "video";
+    apply(app, |m| {
+        if video {
+            m.video = incoming;
+        } else {
+            m.audio = incoming;
+        }
+        // D69: whichever last started playing is the transport. A pause or a
+        // stop from the other side reports itself but does not take it back.
+        let reported = if video { &m.video } else { &m.audio };
+        if reported.state == "playing" {
+            m.active_video = video;
+        }
+    });
+}
+
+/// The video window closed. Its `<video>` is gone with it, so its mirror is
+/// stopped; if it was the transport, `status` says stopped rather than going
+/// on describing a window that no longer exists (D70).
+pub fn video_gone(app: &AppHandle) {
+    apply(app, |m| {
+        let volume = m.video.volume;
+        m.video = PlayerState {
+            state: "stopped".into(),
+            kind: "video".into(),
+            volume,
+            ..Default::default()
+        };
+    });
+}
+
+/// Change the mirror, then tell clients what changed about the one state
+/// they see. Events come from the diff against what they were last told,
+/// so a position tick on the transport that is not active is silent.
+fn apply(app: &AppHandle, change: impl FnOnce(&mut Mirror)) {
+    let (state_changed, track_changed, now) = {
         let st = app.state::<ControlState>();
-        let mut cur = st.0.lock().unwrap();
-        let sc = cur.state != incoming.state;
-        let tc = cur.media_id != incoming.media_id;
-        *cur = incoming.clone();
-        (sc, tc)
+        let mut m = st.0.lock().unwrap();
+        change(&mut m);
+        let now = m.current();
+        let sc = m.told.state != now.state;
+        let tc = m.told.media_id != now.media_id || m.told.kind != now.kind;
+        m.told = now.clone();
+        (sc, tc, now)
     };
 
     let bc = app.state::<Broadcaster>();
     if track_changed {
         bc.send(&Event::NowPlaying {
-            media_id: incoming.media_id,
-            title: incoming.title.clone(),
-            uploader: incoming.uploader.clone(),
-            duration_s: incoming.duration_s,
+            kind: now.kind.clone(),
+            media_id: now.media_id,
+            title: now.title.clone(),
+            uploader: now.uploader.clone(),
+            duration_s: now.duration_s,
         });
     }
     if state_changed {
-        bc.send(&Event::StateChanged {
-            state: incoming.state,
-        });
+        bc.send(&Event::StateChanged { state: now.state });
     }
 }
