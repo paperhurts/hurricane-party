@@ -235,6 +235,26 @@ body {
   }
 }
 
+/* ---- corner grip ----
+ *
+ * The playlist's resize handle, bottom-right, as the classic had. Above the
+ * seam bands, which share this corner. Three diagonal ticks in arc so it
+ * reads as a grip without a sprite. */
+.grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  z-index: 4;
+  background:
+    linear-gradient(135deg, transparent 0 55%, color-mix(in srgb, var(--arc) 55%, transparent) 55% 65%, transparent 65% 75%, color-mix(in srgb, var(--arc) 55%, transparent) 75% 85%, transparent 85%);
+}
+.grip:hover {
+  background:
+    linear-gradient(135deg, transparent 0 55%, var(--arc) 55% 65%, transparent 65% 75%, var(--arc) 75% 85%, transparent 85%);
+}
+
 /* ---- windowshade (D60) ----
  *
  * 275 x 14: the title bar is the entire window. In v0.4b this grows transport

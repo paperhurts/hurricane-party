@@ -12,8 +12,16 @@
     label,
     title,
     body = "",
+    resizable = false,
     children,
-  }: { label: string; title: string; body?: string; children?: Snippet } = $props();
+  }: {
+    label: string;
+    title: string;
+    body?: string;
+    /** Shows the corner grip. Only the playlist resizes (D30). */
+    resizable?: boolean;
+    children?: Snippet;
+  } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
   // a handful of custom properties on :root, from design/tokens.json.
@@ -102,7 +110,7 @@
   let pending = false;
   // Which gesture the seam actually gave us. A seam with no resizable neighbour
   // degrades to a group move rather than offering a splitter that does nothing.
-  let gesture: "splitter" | "move" | "none" = "none";
+  let gesture: "splitter" | "move" | "resize" | "none" = "none";
 
   function frame(fn: () => Promise<unknown>) {
     if (pending) return;
@@ -145,6 +153,7 @@
       }
       if (gesture === "splitter") frame(() => invoke("wm_splitter_move"));
       else if (gesture === "move") frame(() => invoke("wm_drag_move"));
+      else if (gesture === "resize") frame(() => invoke("wm_resize_move"));
     };
     const onUp = () => {
       root.removeEventListener("pointermove", onMove);
@@ -153,6 +162,7 @@
       if (!started) return; // a plain click: leave click/dblclick alone
       if (gesture === "splitter") invoke("wm_splitter_end");
       else if (gesture === "move") invoke("wm_drag_end");
+      else if (gesture === "resize") invoke("wm_resize_end");
       gesture = "none";
       dragSide = null;
     };
@@ -223,6 +233,38 @@
     });
   }
 
+  // ---- corner grip: resize the free edges on the D30 grid ----
+
+  // Which edges the grip can move. A bonded edge belongs to its seam.
+  let gripAxes = $derived(
+    !resizable || shaded
+      ? "none"
+      : edges.right === null && edges.bottom === null
+        ? "both"
+        : edges.right === null
+          ? "w"
+          : edges.bottom === null
+            ? "h"
+            : "none",
+  );
+  let gripCursor = $derived(
+    gripAxes === "both" ? "nwse-resize" : gripAxes === "w" ? "ew-resize" : "ns-resize",
+  );
+
+  function gripDown(e: PointerEvent) {
+    if (gripAxes === "none") return;
+    // Stop it here: the chrome underneath would otherwise start a raise, and
+    // the seam bands share this corner.
+    e.stopPropagation();
+    arm(e, () => {
+      // Provisionally a resize; Rust says no if there is nothing to resize.
+      gesture = "resize";
+      invoke<boolean>("wm_resize_start", { label }).then((ok) => {
+        if (!ok && gesture === "resize") gesture = "none";
+      });
+    });
+  }
+
   // D60. The seam already owns dblclick for demagnetize, and its 4px strip
   // stacks above the title bar, so the hit target decides which one fires.
   function toggleShade() {
@@ -287,4 +329,9 @@
       <div class="discharge {side}"></div>
     {/if}
   {/each}
+
+  {#if gripAxes !== "none"}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="grip" style:cursor={gripCursor} onpointerdown={gripDown} title="Resize"></div>
+  {/if}
 </div>
