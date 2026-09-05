@@ -47,9 +47,12 @@ pub struct ScanReport {
     pub added: usize,
     pub updated: usize,
     pub skipped: usize,
-    /// The media ids this scan created, so a caller can put the new tracks
-    /// somewhere (the playlist window's ADD appends them to the list showing).
-    pub added_ids: Vec<i64>,
+    /// Every media id this scan touched, inserted or already known, in walk
+    /// order, so a caller can put the folder's tracks somewhere: the playlist
+    /// window's ADD appends them to the list showing. Known tracks count too,
+    /// because "add this folder to the playlist" does not stop meaning that
+    /// once the library has seen the folder.
+    pub ids: Vec<i64>,
 }
 
 /// `"audio"`, `"video"`, or `None` for a file the library should not claim.
@@ -152,7 +155,7 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
         added: 0,
         updated: 0,
         skipped: 0,
-        added_ids: Vec::new(),
+        ids: Vec::new(),
     };
 
     let state = app.state::<Db>();
@@ -183,13 +186,13 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
         // conflict clause inserted or updated, so counting `execute`'s return
         // called every re-scan a fresh import. One indexed lookup per file is a
         // cheap price for a message that is true.
-        let existed: bool = tx
+        let existing: Option<i64> = tx
             .query_row(
-                "SELECT 1 FROM media WHERE root_id = ?1 AND relpath = ?2",
+                "SELECT id FROM media WHERE root_id = ?1 AND relpath = ?2",
                 rusqlite::params![root_id, relpath],
-                |_| Ok(true),
+                |r| r.get(0),
             )
-            .unwrap_or(false);
+            .ok();
 
         // D28: (root_id, relpath), never the absolute path.
         tx.execute(
@@ -213,13 +216,18 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
                 db::now(),
             ],
         )?;
-        if existed {
-            report.updated += 1;
-        } else {
-            report.added += 1;
-            // Only on a real insert: after the UPDATE arm of the upsert,
-            // last_insert_rowid still names whatever was inserted last.
-            report.added_ids.push(tx.last_insert_rowid());
+        match existing {
+            Some(id) => {
+                report.updated += 1;
+                report.ids.push(id);
+            }
+            None => {
+                report.added += 1;
+                // Read only on a real insert: after the UPDATE arm of the
+                // upsert, last_insert_rowid still names whatever was inserted
+                // last, which is why the known id comes from the lookup above.
+                report.ids.push(tx.last_insert_rowid());
+            }
         }
     }
 

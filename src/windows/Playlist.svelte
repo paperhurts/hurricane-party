@@ -88,28 +88,37 @@
   }
 
   // ADD: a folder, scanned into the library; and when a real playlist is
-  // showing, the tracks the scan created are appended to it as well, which is
-  // what ADD means on a playlist window. The library hears library-changed
-  // from the scan and re-broadcasts the queue.
+  // showing, the folder's tracks are appended to it, which is what ADD means
+  // on a playlist window. Every track the scan touched, not only the new
+  // ones: a folder the library already knows is still a folder the user
+  // wants in this list. Tracks already in the list are left alone. The
+  // library hears library-changed and re-broadcasts the queue.
   async function addFolder() {
     const picked = await openDialog({ directory: true, multiple: false, title: "Add a music folder" });
     if (typeof picked !== "string") return;
     try {
-      const r = await invoke<{ found: number; added: number; updated: number; added_ids: number[] }>(
+      const r = await invoke<{ found: number; added: number; updated: number; ids: number[] }>(
         "add_local_folder",
         { path: picked },
       );
+      let put = 0;
       if (queue.listId != null) {
-        for (const mediaId of r.added_ids) {
+        const have = new Set(queue.items.map((t) => t.id));
+        for (const mediaId of r.ids) {
+          if (have.has(mediaId)) continue;
           await invoke("add_to_playlist", { playlistId: queue.listId, mediaId });
+          put++;
         }
-        if (r.added_ids.length) await emit("library-changed");
+        if (put) await emit("library-changed");
       }
       say(
         r.found === 0
           ? "No audio or video files in that folder."
-          : `${r.added} added, ${r.updated} already known` +
-              (queue.listId != null && r.added ? `, ${r.added} put in ${queue.name}` : ""),
+          : queue.listId != null
+            ? `${put} put in ${queue.name}` +
+              (r.ids.length - put > 0 ? `, ${r.ids.length - put} already there` : "") +
+              (r.added ? `, ${r.added} new to the library` : "")
+            : `${r.added} added to the library, ${r.updated} already known`,
       );
     } catch (e) {
       say(String(e));
