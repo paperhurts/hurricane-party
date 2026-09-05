@@ -284,6 +284,13 @@ fn wm_raise(app: AppHandle, label: String) {
     }
 }
 
+/// The classic chrome at 1x or 2x (#47). Integer only; fractional chrome
+/// scaling is anti-scope.
+#[tauri::command]
+fn wm_set_double(app: AppHandle, on: bool) {
+    wm::set_double(&app, on);
+}
+
 // ---- playlists --------------------------------------------------------------
 
 #[tauri::command]
@@ -534,6 +541,7 @@ pub fn run() {
             wm_drag_end,
             wm_focus,
             wm_raise,
+            wm_set_double,
             wm_hello,
             wm_toggle_shade,
             wm_seam_down,

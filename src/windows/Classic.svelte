@@ -30,16 +30,24 @@
   // Rust holds the bond graph. A window cannot work out on its own whether a
   // sibling being focused should light it up, or whether its bottom edge is
   // somebody else's top edge.
-  type WmState = { edges: Edges; active: boolean; shaded: boolean };
+  type WmState = { edges: Edges; active: boolean; shaded: boolean; double: boolean };
 
   let active = $state(true);
   let shaded = $state(false);
+  // 2x chrome (#47). Rust re-zooms the webview and re-lays the windows; this
+  // only drives the toggle's label.
+  let double = $state(false);
   let edges = $state<Edges>({ top: null, right: null, bottom: null, left: null });
 
   function absorb(s: WmState) {
     edges = s.edges;
     active = s.active;
     shaded = s.shaded;
+    double = s.double;
+  }
+
+  function toggleDouble() {
+    invoke("wm_set_double", { on: !double });
   }
 
   $effect(() => {
@@ -211,7 +219,15 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="chrome" data-active={active} data-shaded={shaded} onpointerdown={raise}>
   <div class="titlebar" onpointerdown={titleDown}>
-    {title}
+    <span class="ttl">{title}</span>
+    <!-- Stops the pointerdown so a click here is neither a drag nor a
+         double-tap on the title bar. -->
+    <button
+      class="tbtn"
+      title={double ? "Normal size" : "Double size"}
+      onpointerdown={(e) => e.stopPropagation()}
+      onclick={toggleDouble}>{double ? "1×" : "2×"}</button
+    >
   </div>
   <div class="body">
     {#if children}
