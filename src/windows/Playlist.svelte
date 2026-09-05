@@ -6,6 +6,7 @@
   // place. Main says what is playing over `player:now`.
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Classic from "./Classic.svelte";
 
   type Item = {
@@ -22,6 +23,20 @@
   let nowId = $state<number | null>(null);
   let selected = $state<number | null>(null);
   let rowsEl: HTMLDivElement;
+
+  // The bottom bar doubles as a one-line URL field, and as a one-line notice
+  // for a few seconds after something happened.
+  let urlMode = $state(false);
+  let url = $state("");
+  let urlEl = $state<HTMLInputElement | undefined>();
+  let flash = $state<string | null>(null);
+  let flashTimer = 0;
+
+  function say(msg: string) {
+    flash = msg;
+    clearTimeout(flashTimer);
+    flashTimer = window.setTimeout(() => (flash = null), 4000);
+  }
 
   function clock(s: number | null): string {
     if (s == null) return "";
@@ -70,6 +85,60 @@
   function remove() {
     if (!canRemove || !selectedItem) return;
     emitTo("library", "queue:remove", selectedItem.position).catch(() => {});
+  }
+
+  // ADD: a folder, scanned into the library; and when a real playlist is
+  // showing, the tracks the scan created are appended to it as well, which is
+  // what ADD means on a playlist window. The library hears library-changed
+  // from the scan and re-broadcasts the queue.
+  async function addFolder() {
+    const picked = await openDialog({ directory: true, multiple: false, title: "Add a music folder" });
+    if (typeof picked !== "string") return;
+    try {
+      const r = await invoke<{ found: number; added: number; updated: number; added_ids: number[] }>(
+        "add_local_folder",
+        { path: picked },
+      );
+      if (queue.listId != null) {
+        for (const mediaId of r.added_ids) {
+          await invoke("add_to_playlist", { playlistId: queue.listId, mediaId });
+        }
+        if (r.added_ids.length) await emit("library-changed");
+      }
+      say(
+        r.found === 0
+          ? "No audio or video files in that folder."
+          : `${r.added} added, ${r.updated} already known` +
+              (queue.listId != null && r.added ? `, ${r.added} put in ${queue.name}` : ""),
+      );
+    } catch (e) {
+      say(String(e));
+    }
+  }
+
+  // URL: queued for download into the library. Where it lands in a playlist
+  // is decided when it finishes, and that is not wired yet.
+  function openUrl() {
+    urlMode = true;
+    url = "";
+    setTimeout(() => urlEl?.focus(), 0);
+  }
+
+  async function queueUrl() {
+    const u = url.trim();
+    urlMode = false;
+    if (!u) return;
+    try {
+      await invoke("enqueue_url", { url: u, wantVideo: false });
+      say("Queued. It shows up in the library when the download finishes.");
+    } catch (e) {
+      say(String(e));
+    }
+  }
+
+  function urlKey(e: KeyboardEvent) {
+    if (e.key === "Enter") queueUrl();
+    else if (e.key === "Escape") urlMode = false;
   }
 
   // Double-click by pointerdown timing, not the DOM's dblclick: raising the
@@ -134,18 +203,37 @@
           <span class="d">{clock(t.duration_s)}</span>
         </div>
       {:else}
-        <div class="empty">Nothing here yet. Add tracks in the library.</div>
+        <div class="empty">
+          Nothing here yet. ADD a folder, paste a URL, or pick tracks in the library.
+        </div>
       {/each}
     </div>
     <div class="bar">
-      <div class="btns">
-        <button class="pb" onclick={() => invoke("show_library")} title="Open the library">ADD</button>
-        <button class="pb rem" onclick={remove} disabled={!canRemove} title="Remove from this playlist">REM</button>
-      </div>
-      <div class="stat">
-        <span>{queue.items.length} {queue.items.length === 1 ? "ITEM" : "ITEMS"}</span>
-        <span class="tot">{clock(total)}</span>
-      </div>
+      {#if urlMode}
+        <input
+          class="url"
+          bind:this={urlEl}
+          bind:value={url}
+          placeholder="Paste a link, Enter to queue, Esc to cancel"
+          onkeydown={urlKey}
+          onblur={() => (urlMode = false)}
+        />
+      {:else}
+        <div class="btns">
+          <button class="pb" onclick={addFolder} title="Add a folder of music">ADD</button>
+          <button class="pb" onclick={openUrl} title="Queue a link for download">URL</button>
+          <button class="pb rem" onclick={remove} disabled={!canRemove} title="Remove from this playlist">REM</button>
+          <button class="pb" onclick={() => invoke("show_library")} title="Open the library window">LIB</button>
+        </div>
+        {#if flash}
+          <div class="flash" title={flash}>{flash}</div>
+        {:else}
+          <div class="stat">
+            <span>{queue.items.length} {queue.items.length === 1 ? "ITEM" : "ITEMS"}</span>
+            <span class="tot">{clock(total)}</span>
+          </div>
+        {/if}
+      {/if}
     </div>
   </div>
 </Classic>
@@ -277,9 +365,39 @@
   .stat {
     display: flex;
     gap: 6px;
+    white-space: nowrap;
     color: color-mix(in srgb, var(--filament) 40%, transparent);
   }
   .tot {
     color: var(--arc);
+  }
+  .flash {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+    letter-spacing: 0.02em;
+    font-size: 7px;
+    color: var(--arc);
+  }
+  .url {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 13px;
+    padding: 0 4px;
+    font: inherit;
+    font-size: 8px;
+    letter-spacing: 0;
+    color: var(--filament);
+    background: var(--well);
+    border: 0;
+    box-shadow: inset 0 0 0 1px var(--arc);
+    outline: none;
+  }
+  .url::placeholder {
+    color: color-mix(in srgb, var(--filament) 40%, transparent);
   }
 </style>
