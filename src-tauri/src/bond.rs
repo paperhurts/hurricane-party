@@ -400,7 +400,14 @@ pub fn apply_splitter(
     } else {
         (rb.y, rb.bottom())
     };
-    debug_assert_eq!(a_hi, b_lo, "bond was not flush before the splitter drag");
+    // A bond whose windows are not flush is a corrupt model, not a splitter.
+    // This was a debug_assert, and it fired inside a Win32 callback where Rust
+    // cannot unwind, so the whole app aborted on a hand test (a persisted
+    // layout had EQ and the playlist overlapping by one step). Refuse the
+    // drag instead; `wm::seed_state` drops such bonds on load.
+    if a_hi != b_lo {
+        return SplitterOutcome::NotLive;
+    }
 
     // Clamp so no *resizable* side goes under its minimum. A fixed side imposes
     // no bound at all: it keeps its size and slides, so the seam can travel past
@@ -497,8 +504,14 @@ pub fn apply_splitter_in_graph(
         if dx == 0 && dy == 0 {
             continue;
         }
+        // Neither end of the seam rides along: the slid window has already
+        // moved, and the other end has already been placed by the splitter.
+        // With a cycle in the graph (main above both eq and the playlist,
+        // eq and playlist also bonded side by side) the far end is reachable
+        // through the third window, and dragging it along on top of its own
+        // resize is how two windows ended up overlapping by one step.
         let mut side = side_of(graph, bond, id);
-        side.retain(|s| *s != id);
+        side.retain(|s| *s != bond.a && *s != bond.b);
         translate_group(layout, &side, dx, dy);
     }
     out
@@ -1039,6 +1052,42 @@ mod tests {
         apply_splitter_in_graph(&mut l, &g, &ep, 2 * W - 60, &all, 50);
         assert_eq!(l[&m], m_before, "main must not move when eq merely resized");
         assert!(violations(&g, &l).is_empty());
+    }
+
+    /// A T with a cycle: main sits above eq and the playlist, bonded to both,
+    /// and eq and the playlist are bonded side by side. "Eq's side of the
+    /// seam" then reaches the playlist through main. Widening the playlist
+    /// must slide eq and main and leave the playlist where the splitter put
+    /// it. Before the fix the playlist was slid too, on top of its resize,
+    /// and ended up one step inside eq; the next frame's flush check then
+    /// aborted the app inside a Win32 callback (hand test, 2026-09-05).
+    #[test]
+    fn splitter_in_a_cycle_does_not_drag_the_far_end_along() {
+        let (m, e, pl) = (a(), b(), c());
+        let mut l = Layout::new();
+        l.insert(m, Rect::new(W / 2, 0, W, H)); // straddles both below
+        l.insert(e, Rect::new(0, H, W, H));
+        l.insert(pl, Rect::new(W, H, W, H));
+        let mut g = WindowGraph::new();
+        g.insert(Bond::new(m, e, Edge::Bottom, (W / 2, W)));
+        g.insert(Bond::new(m, pl, Edge::Bottom, (W, W / 2 + W)));
+        g.insert(Bond::new(e, pl, Edge::Right, (H, 2 * H)));
+        assert!(violations(&g, &l).is_empty(), "{:?}", violations(&g, &l));
+
+        let only_pl = |id: WindowId| id == pl;
+        let ep = *g.bond_between(e, pl).unwrap();
+        // Widen the playlist by 50: the seam moves left.
+        let out = apply_splitter_in_graph(&mut l, &g, &ep, W - 50, &only_pl, 50);
+        assert_eq!(out, SplitterOutcome::OneMoved);
+        assert!(violations(&g, &l).is_empty(), "{:?}", violations(&g, &l));
+        assert_eq!(
+            (l[&pl].x, l[&pl].w),
+            (W - 50, W + 50),
+            "playlist widened in place"
+        );
+        assert_eq!((l[&e].x, l[&e].w), (-50, W), "eq slid, fixed size");
+        assert_eq!(l[&m].x, W / 2 - 50, "main came along with eq");
+        assert_eq!(l[&e].right(), l[&pl].x, "still flush");
     }
 
     #[test]

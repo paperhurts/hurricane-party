@@ -184,14 +184,18 @@ body {
 .seam.left::after   { left: 0;   top: 0; bottom: 0; width: 1px; }
 .seam.right::after  { right: 0;  top: 0; bottom: 0; width: 1px; }
 
+/* One line per bond, not two. Both windows own half of the seam band, so
+ * only the window whose bottom or right edge it is draws the idle hairline;
+ * the other side's line appears on hover or while dragging, and the two
+ * together are the "+1 px". */
+.seam.top::after,
+.seam.left::after {
+  opacity: 0;
+}
 .seam:hover::after,
 .seam.dragging::after {
   opacity: 1;
 }
-.seam.top:hover::after,    .seam.top.dragging::after,
-.seam.bottom:hover::after, .seam.bottom.dragging::after { height: 2px; }
-.seam.left:hover::after,   .seam.left.dragging::after,
-.seam.right:hover::after,  .seam.right.dragging::after  { width: 2px; }
 
 /* The discharge: the one animation in the interface. A bond just broke; its
  * edge blooms to `peakThickness` (4 px) and is gone in ~120 ms, and that is
