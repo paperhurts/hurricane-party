@@ -9,6 +9,8 @@
   // integer coordinates, no CSS filter on this or any ancestor (D73), and the
   // loop idles when nothing is playing.
   import { scopeColorIndex } from "../lib/vis";
+  // Colour: SCOPE_FLOOR and up. The bars can start at the ramp's floor
+  // because they stack from it; a one-pixel line there is invisible.
 
   let {
     analyser,
@@ -46,7 +48,8 @@
 
     const mid = Math.floor(H / 2);
     // The centre line is there even in silence: it says "scope", not "off".
-    ctx.fillStyle = palette[0];
+    // A few steps up the ramp, because the floor of it is black on black.
+    ctx.fillStyle = palette[Math.min(palette.length - 1, 4)];
     ctx.fillRect(0, mid, W, 1);
 
     if (analyser && active) {

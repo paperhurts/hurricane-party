@@ -35,12 +35,18 @@ export function saveVisMode(storage: StorageLike, m: VisMode): void {
   }
 }
 
+/** The first ramp step a one-pixel line can be seen in. The bars can start
+ * at the floor because they stack; a lone line at the bottom of the ramp is
+ * black on black, which is how the scope first shipped invisible. */
+export const SCOPE_FLOOR = 6;
+
 /**
- * Ramp index for a scope sample: 0 at the centre line, the last step at full
- * swing, so a loud waveform runs green through yellow and red to magenta the
- * way the bars do. `v` is a byte from getByteTimeDomainData, 128 is silence.
+ * Ramp index for a scope sample: `floor` at the centre line, the last step
+ * at full swing, so a loud waveform runs green through yellow and red to
+ * magenta the way the bars do. `v` is a byte from getByteTimeDomainData,
+ * 128 is silence.
  */
-export function scopeColorIndex(v: number, steps: number): number {
+export function scopeColorIndex(v: number, steps: number, floor = SCOPE_FLOOR): number {
   const a = Math.abs(v - 128) / 128;
-  return Math.min(steps - 1, Math.floor(a * steps));
+  return Math.min(steps - 1, floor + Math.floor(a * (steps - floor)));
 }
