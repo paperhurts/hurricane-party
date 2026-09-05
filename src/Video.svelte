@@ -16,8 +16,50 @@
 
   let track = $state<MediaRow | null>(null);
   let error = $state<string | null>(null);
-  // eslint-disable-next-line no-unused-vars -- bound for future transport control
   let video = $state<HTMLVideoElement | undefined>();
+
+  /**
+   * Mirror into Rust as the video transport (D70), the same call Main makes
+   * for audio. Rust answers `status` from whichever kind last said it was
+   * playing, so a video on screen is what the channel describes.
+   */
+  function report() {
+    const v = video;
+    invoke("report_state", {
+      state: {
+        state: !track || !v ? "stopped" : v.paused ? "paused" : "playing",
+        kind: "video",
+        media_id: track?.id ?? null,
+        title: track?.title ?? null,
+        uploader: track?.uploader ?? null,
+        duration_s: v && Number.isFinite(v.duration) ? v.duration : (track?.duration_s ?? null),
+        pos_s: v?.currentTime ?? 0,
+        volume: v?.volume ?? 1,
+      },
+    }).catch(() => {});
+  }
+
+  /** A transport command Rust routed here because this window is the transport. */
+  function onCommand(cmd: string, arg: unknown) {
+    const v = video;
+    if (!v) return;
+    if (cmd === "play") v.play().catch(() => {});
+    else if (cmd === "pause") v.pause();
+    else if (cmd === "toggle") v.paused ? v.play().catch(() => {}) : v.pause();
+    else if (cmd === "stop") {
+      // Stop is pause and rewind; the window stays open on its first frame
+      // (D69: nothing closes a window the user opened).
+      v.pause();
+      v.currentTime = 0;
+      report();
+    } else if (cmd === "seek") {
+      v.currentTime = Number(arg) || 0;
+      report();
+    } else if (cmd === "volume") {
+      v.volume = Math.min(1, Math.max(0, Number(arg)));
+      report();
+    }
+  }
 
   // Show track `id`. Runs on mount for the ?id= the window was opened with,
   // and again for every switch after that (D68). `src` is reactive on `track`,
@@ -96,9 +138,19 @@
     // The window stays open on its frame; nothing resumes it.
     const pauseSub = listen("hp://pause", () => video?.pause());
 
+    // Transport over the control pipe (D70). Targeted at this window: Rust
+    // sends a command to whichever window is the transport, and a listener
+    // with no target would also hear the ones meant for Main.
+    const cmdSub = listen<{ cmd: string; arg: unknown }>(
+      "control-command",
+      (e) => onCommand(e.payload.cmd, e.payload.arg),
+      { target: { kind: "WebviewWindow", label: "video" } },
+    );
+
     return () => {
       sub.then((unlisten) => unlisten());
       pauseSub.then((unlisten) => unlisten()).catch(() => {});
+      cmdSub.then((unlisten) => unlisten()).catch(() => {});
     };
   });
 </script>
@@ -115,8 +167,18 @@
       src={convertFileSrc(track.path)}
       controls
       autoplay
-      onerror={() => (error = "Can't open this file. Moved or deleted?")}
-      onended={() => emitTo("library", "player:step", 1).catch(() => {})}
+      onplay={report}
+      onpause={report}
+      ontimeupdate={report}
+      onvolumechange={report}
+      onerror={() => {
+        error = "Can't open this file. Moved or deleted?";
+        report();
+      }}
+      onended={() => {
+        report();
+        emitTo("library", "player:step", 1).catch(() => {});
+      }}
     ></video>
     <footer>
       <span class="title">{track.title}</span>
