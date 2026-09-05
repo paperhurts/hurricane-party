@@ -235,6 +235,8 @@ pub struct WmState {
     /// 2x chrome (#47). Integer only: fractional chrome scaling is anti-scope.
     /// A bool rather than a factor so `Default` is 1x without a custom impl.
     pub double: bool,
+    /// Set for the duration of a corner-grip resize of the playlist.
+    pub resize: Option<ResizeState>,
 }
 
 /// A title-bar drag in flight.
@@ -1060,6 +1062,122 @@ pub fn splitter_end(app: &AppHandle) {
         let mut s = state.0.lock().unwrap();
         s.splitter = None;
     }
+    save_now(app);
+}
+
+// ---- corner grip --------------------------------------------------------------
+//
+// The classic playlist had a grip in its bottom-right corner, and without one a
+// playlist that is not bonded to anything cannot be resized at all: the only
+// other way to change its size is a seam it shares with a neighbour. The grip
+// resizes the free edges. An edge that carries a bond belongs to that seam and
+// keeps its place, so the grip never opens a gap in a group.
+
+/// A corner-grip resize in flight.
+#[derive(Clone, Debug)]
+pub struct ResizeState {
+    pub id: WindowId,
+    pub origin: Rect,
+    pub origin_cursor: (Px, Px),
+    /// The right edge is free (no bond), so the width may change.
+    pub w_free: bool,
+    /// The bottom edge is free, so the height may change.
+    pub h_free: bool,
+}
+
+/// One frame of a grip resize, as pure geometry.
+///
+/// D40 twice over: origin plus the total delta, never the current size plus a
+/// frame's worth; and the size comes fresh from the logical base and step on
+/// the D30 grid, rounded once to physical. The top-left corner stays put.
+pub fn resize_frame(
+    origin: Rect,
+    delta: (Px, Px),
+    w_free: bool,
+    h_free: bool,
+    scale: f64,
+    zoom: f64,
+) -> Rect {
+    let grid = |px: Px, base: f64, step: f64| {
+        let n = (((px as f64 / scale) - base * zoom) / (step * zoom))
+            .round()
+            .max(0.0) as i32;
+        bond::d40::stepped(base * zoom, step * zoom, n, scale)
+    };
+    let w = if w_free {
+        grid(origin.w + delta.0, CHROME_W, PLAYLIST_STEP_W)
+    } else {
+        origin.w
+    };
+    let h = if h_free {
+        grid(origin.h + delta.1, CHROME_H, PLAYLIST_STEP_H)
+    } else {
+        origin.h
+    };
+    Rect::new(origin.x, origin.y, w, h)
+}
+
+/// Begin a grip resize. False when the window cannot resize, is shaded, or has
+/// both edges bonded, which is the caller's signal to do nothing.
+pub fn resize_start(app: &AppHandle, id: WindowId) -> bool {
+    let state = app.state::<Wm>();
+    let mut s = state.0.lock().unwrap();
+    if !is_resizable(id) || s.shaded.contains(&id) {
+        return false;
+    }
+    let Some(origin) = s.layout.get(&id).copied() else {
+        return false;
+    };
+    let w_free = seam_on(&s, id, Edge::Right).is_none();
+    let h_free = seam_on(&s, id, Edge::Bottom).is_none();
+    if !w_free && !h_free {
+        return false;
+    }
+    // D54: the cursor read is a Win32 call, but not one aimed at another
+    // thread's window, so it is safe under the lock.
+    let origin_cursor = platform::platform().cursor_pos();
+    s.resize = Some(ResizeState {
+        id,
+        origin,
+        origin_cursor,
+        w_free,
+        h_free,
+    });
+    true
+}
+
+/// One grip frame.
+pub fn resize_move(app: &AppHandle) {
+    let cursor = platform::platform().cursor_pos();
+    let (layout, id) = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        let Some(r) = s.resize.clone() else {
+            return;
+        };
+        // D51: rendered geometry resolves from the window's own monitor.
+        let scale = scale_at(&s.monitors, r.origin.x, r.origin.y, s.scale);
+        let delta = (cursor.0 - r.origin_cursor.0, cursor.1 - r.origin_cursor.1);
+        let rect = resize_frame(r.origin, delta, r.w_free, r.h_free, scale, s.zoom());
+        s.layout.insert(r.id, rect);
+        (s.layout.clone(), r.id)
+    };
+    push_to_os(app, &layout, &[id]);
+}
+
+/// Release the grip: the bonds on the edges that stayed put may now span a
+/// different length of seam, and the size is worth keeping.
+pub fn resize_end(app: &AppHandle) {
+    {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        if s.resize.take().is_none() {
+            return;
+        }
+        let layout = s.layout.clone();
+        resync_spans(&mut s.graph, &layout);
+    }
+    emit_state(app);
     save_now(app);
 }
 
@@ -1915,6 +2033,55 @@ pub fn load(conn: &Connection) -> Option<Restored> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- corner grip ----
+
+    #[test]
+    fn grip_snaps_to_the_playlist_grid_and_keeps_the_corner() {
+        let o = Rect::new(100, 200, 275, 116);
+        // A little past one step each way rounds to one step.
+        let r = resize_frame(o, (30, 40), true, true, 1.0, 1.0);
+        assert_eq!(r, Rect::new(100, 200, 300, 145));
+        // Just under half a step rounds back to none.
+        let r = resize_frame(o, (12, 14), true, true, 1.0, 1.0);
+        assert_eq!(r, o);
+        // Three steps.
+        let r = resize_frame(o, (76, 88), true, true, 1.0, 1.0);
+        assert_eq!(r, Rect::new(100, 200, 350, 203));
+    }
+
+    #[test]
+    fn grip_never_goes_under_the_base_size() {
+        let o = Rect::new(0, 0, 325, 174);
+        let r = resize_frame(o, (-500, -500), true, true, 1.0, 1.0);
+        assert_eq!((r.w, r.h), (275, 116));
+    }
+
+    #[test]
+    fn grip_leaves_a_bonded_edge_alone() {
+        let o = Rect::new(0, 0, 275, 116);
+        assert_eq!(
+            resize_frame(o, (60, 60), false, true, 1.0, 1.0),
+            Rect::new(0, 0, 275, 174)
+        );
+        assert_eq!(
+            resize_frame(o, (60, 60), true, false, 1.0, 1.0),
+            Rect::new(0, 0, 325, 116)
+        );
+    }
+
+    #[test]
+    fn grip_rounds_once_from_the_logical_base_at_150_percent_and_at_2x() {
+        // 150%: one step wide is 300 logical, 450 physical, not 413 + 37.
+        let o = Rect::new(0, 0, 413, 174);
+        let r = resize_frame(o, (40, 0), true, true, 1.5, 1.0);
+        assert_eq!(r.w, bond::d40::stepped(CHROME_W, PLAYLIST_STEP_W, 1, 1.5));
+        assert_eq!(r.w, 450);
+        // 2x: the grid is 550 + 50n.
+        let o = Rect::new(0, 0, 550, 232);
+        let r = resize_frame(o, (60, -10), true, true, 1.0, 2.0);
+        assert_eq!((r.w, r.h), (600, 232));
+    }
 
     // ---- chrome zoom (#47) ----
 
