@@ -49,6 +49,11 @@
 
   let total = $derived(queue.items.reduce((a, t) => a + (t.duration_s ?? 0), 0));
   let title = $derived(queue.name ? `PLAYLIST — ${queue.name}` : "PLAYLIST");
+  // The shade's one line: the playing row, or the list's name when nothing is.
+  let now = $derived(queue.items.find((t) => t.id === nowId) ?? null);
+  let nowLine = $derived(
+    now ? (now.uploader ? `${now.uploader} — ${now.title}` : now.title) : queue.name || "Library",
+  );
   let selectedItem = $derived(queue.items.find((t) => t.id === selected) ?? null);
   // Only a real playlist has rows to remove; the library is not a list.
   let canRemove = $derived(queue.listId != null && selectedItem?.position != null);
@@ -240,7 +245,16 @@
   }
 </script>
 
-<Classic label="playlist" {title} resizable>
+<!-- The playlist's shade: what is playing, and how much list there is (D79). -->
+{#snippet shade()}
+  <div class="shade">
+    <span class="stag">PL</span>
+    <span class="stext" class:now={!!now}>{nowLine}</span>
+    <span class="stag">{queue.items.length} · {clock(total)}</span>
+  </div>
+{/snippet}
+
+<Classic label="playlist" {title} resizable {shade}>
   <div class="pl">
     <div
       class="rows"

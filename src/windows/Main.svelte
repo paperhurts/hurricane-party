@@ -62,6 +62,10 @@
   );
   // Scroll only when there is something to scroll and something happening.
   let marquee = $derived(playing && title.length > 34);
+  // The shade's line is narrower: three buttons and the clock share it.
+  let shadeMarquee = $derived(playing && title.length > 28);
+  // A control in the title strip: neither a drag nor a double-tap (Classic).
+  const eat = (e: Event) => e.stopPropagation();
 
   // Built on first play rather than at mount: an AudioContext made before any
   // gesture starts suspended, and resume() is the same call either way.
@@ -291,7 +295,36 @@
   }
 </script>
 
-<Classic label="main" title="MAIN">
+<!-- The windowshade: the always-on-top mini-player, "the state you'll live
+     in" (theme.md, D79). Transport, the title, the clock, in fourteen pixels. -->
+{#snippet shade()}
+  <div class="shade">
+    <button class="sb" onpointerdown={eat} onclick={() => step(-1)} title="Previous">◀◀</button>
+    <button
+      class="sb"
+      class:lit={playing}
+      onpointerdown={eat}
+      onclick={() => (audio.paused ? play() : pause())}
+      title={playing ? "Pause" : "Play"}>{playing ? "‖" : "▶"}</button
+    >
+    <button class="sb" onpointerdown={eat} onclick={() => step(1)} title="Next">▶▶</button>
+    <span class="sep"></span>
+    <span class="stext" class:err={!!error}>
+      {#if error}
+        {error}
+      {:else if shadeMarquee}
+        <span class="scroll" style:animation-duration="{title.length * 0.35}s">
+          {title}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{title}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
+        </span>
+      {:else}
+        {title}
+      {/if}
+    </span>
+    <span class="stime">{elapsed}</span>
+  </div>
+{/snippet}
+
+<Classic label="main" title="MAIN" {shade}>
   <div class="player">
     <div class="top">
       <div class="clock">

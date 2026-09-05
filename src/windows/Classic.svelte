@@ -14,6 +14,7 @@
     body = "",
     resizable = false,
     children,
+    shade,
   }: {
     label: string;
     title: string;
@@ -21,6 +22,12 @@
     /** Shows the corner grip. Only the playlist resizes (D30). */
     resizable?: boolean;
     children?: Snippet;
+    /**
+     * What the 275 x 14 strip shows while shaded (D60, D79). Rendered inside
+     * the title bar, so the strip stays the one move handle and the
+     * double-click that expands it; a window without one shows its name.
+     */
+    shade?: Snippet;
   } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
@@ -294,7 +301,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="chrome" data-active={active} data-shaded={shaded} onpointerdown={raise}>
   <div class="titlebar" onpointerdown={titleDown}>
-    <span class="ttl">{title}</span>
+    {#if shaded && shade}
+      {@render shade()}
+    {:else}
+      <span class="ttl">{title}</span>
+    {/if}
     <!-- Stops the pointerdown so a click here is neither a drag nor a
          double-tap on the title bar. -->
     <button
