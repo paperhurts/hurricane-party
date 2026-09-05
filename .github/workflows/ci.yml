@@ -27,7 +27,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Stub the sidecars so tauri-build can run
         run: |
@@ -41,7 +41,7 @@ jobs:
           cargo clippy --version
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -73,7 +73,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --manifest-path crates/hp-control/Cargo.toml
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: pnpm
