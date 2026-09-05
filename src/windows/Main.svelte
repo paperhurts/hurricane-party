@@ -14,6 +14,9 @@
   import { loadEq, type EqState } from "../lib/eq";
   import { viscolor } from "../lib/theme";
   import { loadVisMode, nextVisMode, saveVisMode, type VisMode } from "../lib/vis";
+  // The cooler capybara's home (#62): the display, while a file cannot be
+  // opened. The analyser has nothing to draw then, and he has a drink.
+  import cooler from "../assets/capybara-cooler.png";
 
   type Track = {
     id: number;
@@ -408,7 +411,9 @@
         }}
         title={visMode === "bars" ? "Spectrum. Click for scope" : visMode === "scope" ? "Scope. Click for off" : "Off. Click for spectrum"}
       >
-        {#if visMode === "bars"}
+        {#if error}
+          <img class="oops" src={cooler} alt="" draggable="false">
+        {:else if visMode === "bars"}
           <SpectrumBars {analyser} {palette} active={playing} />
         {:else if visMode === "scope"}
           <Oscilloscope {analyser} {palette} active={playing} />
@@ -544,6 +549,19 @@
     min-width: 0;
     cursor: pointer;
     /* The visualizer and everything above it: no filter, ever (D73). */
+  }
+  /* A file that cannot be opened: the cooler capybara where the bars were,
+   * the well behind him, the message in the strip below. */
+  .visbox .oops {
+    display: block;
+    height: 100%;
+    width: 100%;
+    object-fit: contain;
+    object-position: center bottom;
+    padding: 2px 0 0;
+    box-sizing: border-box;
+    background: var(--well);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ember) 30%, transparent);
   }
   /* Off: the well, and nothing drawing into it. */
   .visbox.off {
