@@ -8,6 +8,7 @@
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
   import { AudioGraph } from "../lib/audio";
+  import { loadEq, type EqState } from "../lib/eq";
   import { viscolor } from "../lib/theme";
 
   type Track = {
@@ -23,6 +24,9 @@
   let graph: AudioGraph | null = null;
   let analyser = $state<AnalyserNode | null>(null);
   const palette = viscolor("eyewall");
+  // The EQ window owns the sliders and the saved copy; this is the applied
+  // copy. Same saved state at mount, then live updates over eq:set.
+  let eq: EqState = loadEq(localStorage);
 
   let track = $state<Track | null>(null);
   // `playing` follows the element; `stopped` is the transport's own state,
@@ -49,6 +53,7 @@
   function ensureGraph() {
     if (!graph) {
       graph = new AudioGraph(audio);
+      graph.applyEq(eq);
       analyser = graph.analyser;
     }
     graph.resume().catch((e) => (error = `Audio engine: ${String(e)}`));
@@ -170,6 +175,10 @@
       // The library opened a video (D69), or clicked the row that is playing.
       listen("player:pause", () => pause()),
       listen("player:toggle", () => (audio.paused ? play() : pause())),
+      listen<EqState>("eq:set", (e) => {
+        eq = e.payload;
+        graph?.applyEq(eq);
+      }),
       listen<{ cmd: string; arg: unknown }>("control-command", (e) => {
         const { cmd, arg } = e.payload;
         if (cmd === "play") play();
@@ -187,6 +196,35 @@
     ];
     return () => {
       for (const s of subs) s.then((off) => off());
+    };
+  });
+
+  // The clip check (D21): while sound plays, look at each block that reached
+  // the analyser and tell the EQ window when one went past the ceiling.
+  // Rate-limited so a sustained clip is a few events a second, not sixty.
+  let clipBuf: Float32Array<ArrayBuffer> | null = null;
+  let clipRaf = 0;
+  let lastClipAt = 0;
+
+  function clipLoop() {
+    clipRaf = 0;
+    if (!graph || !playing) return;
+    clipBuf ??= new Float32Array(graph.analyser.fftSize);
+    if (graph.clipping(clipBuf)) {
+      const now = performance.now();
+      if (now - lastClipAt > 120) {
+        lastClipAt = now;
+        emitTo("eq", "eq:clip", true).catch(() => {});
+      }
+    }
+    clipRaf = requestAnimationFrame(clipLoop);
+  }
+
+  $effect(() => {
+    if (playing && !clipRaf) clipRaf = requestAnimationFrame(clipLoop);
+    return () => {
+      if (clipRaf) cancelAnimationFrame(clipRaf);
+      clipRaf = 0;
     };
   });
 
