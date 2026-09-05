@@ -27,7 +27,7 @@ Pass 1 is the one that matters. If it comes out right the rest follows.
 
 A desktop media player for saving YouTube playlists, videos, and MP3s to disk so you can watch and listen when the internet is down during a hurricane. Windows-first, built with Tauri and Svelte.
 
-It's styled after classic Winamp: small fixed-size skinnable windows that magnetize to each other. This is a personal tool for one engineer in Gainesville, Florida, not a product for a market.
+It's styled after classic Winamp: small fixed-size skinnable windows that magnetize to each other. This is a personal tool for one engineer, not a product for a market.
 
 ## The thesis, which should drive every decision
 

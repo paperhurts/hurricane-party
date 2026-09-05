@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="design/icon/capybara-boombox-1254.png" width="340" alt="A capybara in a yellow rain jacket holding a boombox over his head">
+</p>
+
 # hurricane-party
 
 Offline-first media library and player. Save YouTube playlists, videos, and MP3s to disk
@@ -6,7 +10,7 @@ skinnable windows that magnetize to each other.
 
 Windows-first. Tauri v2 + Svelte 5 + Vite. SQLite. yt-dlp, ffmpeg, and deno as sidecars.
 
-**Personal tool, not a product.** Built for one engineer in Gainesville, Florida.
+**Personal tool, not a product.** Built for one engineer riding out hurricane season.
 
 ---
 
@@ -68,10 +72,10 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check              # format che
 
 ## Workflow
 
-GitHub issues are the work list. Every change is an issue, briefed before it is built,
-merged through a pull request that the owner reviews and hand-tests. CI runs the gates
-above on every PR. The full loop, and the Claude Code skills that drive it, are in
-`CLAUDE.md`.
+Say what you want. The session branches off `main`, builds it, and opens a pull request;
+the owner hand-tests anything that shows on a screen and merges on GitHub. Issues are the
+list of work that isn't happening yet. CI runs the gates above on every PR. Details, and
+the two remaining Claude Code commands, are in `CLAUDE.md`.
 
 ## Layout
 
