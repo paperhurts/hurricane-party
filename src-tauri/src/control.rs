@@ -141,15 +141,30 @@ pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>) -> Result<(), String>
         (_, a) => a,
     };
     let steps = matches!(cmd, "next" | "prev");
-    let to_video = !steps
-        && app.state::<ControlState>().0.lock().unwrap().active_video
-        && app.get_webview_window("video").is_some();
+    // Read what the lock knows, then drop it: the raise below is a Win32
+    // call on another thread's window, never made under the state lock (D54).
+    let (to_video, video_paused) = {
+        let st = app.state::<ControlState>();
+        let m = st.0.lock().unwrap();
+        let to_video = !steps && m.active_video && app.get_webview_window("video").is_some();
+        (to_video, m.video.state != "playing")
+    };
     app.emit_to(
         if to_video { "video" } else { "main" },
         "control-command",
         serde_json::json!({ "cmd": cmd, "arg": arg }),
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    // A resume brings the video forward, as a switch does (`open_video`): the
+    // user pressed play to watch it, and it may have gone behind something
+    // while it sat paused. Only when the command would start it, so a toggle
+    // that pauses does not pull a window forward on its way to stopping.
+    if to_video && (cmd == "play" || (cmd == "toggle" && video_paused)) {
+        if let Some(w) = app.get_webview_window("video") {
+            let _ = w.set_focus();
+        }
+    }
+    Ok(())
 }
 
 /// The one state the channel reports, for Main's display (D81).
