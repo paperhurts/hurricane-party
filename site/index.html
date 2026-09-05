@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<!--
+  The download page (#66). A template: tools/build-site.ps1 fills the {{…}}
+  fields from design/tokens.json, package.json and the latest release, and
+  writes site/dist/index.html for GitHub Pages.
+
+  Rules this page keeps, from the issue: dark only, the Eyewall palette from
+  tokens.json and no other colour, no tracking, no fonts or scripts from
+  anyone else's server, and it describes the shipped version.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hurricane-party — an offline media player for Windows</title>
+<meta name="description" content="Save YouTube videos and MP3s to disk. Play them when the internet is down. A small Winamp-style player for Windows, no installer.">
+<link rel="icon" href="img/favicon.png">
+<style>
+  :root {
+{{tokens}}
+    --mono: Iosevka, "Iosevka Web", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --ui: "Iosevka Aile", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --dim: color-mix(in srgb, var(--filament) 60%, transparent);
+    --dimmer: color-mix(in srgb, var(--filament) 40%, transparent);
+    --body: color-mix(in srgb, var(--filament) 80%, transparent);
+    --rule: color-mix(in srgb, var(--arc) 14%, transparent);
+    --arc-glow: color-mix(in srgb, var(--arc) 45%, transparent);
+  }
+  html, body { margin: 0; background: var(--void); color: var(--filament); }
+  body { font: 400 16px/1.6 var(--ui); display: flex; flex-direction: column; align-items: center; text-wrap: pretty; }
+  a { color: var(--arc); text-decoration: none; }
+  a:hover { color: var(--strike); }
+  ::selection { background: color-mix(in srgb, var(--strike) 35%, transparent); color: var(--filament); }
+  h1, h2, p { margin: 0; }
+  img { max-width: 100%; display: block; }
+  .wrap { width: 100%; max-width: 1080px; box-sizing: border-box; padding: 56px 32px; }
+  .rule { border-top: 1px solid var(--rule); }
+  .eyebrow { font: 400 12px/1 var(--mono); letter-spacing: 2px; color: var(--arc); }
+  .eyebrow.strike { color: var(--strike); }
+  .eyebrow.ember { color: var(--ember); }
+  h2 { font: 600 30px/1.2 var(--ui); letter-spacing: -0.5px; }
+  .lead { color: var(--body); }
+  .small { font: 400 13px/1.7 var(--mono); letter-spacing: 0.3px; color: var(--dim); }
+  strong { color: var(--filament); font-weight: 600; }
+
+  nav { width: 100%; max-width: 1080px; box-sizing: border-box; padding: 22px 32px; display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 400 13px/1 var(--mono); letter-spacing: 1.6px; color: var(--arc); }
+  .brand i { width: 6px; height: 6px; background: var(--arc); box-shadow: 0 0 8px var(--arc); display: inline-block; }
+  .links { display: flex; gap: 26px; font: 400 12px/1 var(--mono); letter-spacing: 1.4px; }
+  .links a { color: var(--dim); }
+  .links a:hover { color: var(--arc); }
+
+  header.hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr); gap: 40px; align-items: center; padding-top: 48px; padding-bottom: 72px; }
+  .hero-text { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+  .hero h1 { font: 700 clamp(44px, 6vw, 76px)/0.95 var(--mono); letter-spacing: -2px; text-shadow: 0 0 18px color-mix(in srgb, var(--arc) 35%, transparent), 0 0 60px color-mix(in srgb, var(--arc) 15%, transparent); }
+  .tagline { font-size: 20px; line-height: 1.45; color: var(--body); max-width: 520px; }
+  .cta { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+  .button { display: inline-flex; align-items: center; gap: 14px; padding: 18px 28px; background: var(--arc); color: var(--well); font: 700 18px/1 var(--mono); letter-spacing: 0.5px; box-shadow: 0 0 0 1px var(--arc), 0 0 24px var(--arc-glow), 0 0 70px color-mix(in srgb, var(--arc) 18%, transparent); }
+  .button:hover { background: var(--filament); color: var(--well); box-shadow: 0 0 0 1px var(--filament), 0 0 30px color-mix(in srgb, var(--filament) 50%, transparent); }
+  .button.ghost { background: transparent; color: var(--arc); font-size: 15px; padding: 14px 22px; box-shadow: inset 0 0 0 1px var(--arc), 0 0 16px color-mix(in srgb, var(--arc) 25%, transparent); }
+  .button.ghost:hover { background: var(--arc); color: var(--well); }
+  .meta { font: 400 12px/1.7 var(--mono); letter-spacing: 0.6px; color: var(--dim); }
+  .meta b { font-weight: 400; color: color-mix(in srgb, var(--filament) 85%, transparent); }
+  .hero img { width: 100%; max-width: 440px; justify-self: center; filter: drop-shadow(0 0 40px color-mix(in srgb, var(--arc) 18%, transparent)); }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; }
+  .step { display: flex; flex-direction: column; gap: 14px; }
+  .shot { aspect-ratio: 4 / 3; background: var(--well); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 18%, transparent); overflow: hidden; display: grid; place-items: center; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+  .num { display: flex; gap: 12px; align-items: baseline; }
+  .num span { font: 700 22px/1 var(--mono); color: var(--strike); text-shadow: 0 0 8px color-mix(in srgb, var(--strike) 50%, transparent); }
+  .num p { color: var(--body); }
+
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 420px); gap: 40px; align-items: start; }
+  .stack { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .card { background: var(--well); padding: 24px 26px; display: flex; flex-direction: column; gap: 12px; }
+  .card.arc { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 25%, transparent); }
+  .card.strike { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--strike) 30%, transparent); }
+  .card.ember { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ember) 40%, transparent), 0 0 24px color-mix(in srgb, var(--ember) 12%, transparent); gap: 18px; padding: 26px 28px; }
+  .card .label { font: 400 11px/1 var(--mono); letter-spacing: 1.6px; }
+  .card .label.arc { color: var(--arc); }
+  .card .label.strike { color: var(--strike); }
+  .card .label.ember { color: var(--ember); }
+  .card .lines { color: color-mix(in srgb, var(--filament) 85%, transparent); display: flex; flex-direction: column; gap: 8px; }
+  .smart-title { font-size: 19px; font-weight: 600; }
+  .smart-body { font-size: 14px; color: var(--dim); line-height: 1.55; }
+  .smart-steps { display: flex; flex-direction: column; gap: 10px; }
+  .smart-steps div { display: flex; align-items: center; gap: 12px; }
+  .smart-steps b { font: 700 12px/1 var(--mono); color: var(--ember); width: 18px; }
+  .smart-steps u { font-size: 14px; text-decoration-color: var(--dimmer); }
+  .smart-steps .run { font-size: 14px; color: var(--well); background: var(--ember); padding: 8px 16px; font-weight: 600; box-shadow: 0 0 14px color-mix(in srgb, var(--ember) 40%, transparent); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+
+  .windows { display: grid; grid-template-columns: minmax(0, auto) minmax(240px, 1fr); gap: 40px; align-items: start; }
+  .windows .shots { overflow-x: auto; max-width: 100%; }
+  .windows .shots img { width: 550px; max-width: none; image-rendering: pixelated; }
+  .blurbs { display: flex; flex-direction: column; gap: 22px; padding-top: 6px; }
+  .blurb { display: flex; flex-direction: column; gap: 4px; }
+  .blurb .label { font: 400 11px/1 var(--mono); letter-spacing: 1.6px; color: var(--arc); }
+  .blurb p { color: var(--body); }
+  .shade { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); gap: 32px 40px; align-items: center; padding: 28px; background: var(--well); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--strike) 30%, transparent); }
+  .shade .strip { overflow-x: auto; }
+  .shade .strip img { width: 550px; max-width: none; image-rendering: pixelated; margin-bottom: 18px; }
+  .shade .label { font: 400 11px/1 var(--mono); letter-spacing: 1.6px; color: var(--strike); }
+  .shade p { color: color-mix(in srgb, var(--filament) 85%, transparent); margin-top: 6px; }
+  .shade img.capy { width: 100%; max-width: 300px; justify-self: center; }
+
+  .tinker { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr); gap: 32px; align-items: center; padding-top: 24px; }
+  .tinker img { width: 100%; max-width: 520px; justify-self: center; }
+
+  .faq { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 40px; align-items: start; }
+  .faq .side { display: flex; flex-direction: column; gap: 20px; }
+  .faq .side img { width: 100%; max-width: 260px; }
+  .qa { display: flex; flex-direction: column; }
+  .qa div { display: flex; flex-direction: column; gap: 6px; padding: 20px 0; border-top: 1px solid color-mix(in srgb, var(--arc) 12%, transparent); }
+  .qa dt { font-weight: 600; font-size: 17px; }
+  .qa dd { margin: 0; color: color-mix(in srgb, var(--filament) 72%, transparent); }
+
+  footer.wrap { padding-bottom: 64px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: end; }
+  footer .col { display: flex; flex-direction: column; gap: 22px; }
+  footer .links { flex-wrap: wrap; gap: 24px; font: 400 12px/1.6 var(--mono); letter-spacing: 1.2px; }
+  footer .links a { color: var(--arc); }
+  footer .fine { font: 400 12px/1.6 var(--mono); letter-spacing: 0.6px; color: var(--dimmer); }
+  footer img { width: 220px; }
+
+  @media (max-width: 760px) {
+    header.hero, .two, .windows, .shade, .tinker, .faq, footer.wrap { grid-template-columns: 1fr; }
+    .hero img, .tinker img, footer img { justify-self: start; }
+    .wrap { padding: 40px 20px; }
+    nav { padding: 18px 20px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .button { transition: background 120ms linear, box-shadow 120ms linear; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand"><i></i><span>HURRICANE-PARTY</span></div>
+  <div class="links">
+    <a href="#first-minute">FIRST MINUTE</a>
+    <a href="#windows">THE WINDOWS</a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/paperhurts/hurricane-party">GITHUB</a>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <div class="hero-text">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="eyebrow strike">OFFLINE MEDIA PLAYER · WINDOWS</div>
+      <h1>hurricane-<br>party</h1>
+      <p class="tagline">Save YouTube videos and MP3s to disk. Play them when the internet is down.</p>
+    </div>
+    <div class="cta">
+      <a class="button" href="https://github.com/paperhurts/hurricane-party/releases/latest/download/hurricane-party-windows.zip"><span style="font-size:20px">↓</span><span>Download for Windows</span></a>
+      <div class="meta"><b>hurricane-party-windows.zip</b> · {{version}} · {{size}}<br>No installer: unzip anywhere, run the exe. Windows 11.</div>
+    </div>
+  </div>
+  <img src="img/capybara-boombox.png" alt="A capybara in a yellow rain jacket holding a boombox over his head">
+</header>
+
+<section id="first-minute" class="wrap rule" style="display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow">THE FIRST MINUTE</div>
+    <h2>Three things, then it plays.</h2>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="shot"><img src="shots/step1.png" alt="The library window with a URL pasted and a download finishing in the queue"></div>
+      <div class="num"><span>1</span><p><strong>Paste a URL.</strong> One video at a time for now. It queues, downloads into your library folder, and survives a restart.</p></div>
+    </div>
+    <div class="step">
+      <div class="shot"><img src="shots/step2.png" alt="The library window listing tracks and videos"></div>
+      <div class="num"><span>2</span><p><strong>Add a folder of MP3s.</strong> Music you already own goes in the same library.</p></div>
+    </div>
+    <div class="step">
+      <div class="shot"><img src="shots/step3.png" alt="The Main, EQ and Playlist windows bonded together with a track playing"></div>
+      <div class="num"><span>3</span><p><strong>Press play.</strong> Three small windows that snap together. If you remember Winamp, you already know how this works.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap rule two">
+  <div class="stack">
+    <div class="eyebrow ember">WHAT WINDOWS WILL SAY</div>
+    <h2>The first time you run it, Windows will stop you.</h2>
+    <p class="lead">A blue panel titled <em>Windows protected your PC</em> appears. That is SmartScreen, and it says the same thing about every program it has not seen before.</p>
+    <p class="lead">Click <strong>More info</strong>, then <strong>Run anyway</strong>. It asks once.</p>
+    <p class="lead" style="color:var(--dim);font-size:15px">Why: hurricane-party is a one-person project and the exe is not code-signed. A signing certificate costs a few hundred dollars a year and would only make this panel go away. The source is public if you want to check what you are running.</p>
+  </div>
+  <div class="card ember">
+    <div class="label ember">WHAT YOU WILL SEE</div>
+    <div class="smart-title">Windows protected your PC</div>
+    <div class="smart-body">Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</div>
+    <div class="smart-steps">
+      <div><b>1</b><u>More info</u></div>
+      <div><b>2</b><span class="run">Run anyway</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap rule" style="display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow">WHAT IT IS, AND ISN'T</div>
+    <h2>Offline first. Nothing on the network at playback, ever.</h2>
+  </div>
+  <div class="cards">
+    <div class="card arc">
+      <div class="label arc">IT IS</div>
+      <div class="lines">
+        <div>A downloader and a player in one small app.</div>
+        <div>Your files, in a folder you chose, as ordinary MP3 and MP4.</div>
+        <div>Built to be used in the dark with the power out. The screen is the only light in the room, so the app is dark only.</div>
+      </div>
+    </div>
+    <div class="card strike">
+      <div class="label strike">IT ISN'T</div>
+      <div class="lines">
+        <div>No accounts. No cloud. No sync. No streaming.</div>
+        <div>No telemetry, no update pings. When you press play it cannot reach the network even if it wanted to.</div>
+        <div>Not a product. One engineer's tool for riding out hurricane season, shared as-is.</div>
+      </div>
+    </div>
+  </div>
+  <p class="small" style="max-width:720px">The zip is {{size}} for a 10 MB app because yt-dlp, ffmpeg and a JavaScript runtime ride along inside it. They do the downloading and the MP3 conversion; hurricane-party is what you look at.</p>
+</section>
+
+<section id="windows" class="wrap rule" style="display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow">THE WINDOWS</div>
+    <h2>Three small windows that snap together. Drag one, they all come.</h2>
+  </div>
+  <div class="windows">
+    <div class="shots"><img src="shots/windows.png" alt="Main, EQ and Playlist bonded in a stack, the analyser lit, at 2x"></div>
+    <div class="blurbs">
+      <div class="blurb"><div class="label">MAIN</div><p>Transport, time, seek, volume. The analyser runs on a weather radar ramp: green through yellow to red, peaking magenta. Click it for an oscilloscope.</p></div>
+      <div class="blurb"><div class="label">EQUALIZER</div><p>Ten bands, a preamp, presets, and a trim that keeps a boosted mix from clipping. A lamp lights when it does.</p></div>
+      <div class="blurb"><div class="label">PLAYLIST</div><p>Resizes by the corner grip. The lit seam between windows is a bond: drag it to resize both neighbours, double-click to break it.</p></div>
+    </div>
+  </div>
+  <div class="shade">
+    <div>
+      <div class="strip"><img src="shots/windowshade.png" alt="The Main window collapsed to a fourteen-pixel bar: transport, the track title, the clock"></div>
+      <div class="label">WINDOWSHADE</div>
+      <p>Double-click Main's title bar and it collapses to a fourteen-pixel bar that stays on top. Title, transport, time. This is the one you live in while working in another app.</p>
+    </div>
+    <img class="capy" src="img/capybara-desk.png" alt="The capybara at a desk in headphones, the windowshade bar floating above his terminal">
+  </div>
+</section>
+
+<section class="wrap tinker">
+  <img src="img/capybara-truck.png" alt="The capybara in the bed of a red pickup, boombox on his shoulder, hurricane warning flag flying">
+  <div class="stack">
+    <div class="eyebrow">FOR TINKERERS</div>
+    <h2>A control pipe and a viz stream.</h2>
+    <p class="lead">The player listens on a named pipe. Anything on the machine can ask what is playing, skip, seek, or read the analyser as a stream of frames, which is enough to drive an LED rig from the bass. The protocol is unstable until v1.0. <a href="https://github.com/paperhurts/hurricane-party/blob/main/docs/control-api.md">docs/control-api.md</a> has the handshake and the message table, and the repo's <code>tools</code> folder has two PowerShell clients to start from.</p>
+  </div>
+</section>
+
+<section id="faq" class="wrap rule faq">
+  <div class="side">
+    <div class="eyebrow">FAQ</div>
+    <h2>Questions a stranger asks.</h2>
+    <img src="img/hurricane-party-flag.png" alt="The capybara with his boombox in front of a red hurricane warning flag">
+  </div>
+  <dl class="qa">
+    <div><dt>Where did my files go?</dt><dd>Into the library folder, whose path is shown at the bottom of the library window. They are plain MP3 and MP4 files; any other player can open them.</dd></div>
+    <div><dt>Does it need the internet?</dt><dd>Only to download. Playback never touches the network, by design and by enforcement. Unplug and it keeps going.</dd></div>
+    <div><dt>Why is it Windows only?</dt><dd>It was built for one Windows machine in hurricane country. Nothing in it is Windows-specific on purpose, but nothing has been tested anywhere else either.</dd></div>
+    <div><dt>Can I use my old Winamp skins?</dt><dd>Not yet. Classic .wsz skins import at v0.5.</dd></div>
+    <div><dt>Is my library shared anywhere?</dt><dd>No. There is no account and no server. The list of what you have lives in a database file on your disk.</dd></div>
+    <div><dt>The download is broken. Who do I tell?</dt><dd><a href="https://github.com/paperhurts/hurricane-party/issues/new">Open an issue on GitHub.</a> If the link on this page is dead, the <a href="https://github.com/paperhurts/hurricane-party/releases">release list</a> is the fallback.</dd></div>
+  </dl>
+</section>
+
+<footer class="wrap rule">
+  <div class="col">
+    <a class="button ghost" href="https://github.com/paperhurts/hurricane-party/releases/latest/download/hurricane-party-windows.zip"><span>↓</span><span>Download for Windows</span></a>
+    <div class="links">
+      <a href="https://github.com/paperhurts/hurricane-party">GITHUB</a>
+      <a href="https://github.com/paperhurts/hurricane-party/releases">ALL RELEASES</a>
+      <a href="https://github.com/paperhurts/hurricane-party/issues/new">BROKEN DOWNLOAD? OPEN AN ISSUE</a>
+    </div>
+    <div class="fine">No tracking on this page. No fonts or scripts from anyone else's server. Hurricane warning. The music is already downloaded.</div>
+  </div>
+  <img src="img/capybara-lounging.png" alt="The capybara lying on a hurricane warning flag in sunglasses, boombox beside him">
+</footer>
+
+</body>
+</html>
