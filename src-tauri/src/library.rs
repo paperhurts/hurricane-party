@@ -122,22 +122,32 @@ pub fn prune(conn: &mut Connection, root_id: i64) -> Result<usize, DbError> {
 ///
 /// The path arrives from the webview, so the check is not a formality: a
 /// track title is untrusted text, and the webview already gets no shell.
+/// Both sides are canonicalized first, because `Path::starts_with` compares
+/// components as written and `root\..\elsewhere\x` begins with `root`;
+/// canonicalizing resolves the `..` and any junction on the way, so what is
+/// compared is where the file really is. A root that is not mounted cannot
+/// be canonicalized and simply does not vouch for anything.
 pub fn delete_file(conn: &Connection, path: &str) -> Result<(), DbError> {
     let roots: Vec<String> = {
         let mut st = conn.prepare("SELECT path FROM library_roots")?;
         let rows = st.query_map([], |r| r.get::<_, String>(0))?;
         rows.filter_map(|r| r.ok()).collect()
     };
-    let p = Path::new(path);
-    if !roots.iter().any(|r| p.starts_with(r)) {
+    let real = std::fs::canonicalize(path)
+        .map_err(|e| DbError::Io(format!("{path} is not there: {e}")))?;
+    let inside = roots
+        .iter()
+        .filter_map(|r| std::fs::canonicalize(r).ok())
+        .any(|r| real.starts_with(&r));
+    if !inside {
         return Err(DbError::Io(format!(
             "{path} is not inside a library folder, so this app will not delete it"
         )));
     }
-    if !p.is_file() {
-        return Err(DbError::Io(format!("{path} is not there")));
+    if !real.is_file() {
+        return Err(DbError::Io(format!("{path} is not a file")));
     }
-    std::fs::remove_file(p).map_err(|e| DbError::Io(format!("couldn't delete {path}: {e}")))
+    std::fs::remove_file(&real).map_err(|e| DbError::Io(format!("couldn't delete {path}: {e}")))
 }
 
 #[cfg(test)]
@@ -272,6 +282,23 @@ mod tests {
             elsewhere.is_file(),
             "a path outside every root must survive"
         );
+
+        // Spelled as if inside the root: `<root>\..\<outside>\mine.mp3` begins
+        // with the root component-wise, and a check on the string as written
+        // would let it through. Where the file really is decides.
+        let dressed = inside
+            .join("..")
+            .join(outside.file_name().unwrap())
+            .join("mine.mp3");
+        assert!(delete_file(&conn, &dressed.to_string_lossy()).is_err());
+        assert!(
+            elsewhere.is_file(),
+            "a traversal out of the root must survive"
+        );
+
+        // A folder is not a file, even inside the root.
+        assert!(delete_file(&conn, &inside.to_string_lossy()).is_err());
+        assert!(inside.is_dir());
 
         let ours = inside.join("keep.mp3");
         delete_file(&conn, &ours.to_string_lossy()).unwrap();
