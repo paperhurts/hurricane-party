@@ -43,10 +43,15 @@ const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mkv", "webm", "mov", "avi"];
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanReport {
     pub root: String,
+    pub root_id: i64,
     pub found: usize,
     pub added: usize,
     pub updated: usize,
     pub skipped: usize,
+    /// Rows under this root whose files are no longer on disk, counted after
+    /// the scan. The scan itself never drops them; the user is offered to
+    /// (#78, `library::prune`).
+    pub missing: usize,
     /// Every media id this scan touched, inserted or already known, in walk
     /// order, so a caller can put the folder's tracks somewhere: the playlist
     /// window's ADD appends them to the list showing. Known tracks count too,
@@ -137,6 +142,9 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
     let root = root
         .canonicalize()
         .map_err(|e| DbError::Io(format!("can't read {}: {e}", root.display())))?;
+    // Plain, not verbatim (`\\?\C:\...`): the download pipeline registers the
+    // same folder plain, and a root is one row per string (#78).
+    let root = PathBuf::from(db::plain_path(&root.to_string_lossy()));
 
     let root_id = {
         let state = app.state::<Db>();
@@ -151,10 +159,12 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
 
     let mut report = ScanReport {
         root: root.to_string_lossy().to_string(),
+        root_id,
         found: 0,
         added: 0,
         updated: 0,
         skipped: 0,
+        missing: 0,
         ids: Vec::new(),
     };
 
@@ -230,6 +240,11 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
             }
         }
     }
+
+    // Counted after the upserts, so a file the walk just found is never in
+    // the count and a row it did not find is. A root that is not there
+    // reports nothing (D28): unplugged is not missing.
+    report.missing = crate::library::missing(&tx, root_id)?.len();
 
     tx.commit()?;
     drop(conn);

@@ -55,6 +55,9 @@
   let dur = $state(0);
   let vol = $state(1);
   let error = $state<string | null>(null);
+  // The error is the file not opening (#43), as opposed to the engine or the
+  // element refusing. Only then is "remove it" the right offer (#78).
+  let missing = $state(false);
 
   // Main is the one transport (D81). When the video window is the thing
   // playing, Rust mirrors its state here as `player:current` (the same state
@@ -121,6 +124,7 @@
 
   async function load(t: Track) {
     error = null;
+    missing = false;
     // Re-clicking the track already loaded is "play", not "start over" (the
     // same rule the video window keeps, D68).
     if (track?.id === t.id && !stopped) {
@@ -149,7 +153,11 @@
     try {
       await audio.play();
     } catch (e) {
-      error = `Couldn't play: ${(e as Error).message}`;
+      // The element's own verdict (onError: "moved or deleted?") is the
+      // specific one, and it is racing this rejection for the same strip. When
+      // the element holds an error, it has said or is about to say what went
+      // wrong; this generic line is for the refusals that never reach it.
+      if (!audio.error) error = `Couldn't play: ${(e as Error).message}`;
     }
     push();
   }
@@ -224,14 +232,45 @@
   // A file that has gone missing used to play as silence with no message (#43).
   // The element does say so, in the error event; it just has to be listened to.
   function onError() {
+    // Letting go of a track (unload) empties the element, and an empty
+    // element has nothing to fail on.
+    if (!track) return;
     const code = audio.error?.code;
-    error =
-      code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
-        ? "Can't open this file. Moved or deleted?"
-        : `Playback failed (${audio.error?.message || code || "unknown"})`;
+    missing = code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+    error = missing
+      ? "Can't open this file. Moved or deleted?"
+      : `Playback failed (${audio.error?.message || code || "unknown"})`;
     playing = false;
     push();
     tell();
+    // The library is where the click came from and where the row is; it
+    // shows the same words with the way out beside them (#78).
+    if (missing) {
+      emitTo("library", "player:missing", { id: track.id, title: track.title }).catch(() => {});
+    }
+  }
+
+  /** Let go of the track: the library removed it (#78), here or from its own window. */
+  function unload() {
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    track = null;
+    error = null;
+    missing = false;
+    stopped = true;
+    playing = false;
+    pos = 0;
+    dur = 0;
+    push();
+    tell();
+  }
+
+  function removeMissing() {
+    if (!track) return;
+    invoke("remove_from_library", { id: track.id })
+      .then(unload)
+      .catch((e) => (error = String(e)));
   }
 
   $effect(() => {
@@ -250,6 +289,10 @@
         target: { kind: "WebviewWindow", label: "main" },
       }),
       listen<Track>("player:load", (e) => load(e.payload)),
+      // The library removed a row (#78); if it is the one loaded here, let go.
+      listen<number>("player:removed", (e) => {
+        if (track?.id === e.payload) unload();
+      }, { target: { kind: "WebviewWindow", label: "main" } }),
       // The library opened a video (D69), or clicked the row that is playing.
       listen("player:pause", () => pause()),
       listen("player:toggle", () => (audio.paused ? play() : pause())),
@@ -421,9 +464,14 @@
       </div>
     </div>
 
-    <div class="strip" class:err={!!error}>
+    <div class="strip" class:err={!!error} title={error ?? undefined}>
       {#if error}
         <span class="static">{error}</span>
+        {#if missing && track}
+          <!-- The way out, on the message itself (#78). The file is gone;
+               there is nothing to offer to delete. -->
+          <button class="act" onpointerdown={eat} onclick={removeMissing} title="Remove from the library">remove</button>
+        {/if}
       {:else if marquee}
         <span class="scroll" style:animation-duration="{title.length * 0.35}s">
           {title}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{title}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
@@ -590,6 +638,27 @@
   .static {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* The action on the message: a word in the strip's own type, boxed so it
+     reads as a control, ember like the state it belongs to. The message
+     yields to it rather than the other way round. */
+  .act {
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding: 0 4px;
+    font: inherit;
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    line-height: 13px;
+    color: var(--ember);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--ember) 55%, transparent);
+    cursor: pointer;
+  }
+  .act:hover {
+    background: color-mix(in srgb, var(--ember) 18%, transparent);
+    border-color: var(--ember);
   }
   .scroll {
     display: inline-block;

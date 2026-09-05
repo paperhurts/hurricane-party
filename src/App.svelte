@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
@@ -37,6 +37,10 @@
 
   type Playlist = { id: number; name: string; count: number };
 
+  // What Rust says after a row is removed: the file is still at `path`, and
+  // the row no longer exists to say so (#78).
+  type Removed = { id: number; title: string; path: string };
+
   let url = $state("");
   let error = $state<string | null>(null);
   let jobs = $state<Job[]>([]);
@@ -66,6 +70,19 @@
   let rowsEl: HTMLUListElement;
   // Which row's "+" menu is open, by track id. One at a time.
   let addMenuFor = $state<number | null>(null);
+  // The offers that ride on a notice (#78). Deleting the file is a second,
+  // separate step after a removal, never part of it; pruning follows a rescan
+  // that found rows whose files are gone. Each is cleared with the notice.
+  let pendingDelete = $state<Removed[]>([]);
+  let pendingPrune = $state<{ rootId: number; count: number } | null>(null);
+  // The checked rows (D84). Removal from the library is a selection and a
+  // button, never a one-click glyph: a × beside every row was one slip away
+  // from a row vanishing, and the playlist's × sets the expectation that a ×
+  // is small.
+  let selected = $state<number[]>([]);
+  // A track Main could not open. It says so in its own strip; this is the
+  // same message where the row is, with the way out beside it.
+  let missing = $state<{ id: number; title: string } | null>(null);
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let shown = $derived(selectedList == null ? tracks : listItems);
@@ -86,6 +103,13 @@
   }
   async function refreshLibrary() {
     tracks = await invoke<MediaRow[]>("list_tracks");
+    // The row the message was about may have been removed from another
+    // window (Main's strip, the video's); a message about a row that is not
+    // there any more is noise.
+    if (missing && !tracks.some((t) => t.id === missing!.id)) missing = null;
+    // A check on a row that has gone (removed elsewhere, pruned) is dropped;
+    // the others keep their check across the refresh.
+    if (selected.length) selected = selected.filter((id) => tracks.some((t) => t.id === id));
     playlists = await invoke<Playlist[]>("list_playlists");
     roots = await invoke<Root[]>("list_roots");
     if (selectedList != null) await openList(selectedList);
@@ -110,6 +134,11 @@
       listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
         nowId = e.payload.id;
         isPlaying = e.payload.playing;
+      }),
+      // ...and when it could not open the file (#43), so the row's window can
+      // offer to remove the row (#78).
+      listen<{ id: number; title: string }>("player:missing", (e) => {
+        missing = e.payload;
       }),
       // The classic playlist window mirrors the list showing here. It asks
       // once on mount, in case the first broadcast went out before it had a
@@ -257,6 +286,7 @@
     // only inside the video branch left a video failure sitting over a later
     // audio play that worked.
     error = null;
+    missing = null;
     // The cursor moves for either kind, so next and prev walk on from a video
     // as well as from a track.
     current = t;
@@ -287,11 +317,102 @@
     if (next) play(next);
   }
 
+  /** A notice and the offers riding on it go together. */
+  function clearNotice() {
+    notice = null;
+    error = null;
+    pendingDelete = [];
+    pendingPrune = null;
+  }
+
+  /**
+   * Take the row out of the library (#78). The file stays; the notice says
+   * where, and offers the separate step. Playlist memberships go with the
+   * row in Rust. Every window holding the track lets go of it.
+   */
+  async function removeTracks(ids: number[]) {
+    if (!ids.length) return;
+    clearNotice();
+    try {
+      const gone = await invoke<Removed[]>("remove_tracks", { ids });
+      for (const id of ids) {
+        emitTo("main", "player:removed", id).catch(() => {});
+        emitTo("video", "hp://removed", id).catch(() => {});
+        if (current?.id === id) current = null;
+        if (missing?.id === id) missing = null;
+      }
+      selected = selected.filter((id) => !ids.includes(id));
+      pendingDelete = gone;
+      notice =
+        gone.length === 1
+          ? `Removed “${gone[0].title}” from the library. Its file is still at ${gone[0].path}`
+          : `Removed ${gone.length} tracks from the library. Their files are still on disk.`;
+      await refreshLibrary();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /** The single-row form, for the "moved or deleted" message's button. */
+  const removeTrack = (id: number) => removeTracks([id]);
+
+  function toggleSelected(id: number) {
+    selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
+  }
+
+  /**
+   * The one destructive action in the app, and it reads like one: a warning
+   * dialog that prints the path, with Keep as the safe answer. Rust refuses
+   * anything outside a library root regardless.
+   */
+  async function deleteFiles() {
+    const rs = pendingDelete;
+    if (!rs.length) return;
+    // Every path, in the dialog, up to a screenful; past that the count
+    // carries it, and the notice above still lists what was removed.
+    const shown = rs.slice(0, 12).map((r) => r.path);
+    const more = rs.length - shown.length;
+    const list = shown.join("\n") + (more > 0 ? `\n…and ${more} more` : "");
+    const head = rs.length === 1 ? "Delete this file from disk?" : `Delete these ${rs.length} files from disk?`;
+    const yes = await ask(`${head}\n\n${list}\n\nThere is no undo.`, {
+      title: rs.length === 1 ? "Delete the file" : `Delete ${rs.length} files`,
+      kind: "warning",
+      okLabel: "Delete",
+      cancelLabel: "Keep",
+    });
+    if (!yes) return;
+    const failed: string[] = [];
+    for (const r of rs) {
+      try {
+        await invoke("delete_media_file", { path: r.path });
+      } catch (e) {
+        failed.push(String(e));
+      }
+    }
+    pendingDelete = [];
+    const done = rs.length - failed.length;
+    notice = rs.length === 1 && !failed.length ? `Deleted ${rs[0].path}` : `Deleted ${done} of ${rs.length} files.`;
+    if (failed.length) error = failed.join("\n");
+  }
+
+  /** After a rescan found rows whose files are gone: drop them. */
+  async function pruneMissing() {
+    const p = pendingPrune;
+    if (!p) return;
+    try {
+      const n = await invoke<number>("prune_root", { rootId: p.rootId });
+      pendingPrune = null;
+      notice = `Removed ${n} row${n === 1 ? "" : "s"} whose file${n === 1 ? " is" : "s are"} gone. The playlists closed up around ${n === 1 ? "it" : "them"}.`;
+      await refreshLibrary();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function addFolder() {
     // Clear first. Leaving the previous run's notice on screen while a new one
     // is in flight is how a no-op reads as a success.
-    notice = null;
-    error = null;
+    clearNotice();
 
     const picked = await openDialog({ directory: true, multiple: false, title: "Add a music folder" });
 
@@ -311,13 +432,19 @@
 
     scanning = true;
     try {
-      const r = await invoke<{ found: number; added: number; updated: number }>(
+      const r = await invoke<{ root_id: number; found: number; added: number; updated: number; missing: number }>(
         "add_local_folder", { path: picked }
       );
       notice =
         r.found === 0
-          ? `${picked} — no audio files found in that folder or below it.`
+          ? `${picked} — no audio or video files found in that folder or below it.`
           : `Scanned ${r.found} file${r.found === 1 ? "" : "s"} — ${r.added} added, ${r.updated} updated.`;
+      // A known root, rescanned: rows whose files have left are counted, not
+      // dropped. Dropping them is the offer beside the notice (#78).
+      if (r.missing > 0) {
+        notice += ` ${r.missing} row${r.missing === 1 ? "" : "s"} in the library point${r.missing === 1 ? "s" : ""} at a file that is gone.`;
+        pendingPrune = { rootId: r.root_id, count: r.missing };
+      }
       await refreshLibrary();
     } catch (e) {
       error = String(e);
@@ -335,7 +462,10 @@
 <svelte:window
   onpointerdown={() => (addMenuFor = null)}
   onkeydown={(e) => {
-    if (e.key === "Escape") addMenuFor = null;
+    if (e.key === "Escape") {
+      addMenuFor = null;
+      selected = [];
+    }
   }}
 />
 
@@ -360,9 +490,31 @@
     </button>
   </form>
 
-  {#if notice}<p class="notice">{notice}</p>{/if}
+  {#if notice}
+    <p class="notice">
+      <span>{notice}</span>
+      {#if pendingDelete.length}
+        <button class="mini danger" onclick={deleteFiles} title="Asks first, and shows every path">
+          {pendingDelete.length === 1 ? "Delete the file…" : `Delete the ${pendingDelete.length} files…`}
+        </button>
+      {/if}
+      {#if pendingPrune}
+        <button class="mini" onclick={pruneMissing}>Remove {pendingPrune.count === 1 ? "it" : `those ${pendingPrune.count}`} from the library</button>
+      {/if}
+    </p>
+  {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
+
+  <!-- Main could not open the file (#43). The same words it shows, here where
+       the row is, with the way out (#78). The file is already gone, so there
+       is nothing to offer to delete. -->
+  {#if missing}
+    <p class="error">
+      <span>Can't open “{missing.title}”. Moved or deleted?</span>
+      <button class="mini" onclick={() => removeTrack(missing!.id)}>Remove from library</button>
+    </p>
+  {/if}
 
   {#if jobs.length}
     <section class="queue">
@@ -419,6 +571,17 @@
       {/if}
     </nav>
 
+    <div class="listcol">
+      <!-- The selection bar (D84): only while something is checked, so the
+           list is quiet until it is asked for something. Removal here keeps
+           the files; the delete offer follows on the notice, as before. -->
+      {#if selectedList == null && selected.length}
+        <div class="selbar">
+          <span class="count">{selected.length} selected</span>
+          <button class="mini" onclick={() => removeTracks(selected)} title="The files stay on disk">Remove from library</button>
+          <button class="mini ghost" onclick={() => (selected = [])} title="Esc">Clear</button>
+        </div>
+      {/if}
     <ul class="tracks" bind:this={rowsEl}>
       {#each shown as t, i (t.id + ":" + (t.position ?? "l"))}
         <li
@@ -431,6 +594,15 @@
           {#if selectedList != null}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <span class="grip" onpointerdown={(e) => gripDown(e, i)} title="Drag to reorder">⋮⋮</span>
+          {:else}
+            <!-- Check to select; the bar above does the removing (D84). -->
+            <input
+              class="tick"
+              type="checkbox"
+              checked={selected.includes(t.id)}
+              onchange={() => toggleSelected(t.id)}
+              title="Select"
+            />
           {/if}
           {#if t.kind === "video"}
             <button class="play" onclick={() => play(t)}>▣</button>
@@ -484,6 +656,7 @@
         {/if}
       {/each}
     </ul>
+    </div>
   </section>
 
   <footer><span>Library</span><code>{libraryPath}</code></footer>
@@ -501,7 +674,12 @@
   .ver { font-size: 12px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
   .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
          color: color-mix(in srgb, var(--filament) 55%, transparent); white-space: nowrap; }
-  .notice { margin: 0; font-size: 12px; color: var(--arc); }
+  .notice { margin: 0; font-size: 12px; color: var(--arc); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .notice span, .error span { overflow-wrap: anywhere; }
+  .error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* The one destructive control reads as one: ember, not arc. */
+  .mini.danger { color: var(--ember); border-color: color-mix(in srgb, var(--ember) 50%, transparent); }
+  .mini.danger:hover { background: color-mix(in srgb, var(--ember) 14%, transparent); border-color: var(--ember); }
   .roots { display: flex; flex-direction: column; gap: 2px; margin-top: 10px;
            padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--arc) 12%, transparent); }
   .rootlabel { font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
@@ -569,6 +747,14 @@
   .tracks li.hangten .big { font-size: 17px; color: var(--filament); }
   .play { padding: 1px 7px; font-size: 10px; }
   .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--arc) 30%, transparent); }
+  .mini.ghost { border-color: transparent; color: color-mix(in srgb, var(--filament) 55%, transparent); }
+  /* The right column: the selection bar, when there is one, sits on the list. */
+  .listcol { display: flex; flex-direction: column; min-width: 0; }
+  .selbar { display: flex; align-items: center; gap: 10px; padding: 5px 9px; font-size: 12px;
+            color: var(--arc); background: color-mix(in srgb, var(--arc) 10%, var(--well));
+            border: 1px solid color-mix(in srgb, var(--arc) 45%, transparent); border-bottom: none; }
+  .selbar .count { flex: 1 1 auto; }
+  .tick { flex: 0 0 auto; width: 13px; height: 13px; margin: 0; accent-color: var(--arc); cursor: pointer; }
   /* Drag-to-reorder: the grip, the lifted row, and the insertion line. */
   .grip { flex: 0 0 auto; padding: 0 2px; font-size: 12px; letter-spacing: -3px; line-height: 1;
           color: color-mix(in srgb, var(--filament) 30%, transparent); cursor: grab; user-select: none; touch-action: none; }

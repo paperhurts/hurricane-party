@@ -218,6 +218,25 @@ migration rather than a chain. The columns that exist purely to avoid a painful 
 later — `profile_id` (O9), `library_roots` + `relpath` (D28), `media.title` (D34) — are
 the whole reason to get this right before v0.2 writes the first migration file.
 
+The one data fix since is `db::normalize_roots`, run on every open (D83): a root the
+scanner stored in Windows' verbatim form (`\\?\C:\…`) is folded into the plain-path twin
+the download pipeline stored, and the twin keeps the rows. Roots are stored plain from
+then on.
+
+### Leaving the library
+
+Three verbs, in `library.rs`, kept apart on purpose (D83, #78):
+
+- **Remove** a row: the row goes, its playlist memberships go (the cascade, then each list
+  closes its gap), the file stays. No undo; adding the folder or the URL again brings it
+  back.
+- **Delete the file**: a separate call, made after the row is gone, from the notice that
+  has already printed the path, behind a warning dialog. Rust refuses any path outside a
+  library root. The only destructive action in the app.
+- **Prune** a root: a rescan of a known root counts the rows whose files are gone and the
+  user is offered to drop them. Nothing drops them unasked, and a root that is not
+  mounted reports nothing (D28: unplugged is not missing).
+
 ### Equalizer spec
 
 The EQ window is in the design brief and the window inventory, but the audio side needs pinning down before build.

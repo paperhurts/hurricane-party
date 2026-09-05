@@ -2,6 +2,7 @@ pub mod bond;
 mod control;
 mod db;
 mod jobs;
+mod library;
 mod localimport;
 mod pipeline;
 pub mod platform;
@@ -94,6 +95,58 @@ fn list_roots(app: AppHandle) -> Result<Vec<localimport::Root>, db::DbError> {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
     localimport::list_roots(&conn)
+}
+
+// ---- taking things out (#78) -------------------------------------------------
+
+/// The row goes; the file stays. Returns where the file still is, so the
+/// library window can offer the separate step.
+#[tauri::command]
+fn remove_from_library(app: AppHandle, id: i64) -> Result<library::Removed, db::DbError> {
+    let removed = {
+        let state = app.state::<Db>();
+        let mut conn = state.0.lock().unwrap();
+        library::remove(&mut conn, id)?
+    };
+    let _ = app.emit("library-changed", ());
+    Ok(removed)
+}
+
+/// A checked selection goes together (D84), in one transaction.
+#[tauri::command]
+fn remove_tracks(app: AppHandle, ids: Vec<i64>) -> Result<Vec<library::Removed>, db::DbError> {
+    let removed = {
+        let state = app.state::<Db>();
+        let mut conn = state.0.lock().unwrap();
+        library::remove_many(&mut conn, &ids)?
+    };
+    if !removed.is_empty() {
+        let _ = app.emit("library-changed", ());
+    }
+    Ok(removed)
+}
+
+/// Drop the rows under one root whose files are gone. Returns how many.
+#[tauri::command]
+fn prune_root(app: AppHandle, root_id: i64) -> Result<usize, db::DbError> {
+    let n = {
+        let state = app.state::<Db>();
+        let mut conn = state.0.lock().unwrap();
+        library::prune(&mut conn, root_id)?
+    };
+    if n > 0 {
+        let _ = app.emit("library-changed", ());
+    }
+    Ok(n)
+}
+
+/// The one destructive action. Inside a library root only; the frontend has
+/// already shown the path and asked.
+#[tauri::command]
+fn delete_media_file(app: AppHandle, path: String) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    library::delete_file(&conn, &path)
 }
 
 // ---- control API (D9/D15) ---------------------------------------------------
@@ -541,7 +594,7 @@ pub fn run() {
                 .app_data_dir()
                 .expect("no app data dir")
                 .join("hurricane-party.db");
-            let conn = db::open(&path).expect("couldn't open the database");
+            let mut conn = db::open(&path).expect("couldn't open the database");
 
             // D10: anything that was mid-flight when the process died goes back
             // in the queue. This re-enters the runner; it does NOT start over,
@@ -550,6 +603,15 @@ pub fn run() {
                 Ok(0) => {}
                 Ok(n) => eprintln!("recovered {n} interrupted job(s) from the last run"),
                 Err(e) => eprintln!("recovery failed: {e}"),
+            }
+
+            // #78: a root the scanner stored in Windows' verbatim form is the
+            // same folder the download pipeline stored plain, and it doubled
+            // every row. Fold them before anything reads the library.
+            match db::normalize_roots(&mut conn) {
+                Ok(0) => {}
+                Ok(n) => eprintln!("folded {n} verbatim library root(s) into their plain form"),
+                Err(e) => eprintln!("root normalization failed: {e}"),
             }
 
             app.manage(Db(std::sync::Mutex::new(conn)));
@@ -603,6 +665,10 @@ pub fn run() {
             set_concurrency,
             add_local_folder,
             list_roots,
+            remove_from_library,
+            remove_tracks,
+            prune_root,
+            delete_media_file,
             open_video,
             video_ready,
             report_state,

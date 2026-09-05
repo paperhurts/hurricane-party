@@ -145,6 +145,14 @@ fn rewrite(tx: &rusqlite::Transaction, playlist_id: i64, order: &[i64]) -> Resul
     Ok(())
 }
 
+/// Close the gaps left by a route other than `remove`: a track taken out of
+/// the library takes its memberships with it (the schema cascades), and the
+/// positions it held stay empty until this runs (#78).
+pub(crate) fn compact(tx: &rusqlite::Transaction, playlist_id: i64) -> Result<(), DbError> {
+    let order = positions(tx, playlist_id)?;
+    rewrite(tx, playlist_id, &order)
+}
+
 fn positions(conn: &Connection, playlist_id: i64) -> Result<Vec<i64>, DbError> {
     let mut st = conn
         .prepare("SELECT position FROM playlist_items WHERE playlist_id = ?1 ORDER BY position")?;

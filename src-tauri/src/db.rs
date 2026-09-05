@@ -7,7 +7,7 @@
 //! **WAL is the point** (D10). The job queue has to survive a hard power loss,
 //! which is the whole reason this app exists rather than a folder of files.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -217,6 +217,96 @@ pub fn ensure_root(conn: &Connection, label: &str, path: &str) -> Result<i64, Db
     )?)
 }
 
+/// A path as Windows shows it, not as `canonicalize` returns it.
+///
+/// On Windows `canonicalize` yields the verbatim form: `\\?\C:\x`, or
+/// `\\?\UNC\server\share` for a network path. The scanner stored that, the
+/// download pipeline stored the plain form, and `library_roots.path` is UNIQUE
+/// on the string, so the same folder added by both routes became two roots
+/// and every file in it two rows (#78). Everything that stores a root goes
+/// through here first. Plain string work, no platform gate: the prefix never
+/// occurs elsewhere, so stripping it is a no-op there.
+pub fn plain_path(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+/// Fold roots stored in verbatim form into their plain twins. Run on open.
+///
+/// A verbatim root with no twin is simply renamed. One with a twin gives it
+/// every row the twin does not already have; the rest are the same file
+/// twice, so the copy's playlist entries and history move to the survivor and
+/// the copy goes. Returns how many roots were touched.
+pub fn normalize_roots(conn: &mut Connection) -> Result<usize, DbError> {
+    let roots: Vec<(i64, String)> = {
+        let mut st = conn.prepare("SELECT id, path FROM library_roots ORDER BY id")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    let tx = conn.transaction()?;
+    let mut touched = 0;
+    for (id, path) in &roots {
+        let plain = plain_path(path);
+        if plain == *path {
+            continue;
+        }
+        let twin: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM library_roots WHERE path = ?1 AND id != ?2",
+                rusqlite::params![plain, id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match twin {
+            None => {
+                tx.execute(
+                    "UPDATE library_roots SET path = ?1 WHERE id = ?2",
+                    rusqlite::params![plain, id],
+                )?;
+            }
+            Some(twin) => {
+                // Rows the twin does not have move over as they are; OR IGNORE
+                // leaves behind exactly the ones it does.
+                tx.execute(
+                    "UPDATE OR IGNORE media SET root_id = ?1 WHERE root_id = ?2",
+                    rusqlite::params![twin, id],
+                )?;
+                let dups: Vec<(i64, i64)> = {
+                    let mut st = tx.prepare(
+                        "SELECT d.id, s.id FROM media d
+                         JOIN media s ON s.root_id = ?1 AND s.relpath = d.relpath
+                         WHERE d.root_id = ?2",
+                    )?;
+                    let rows = st.query_map(rusqlite::params![twin, id], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                    })?;
+                    rows.filter_map(|r| r.ok()).collect()
+                };
+                for (dup, keep) in dups {
+                    tx.execute(
+                        "UPDATE playlist_items SET media_id = ?1 WHERE media_id = ?2",
+                        rusqlite::params![keep, dup],
+                    )?;
+                    tx.execute(
+                        "UPDATE play_history SET media_id = ?1 WHERE media_id = ?2",
+                        rusqlite::params![keep, dup],
+                    )?;
+                    tx.execute("DELETE FROM media WHERE id = ?1", [dup])?;
+                }
+                tx.execute("DELETE FROM library_roots WHERE id = ?1", [id])?;
+            }
+        }
+        touched += 1;
+    }
+    tx.commit()?;
+    Ok(touched)
+}
+
 pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
         r.get::<_, String>(0)
@@ -246,4 +336,110 @@ pub fn concurrency(conn: &Connection) -> usize {
 #[cfg(test)]
 pub fn schema_for_tests() -> &'static str {
     SCHEMA
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_path_strips_the_verbatim_prefix_and_nothing_else() {
+        assert_eq!(plain_path(r"\\?\C:\dev\mp3"), r"C:\dev\mp3");
+        assert_eq!(plain_path(r"\\?\UNC\nas\music"), r"\\nas\music");
+        assert_eq!(plain_path(r"C:\dev\mp3"), r"C:\dev\mp3");
+        assert_eq!(plain_path("/home/x/music"), "/home/x/music");
+    }
+
+    fn fresh() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn
+    }
+
+    fn root(conn: &Connection, id: i64, path: &str) {
+        conn.execute(
+            "INSERT INTO library_roots (id, label, path) VALUES (?1, 'r', ?2)",
+            rusqlite::params![id, path],
+        )
+        .unwrap();
+    }
+
+    fn track(conn: &Connection, root_id: i64, rel: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO media (root_id, relpath, kind, title, added_at)
+             VALUES (?1, ?2, 'audio', ?2, 0)",
+            rusqlite::params![root_id, rel],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn a_verbatim_root_with_no_twin_is_renamed_in_place() {
+        let mut conn = fresh();
+        root(&conn, 1, r"\\?\C:\dev\mp3");
+        let id = track(&conn, 1, "a.mp3");
+        assert_eq!(normalize_roots(&mut conn).unwrap(), 1);
+        let path: String = conn
+            .query_row("SELECT path FROM library_roots WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(path, r"C:\dev\mp3");
+        let still: i64 = conn
+            .query_row("SELECT root_id FROM media WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(still, 1);
+        // Idempotent: a second run finds nothing to do.
+        assert_eq!(normalize_roots(&mut conn).unwrap(), 0);
+    }
+
+    /// The shape the live database was in (#78): the download root stored
+    /// plain by the pipeline, the same folder stored verbatim by "Add folder",
+    /// and a playlist pointing at the verbatim copy of a file both had.
+    #[test]
+    fn a_verbatim_twin_is_folded_into_the_plain_root() {
+        let mut conn = fresh();
+        root(&conn, 2, r"\\?\C:\lib");
+        root(&conn, 3, r"C:\lib");
+        let dup = track(&conn, 2, "both.mp3");
+        let only_verbatim = track(&conn, 2, "only-in-2.mp3");
+        let keep = track(&conn, 3, "both.mp3");
+        let pid = crate::playlist::create(&conn, "p").unwrap();
+        crate::playlist::add(&conn, pid, dup).unwrap();
+        crate::playlist::add(&conn, pid, only_verbatim).unwrap();
+
+        assert_eq!(normalize_roots(&mut conn).unwrap(), 1);
+
+        let roots: i64 = conn
+            .query_row("SELECT COUNT(*) FROM library_roots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(roots, 1);
+        let mut rows: Vec<(i64, i64, String)> = conn
+            .prepare("SELECT id, root_id, relpath FROM media ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        rows.sort();
+        assert_eq!(
+            rows,
+            [
+                (only_verbatim, 3, "only-in-2.mp3".to_string()),
+                (keep, 3, "both.mp3".to_string()),
+            ]
+        );
+        // The playlist kept both members; the duplicate now names the survivor.
+        let members: Vec<i64> = conn
+            .prepare("SELECT media_id FROM playlist_items WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([pid], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(members, [keep, only_verbatim]);
+    }
 }
