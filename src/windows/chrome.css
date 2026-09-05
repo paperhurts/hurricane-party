@@ -64,6 +64,40 @@ body {
   cursor: move;
 }
 
+.titlebar .ttl {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one button in the title bar: 1x / 2x chrome (#47). */
+.tbtn {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 6px;
+  letter-spacing: 0;
+  line-height: 1;
+  color: var(--arc);
+  background: color-mix(in srgb, var(--void) 70%, var(--well));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 24%, transparent);
+  cursor: pointer;
+}
+.tbtn:hover {
+  background: color-mix(in srgb, var(--void) 70%, var(--well));
+  box-shadow: inset 0 0 0 1px var(--arc);
+}
+.chrome[data-active="false"] .tbtn {
+  color: color-mix(in srgb, var(--filament) 45%, transparent);
+}
+
 /* Focus is a group property (v0.4-brief): when any bonded window has focus,
  * every member renders active. Getting this wrong looks broken immediately, so
  * the inactive state is defined up front even though nothing sets it yet. */
