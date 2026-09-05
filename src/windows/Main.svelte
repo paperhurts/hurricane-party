@@ -8,7 +8,9 @@
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
   import Oscilloscope from "./Oscilloscope.svelte";
+  import { untrack } from "svelte";
   import { AudioGraph } from "../lib/audio";
+  import { sourceFromAnalyser, VizCapture, type Demand } from "../lib/vizstream";
   import { loadEq, type EqState } from "../lib/eq";
   import { viscolor } from "../lib/theme";
   import { loadVisMode, nextVisMode, saveVisMode, type VisMode } from "../lib/vis";
@@ -25,6 +27,9 @@
   let audio: HTMLAudioElement;
   let graph: AudioGraph | null = null;
   let analyser = $state<AnalyserNode | null>(null);
+  // The viz channel's source (control-api.md). Rust says when and how fast;
+  // this reads the graph's unsmoothed tap and ships bytes, not JSON.
+  const viz = new VizCapture((bins, headers) => invoke("viz_frame", bins, { headers }));
   const palette = viscolor("eyewall");
   // The EQ window owns the sliders and the saved copy; this is the applied
   // copy. Same saved state at mount, then live updates over eq:set.
@@ -65,6 +70,7 @@
       graph = new AudioGraph(audio);
       graph.applyEq(eq);
       analyser = graph.analyser;
+      viz.source = sourceFromAnalyser(graph.stream);
     }
     graph.resume().catch((e) => (error = `Audio engine: ${String(e)}`));
     // A resume the browser refuses (no gesture in this document yet) leaves
@@ -179,7 +185,10 @@
   $effect(() => {
     // Say "stopped, volume 1" up front: until the first play nobody has
     // reported anything, and `status` over the pipe answered with blanks.
-    push();
+    // Untracked: push() reads pos, vol and the rest, and without this the
+    // effect re-ran on every timeupdate, tearing down and re-subscribing
+    // every listener below four times a second. timeupdate pushes itself.
+    untrack(push);
     const subs = [
       listen<Track>("player:load", (e) => load(e.payload)),
       // The library opened a video (D69), or clicked the row that is playing.
@@ -206,6 +215,23 @@
     ];
     return () => {
       for (const s of subs) s.then((off) => off());
+    };
+  });
+
+  // The viz channel's source loop follows Rust's demand. Its own effect,
+  // reading no state, so nothing in this window can restart the timer: a
+  // restart defers the next frame by a whole period, and that showed up as a
+  // 67 ms gap four times a second when it lived in the effect above.
+  $effect(() => {
+    // Ask whether a rig is already listening: a reload of this window must
+    // not silently end a stream Rust still has subscribers for.
+    invoke<Demand>("viz_demand")
+      .then((d) => viz.apply(d))
+      .catch(() => {});
+    const off = listen<Demand>("viz:capture", (e) => viz.apply(e.payload));
+    return () => {
+      viz.stop();
+      off.then((f) => f());
     };
   });
 

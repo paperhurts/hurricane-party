@@ -104,7 +104,7 @@ Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.d
 | v0.2 | SQLite, persistent queue with byte-level resume, playlists |
 | v0.3 | Video window, local folder import, control API handshake + transport |
 | v0.4a | The window system: bonding, splitter, shade modes, grouped z-order, layout persistence, stranded-group rescue |
-| **v0.4b** | **In progress.** Chrome from tokens (D72), Main plays with the analyser on the radar ramp, 10-band EQ, the playlist window, seams that glow and discharge, 2x chrome, the playlist's corner grip. Left: the viz stream, the windowshade contents, the sprite renderer. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
+| **v0.4b** | **In progress.** Chrome from tokens (D72), Main plays with the analyser on the radar ramp, 10-band EQ, the playlist window, seams that glow and discharge, 2x chrome, the playlist's corner grip, an oscilloscope, the viz stream on its own pipe (`hello` advertises `viz`; measured in `docs/control-api.md`). Left: the windowshade contents, the sprite renderer. See `docs/v0.4-brief.md` and the v0.4b milestone on GitHub |
 
 The canonical milestone table is in `docs/decisions.md` (D27).
 
