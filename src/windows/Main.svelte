@@ -7,9 +7,11 @@
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
+  import Oscilloscope from "./Oscilloscope.svelte";
   import { AudioGraph } from "../lib/audio";
   import { loadEq, type EqState } from "../lib/eq";
   import { viscolor } from "../lib/theme";
+  import { loadVisMode, nextVisMode, saveVisMode, type VisMode } from "../lib/vis";
 
   type Track = {
     id: number;
@@ -27,6 +29,14 @@
   // The EQ window owns the sliders and the saved copy; this is the applied
   // copy. Same saved state at mount, then live updates over eq:set.
   let eq: EqState = loadEq(localStorage);
+
+  // Click the display to cycle bars, scope, off, as the classic did (D20:
+  // the visualizer is a swappable component; the theme names the default).
+  let visMode = $state<VisMode>(loadVisMode(localStorage));
+  function cycleVis() {
+    visMode = nextVisMode(visMode);
+    saveVisMode(localStorage, visMode);
+  }
 
   let track = $state<Track | null>(null);
   // `playing` follows the element; `stopped` is the transport's own state,
@@ -266,8 +276,25 @@
           <span class:lit={!!track && stopped} class="strike">STOP</span>
         </div>
       </div>
-      <div class="visbox">
-        <SpectrumBars {analyser} {palette} active={playing} />
+      <div
+        class="visbox"
+        class:off={visMode === "off"}
+        role="button"
+        tabindex="0"
+        onclick={cycleVis}
+        onkeydown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            cycleVis();
+          }
+        }}
+        title={visMode === "bars" ? "Spectrum. Click for scope" : visMode === "scope" ? "Scope. Click for off" : "Off. Click for spectrum"}
+      >
+        {#if visMode === "bars"}
+          <SpectrumBars {analyser} {palette} active={playing} />
+        {:else if visMode === "scope"}
+          <Oscilloscope {analyser} {palette} active={playing} />
+        {/if}
       </div>
     </div>
 
@@ -397,7 +424,13 @@
   .visbox {
     flex: 1 1 auto;
     min-width: 0;
+    cursor: pointer;
     /* The visualizer and everything above it: no filter, ever (D73). */
+  }
+  /* Off: the well, and nothing drawing into it. */
+  .visbox.off {
+    background: var(--well);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
   }
 
   /* ---- title strip ---- */
