@@ -65,6 +65,12 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
             let s = state.0.lock().unwrap().clone();
             Response::ok(req.id, serde_json::to_value(s).unwrap_or_default())
         }
+        // The one command answered here rather than relayed: the pipe is
+        // created before the reply, so the client never finds it missing.
+        Command::SubscribeViz(params) => match crate::viz::subscribe(app, params) {
+            Ok(stream) => Response::ok(req.id, serde_json::json!({ "stream": stream })),
+            Err(e) => Response::err(req.id, e),
+        },
         other => {
             let (name, arg) = match other {
                 Command::Play => ("play", serde_json::Value::Null),
@@ -86,27 +92,34 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
     }
 }
 
-#[cfg(windows)]
+/// Accept clients on the control pipe, one task each, forever.
+///
+/// The transport is `platform::pipe` (D9, #20): this file knows it has a byte
+/// stream and that the framing is lines, nothing about the OS.
 pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
+    use crate::platform::pipe;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::windows::named_pipe::ServerOptions;
 
     tauri::async_runtime::spawn(async move {
         loop {
             // A fresh instance per connection: create it *before* accepting so
             // there is never a window where a client finds no pipe listening.
-            let server = match ServerOptions::new().create(hp_control::PIPE_NAME) {
-                Ok(s) => s,
+            let listener = match pipe::listen(hp_control::PIPE_NAME, pipe::ListenOptions::default())
+            {
+                Ok(l) => l,
                 Err(e) => {
                     eprintln!("hp-control: can't create pipe: {e}");
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     continue;
                 }
             };
-            if let Err(e) = server.connect().await {
-                eprintln!("hp-control: accept failed: {e}");
-                continue;
-            }
+            let server = match listener.accept().await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("hp-control: accept failed: {e}");
+                    continue;
+                }
+            };
 
             let app = app.clone();
             let mut events = broadcaster.subscribe();
@@ -145,12 +158,6 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
             });
         }
     });
-}
-
-#[cfg(not(windows))]
-pub fn spawn_server(_app: AppHandle, _broadcaster: Broadcaster) {
-    // POSIX socket path is specced in control-api.md; Windows-first per O7.
-    eprintln!("hp-control: no server on this platform yet");
 }
 
 use tauri::Manager;

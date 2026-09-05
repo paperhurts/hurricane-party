@@ -7,6 +7,7 @@ mod pipeline;
 pub mod platform;
 mod playlist;
 mod video;
+mod viz;
 pub mod wm;
 
 use db::Db;
@@ -102,6 +103,23 @@ fn list_roots(app: AppHandle) -> Result<Vec<localimport::Root>, db::DbError> {
 #[tauri::command]
 fn report_state(app: AppHandle, state: hp_control::PlayerState) {
     control::update_state(&app, state);
+}
+
+// ---- viz stream (D15, #6) ---------------------------------------------------
+
+/// One source frame from Main's stream analyser: scalars in the headers, the
+/// raw FFT bins as the body. Sixty times a second while anyone is subscribed,
+/// so it takes bytes rather than a JSON array of numbers.
+#[tauri::command]
+fn viz_frame(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    viz::on_request(&app, &request)
+}
+
+/// Main asks on mount whether anyone is listening and how fast; afterwards
+/// the hub pushes changes as `viz:capture`.
+#[tauri::command]
+fn viz_demand(app: AppHandle) -> viz::Demand {
+    viz::demand(&app)
 }
 
 // ---- video window (D13) -----------------------------------------------------
@@ -484,6 +502,7 @@ pub fn run() {
         .manage(RunnerHandle::default())
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
+        .manage(viz::VizHub::default())
         .manage(wm::Wm::default())
         .manage(video::SwitchAcks::default())
         .manage(video::OpenLock::default())
@@ -565,6 +584,8 @@ pub fn run() {
             open_video,
             video_ready,
             report_state,
+            viz_frame,
+            viz_demand,
             wm_drag_start,
             wm_drag_move,
             wm_drag_end,

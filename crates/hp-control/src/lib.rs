@@ -13,17 +13,23 @@
 //! - **D8/D15** — this is the *only* external surface. Nothing loads into the
 //!   player's process; a client runs in its own and speaks NDJSON.
 //!
-//! The viz channel (binary frames, separate pipe) lands at v0.4 with the
-//! analyser, since it's the same data.
+//! The viz channel (binary frames, separate pipe) is in `viz`: what
+//! `subscribe_viz` accepts and the frame a subscriber reads. It landed at
+//! v0.4b with the analyser, since it's the same data.
 
 use serde::{Deserialize, Serialize};
+
+pub mod viz;
+pub use viz::{Depth, Frame, Include, VizParams};
 
 /// Bumped only for breaking changes. Servers reject unknown majors rather than
 /// guessing at what a future client meant.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Windows. The POSIX paths in control-api.md land when a port does.
-#[cfg(windows)]
+/// The control pipe. A Windows name; the POSIX paths in control-api.md land
+/// when a port does. Not `cfg`-gated: a name is a string on every platform,
+/// and the app selects its transport behind `platform/pipe.rs`, so this crate
+/// carries no platform conditionals at all (#20).
 pub const PIPE_NAME: &str = r"\\.\pipe\hurricane-party";
 
 /// A request from a client. `id` is echoed back so a client can match replies
@@ -43,6 +49,15 @@ pub struct Request {
     pub pos_s: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<f64>,
+    // subscribe_viz. All optional: the defaults are the LED wall's numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bands: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_hz: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +142,8 @@ pub enum Command {
     Prev,
     Seek(f64),
     Volume(f64),
+    /// Open a per-subscriber pipe and push frames down it (`viz`).
+    SubscribeViz(VizParams),
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -135,6 +152,12 @@ pub enum ParseError {
     UnknownCommand(String),
     #[error("{cmd:?} needs {field}")]
     MissingField { cmd: String, field: &'static str },
+    #[error("{cmd:?}: {field} {why}")]
+    InvalidField {
+        cmd: String,
+        field: &'static str,
+        why: String,
+    },
     #[error("protocol version {0} is not supported (this server speaks {PROTOCOL_VERSION})")]
     UnsupportedVersion(u32),
 }
@@ -173,6 +196,55 @@ impl Request {
             "volume" => {
                 Command::Volume(self.level.ok_or_else(|| missing("level"))?.clamp(0.0, 1.0))
             }
+            // Validated rather than clamped, unlike volume: a rig asking for
+            // 200 bands or 45 Hz has a wrong idea of the protocol, and a frame
+            // shaped differently from what it asked for would be worse than a
+            // refusal it can read.
+            "subscribe_viz" => {
+                let invalid = |field, why: String| ParseError::InvalidField {
+                    cmd: self.cmd.clone(),
+                    field,
+                    why,
+                };
+                let d = VizParams::default();
+                let bands = match self.bands {
+                    None => d.bands,
+                    Some(b) if (viz::MIN_BANDS as u32..=viz::MAX_BANDS as u32).contains(&b) => {
+                        b as u8
+                    }
+                    Some(b) => {
+                        return Err(invalid(
+                            "bands",
+                            format!("must be {}..={}, not {b}", viz::MIN_BANDS, viz::MAX_BANDS),
+                        ))
+                    }
+                };
+                let rate_hz = match self.rate_hz {
+                    None => d.rate_hz,
+                    Some(r) if viz::RATES_HZ.contains(&r) => r,
+                    Some(r) => {
+                        return Err(invalid(
+                            "rate_hz",
+                            format!("must be one of {:?}, not {r}", viz::RATES_HZ),
+                        ))
+                    }
+                };
+                let depth = match &self.depth {
+                    None => d.depth,
+                    Some(s) => Depth::parse(s)
+                        .ok_or_else(|| invalid("depth", format!("must be u8 or f32, not {s:?}")))?,
+                };
+                let include = match &self.include {
+                    None => d.include,
+                    Some(names) => Include::parse(names).map_err(|e| invalid("include", e))?,
+                };
+                Command::SubscribeViz(VizParams {
+                    bands,
+                    rate_hz,
+                    depth,
+                    include,
+                })
+            }
             other => return Err(ParseError::UnknownCommand(other.to_string())),
         })
     }
@@ -184,8 +256,8 @@ pub fn hello_result(app_version: &str) -> serde_json::Value {
     serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
         "app_version": app_version,
-        // No "viz" yet — that lands at v0.4 with the analyser.
-        "capabilities": ["transport"],
+        // "palette" joins at v0.5 with the skin loader (control-api.md).
+        "capabilities": ["transport", "viz"],
         "stable": false,
     })
 }
@@ -283,9 +355,68 @@ mod tests {
     }
 
     #[test]
-    fn hello_does_not_yet_advertise_viz() {
-        let h = hello_result("0.3.0");
-        assert_eq!(h["capabilities"], serde_json::json!(["transport"]));
+    fn hello_advertises_viz_and_is_still_unstable() {
+        let h = hello_result("0.4.0");
+        assert_eq!(h["capabilities"], serde_json::json!(["transport", "viz"]));
         assert_eq!(h["stable"], false);
+    }
+
+    /// A bare subscribe is the LED wall's numbers from control-api.md.
+    #[test]
+    fn subscribe_viz_defaults_to_the_led_wall() {
+        let c = req(r#"{"id":7,"cmd":"subscribe_viz"}"#).parse().unwrap();
+        assert_eq!(c, Command::SubscribeViz(VizParams::default()));
+        let Command::SubscribeViz(p) = c else {
+            unreachable!()
+        };
+        assert_eq!((p.bands, p.rate_hz, p.depth), (32, 30, Depth::U8));
+        assert!(p.include.spectrum && p.include.level && p.include.beat);
+    }
+
+    #[test]
+    fn subscribe_viz_takes_every_field() {
+        let c = req(
+            r#"{"id":7,"cmd":"subscribe_viz","bands":128,"rate_hz":60,"depth":"f32","include":["spectrum"]}"#,
+        )
+        .parse()
+        .unwrap();
+        assert_eq!(
+            c,
+            Command::SubscribeViz(VizParams {
+                bands: 128,
+                rate_hz: 60,
+                depth: Depth::F32,
+                include: Include {
+                    spectrum: true,
+                    level: false,
+                    beat: false
+                },
+            })
+        );
+    }
+
+    /// Refused by name, not clamped: a frame shaped differently from what a
+    /// rig asked for is worse than a refusal it can read.
+    #[test]
+    fn subscribe_viz_refuses_out_of_range_values_by_field() {
+        for (json, field) in [
+            (r#"{"cmd":"subscribe_viz","bands":4}"#, "bands"),
+            (r#"{"cmd":"subscribe_viz","bands":129}"#, "bands"),
+            (r#"{"cmd":"subscribe_viz","rate_hz":45}"#, "rate_hz"),
+            (r#"{"cmd":"subscribe_viz","depth":"u16"}"#, "depth"),
+            (r#"{"cmd":"subscribe_viz","include":["beet"]}"#, "include"),
+        ] {
+            match req(json).parse() {
+                Err(ParseError::InvalidField { field: f, .. }) => assert_eq!(f, field),
+                other => panic!("{json}: expected InvalidField, got {other:?}"),
+            }
+        }
+        let e = req(r#"{"cmd":"subscribe_viz","bands":4}"#)
+            .parse()
+            .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "\"subscribe_viz\": bands must be 8..=128, not 4"
+        );
     }
 }
