@@ -291,6 +291,25 @@ fn wm_set_double(app: AppHandle, on: bool) {
     wm::set_double(&app, on);
 }
 
+/// Corner grip on the playlist: pointerdown. False means nothing to resize.
+#[tauri::command]
+fn wm_resize_start(app: AppHandle, label: String) -> bool {
+    match wm::id_of(&label) {
+        Some(id) => wm::resize_start(&app, id),
+        None => false,
+    }
+}
+
+#[tauri::command]
+fn wm_resize_move(app: AppHandle) {
+    wm::resize_move(&app);
+}
+
+#[tauri::command]
+fn wm_resize_end(app: AppHandle) {
+    wm::resize_end(&app);
+}
+
 /// The playlist window's ADD button: the library is where tracks come from.
 #[tauri::command]
 fn show_library(app: AppHandle) {
@@ -552,6 +571,9 @@ pub fn run() {
             wm_focus,
             wm_raise,
             wm_set_double,
+            wm_resize_start,
+            wm_resize_move,
+            wm_resize_end,
             show_library,
             wm_hello,
             wm_toggle_shade,
