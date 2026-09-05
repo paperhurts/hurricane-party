@@ -56,6 +56,7 @@ pnpm tauri dev                                              # run it
 pnpm check                                                  # svelte-check + tsc
 pnpm test                                                   # vitest: the frontend's pure logic (analyser math)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main   # screenshot a running window into .sid/
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\keyout.ps1 -In art.jpg -Out icon.png   # flat background -> transparent square PNG, then: pnpm tauri icon icon.png
 pnpm tauri build --no-bundle                                # release binary, no installer
 
 cargo test --manifest-path src-tauri/Cargo.toml --lib               # app tests
