@@ -39,12 +39,30 @@
   let double = $state(false);
   let edges = $state<Edges>({ top: null, right: null, bottom: null, left: null });
 
+  // The discharge (#9, theme.md): a bond that just broke blooms for ~120 ms
+  // and is gone. Detected here, from the edge going from bonded to null in a
+  // state push, so both windows of the broken bond flash their own side.
+  // The seam element itself is gone the moment the edge is null, so the
+  // bloom is its own element, kept just long enough to finish.
+  let bloom = $state<Record<Side, boolean>>({ top: false, right: false, bottom: false, left: false });
+  const bloomTimers: Partial<Record<Side, number>> = {};
+
   function absorb(s: WmState) {
+    for (const side of SIDES) {
+      if (edges[side] !== null && s.edges[side] === null) {
+        bloom[side] = true;
+        clearTimeout(bloomTimers[side]);
+        bloomTimers[side] = window.setTimeout(() => (bloom[side] = false), 240);
+      }
+    }
     edges = s.edges;
     active = s.active;
     shaded = s.shaded;
     double = s.double;
   }
+
+  // Which seam is being dragged as a splitter, so it can render as such.
+  let dragSide = $state<Side | null>(null);
 
   function toggleDouble() {
     invoke("wm_set_double", { on: !double });
@@ -55,7 +73,16 @@
     // from the same locked state in Rust, so splitting them into separate
     // messages would only let this window hold two of them from different
     // moments.
-    const subs = [listen<WmState>("wm:state", (e) => absorb(e.payload))];
+    // Targeted at THIS window. A listener with no target receives every
+    // emit, including the pushes Rust aims at the other two windows, and the
+    // last of the three to arrive won: Main would end up wearing the
+    // playlist's edges, with a seam on top and none on the bottom, after any
+    // click. A targeted listener still receives global emits.
+    const subs = [
+      listen<WmState>("wm:state", (e) => absorb(e.payload), {
+        target: { kind: "WebviewWindow", label },
+      }),
+    ];
     // Subscribe first, then ask. The push events fire when something changes,
     // and the first one is emitted during Rust setup -- long before this bundle
     // has loaded. Without the pull the seams simply never appear, and every
@@ -127,6 +154,7 @@
       if (gesture === "splitter") invoke("wm_splitter_end");
       else if (gesture === "move") invoke("wm_drag_end");
       gesture = "none";
+      dragSide = null;
     };
 
     root.addEventListener("pointermove", onMove);
@@ -184,8 +212,13 @@
       // not dropped. Rust decides which it really is: a seam whose neighbours
       // cannot resize degrades to a group move (D35).
       gesture = "move";
-      invoke<typeof gesture>("wm_seam_down", { label, edge: side }).then((g) => {
-        if (gesture !== "none") gesture = g;
+      // Spelled out: after the assignment above TypeScript narrows `gesture`
+      // to "move", and `typeof gesture` would carry that narrowing here.
+      invoke<"splitter" | "move" | "none">("wm_seam_down", { label, edge: side }).then((g) => {
+        if (gesture !== "none") {
+          gesture = g;
+          if (g === "splitter") dragSide = side;
+        }
       });
     });
   }
@@ -244,9 +277,14 @@
            side contributes half the band. -->
       <div
         class="seam {side}"
+        class:live={edges[side] === true}
+        class:dragging={dragSide === side}
         style:cursor={cursorFor(side)}
         onpointerdown={(e) => seamDown(e, side)}
       ></div>
+    {/if}
+    {#if bloom[side]}
+      <div class="discharge {side}"></div>
     {/if}
   {/each}
 </div>
