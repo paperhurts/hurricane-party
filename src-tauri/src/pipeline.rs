@@ -437,8 +437,21 @@ async fn download_media(
 
     // Deterministic path is why the probe ran first: scan for <id>.* rather
     // than parsing the filename back out of yt-dlp's chatter.
-    find_by_id(&root, &probed.id)
+    downloaded_output(&root, &probed.id, want_video)
         .ok_or_else(|| PipelineError::MissingOutput(format!("{} [{}]", root.display(), probed.id)))
+}
+
+/// The file a download just produced, by the kind it was asked for. The
+/// video path must find its MP4 even when an earlier audio import left an
+/// MP3 with the same id beside it (#22): the general lookup prefers the MP3,
+/// and reporting that path made the video's row collide with the audio's,
+/// leaving the MP4 on disk with no row in the library.
+fn downloaded_output(root: &Path, id: &str, want_video: bool) -> Option<PathBuf> {
+    if want_video {
+        find_video_by_id(root, id)
+    } else {
+        find_by_id(root, id)
+    }
 }
 
 /// Locate a downloaded file by the `[id]` yt-dlp writes into its name.
@@ -446,9 +459,38 @@ async fn download_media(
 /// Recursive, because the template nests by extractor and uploader. Skips
 /// `.part` files — a partial is not a result, it is the thing `--continue`
 /// will finish.
+/// Any media file carrying `[id]`, the finished MP3 first. What the audio
+/// path resumes from: an MP3 means done, anything else is a source to extract
+/// from, which includes a video a previous import finished (D3, D80).
 fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
+    find_by_id_where(root, id, |_| true)
+}
+
+/// A finished *video* carrying `[id]`: a video container, never the MP3 an
+/// audio-only import left behind (#22). The identity of a finished import is
+/// (source id, kind), not the id alone (D80). `.webm` is left out on purpose:
+/// the audio path's intermediate is a webm, and a dead job leaves one behind
+/// (D26), so a webm here would be taken for a finished video and served as
+/// one, silent picture and all. The video path merges to mp4 (D3), so the
+/// cost is at most one re-download of a single-stream fallback.
+fn find_video_by_id(root: &Path, id: &str) -> Option<PathBuf> {
+    find_by_id_where(root, id, is_video_container)
+}
+
+/// The containers the video path produces, and only those.
+fn is_video_container(p: &Path) -> bool {
+    matches!(
+        p.extension()
+            .and_then(|s| s.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("mp4" | "mkv" | "mov" | "m4v")
+    )
+}
+
+fn find_by_id_where(root: &Path, id: &str, keep: fn(&Path) -> bool) -> Option<PathBuf> {
     let marker = format!("[{id}]");
-    fn walk(dir: &Path, marker: &str, depth: usize) -> Option<PathBuf> {
+    fn walk(dir: &Path, marker: &str, keep: fn(&Path) -> bool, depth: usize) -> Option<PathBuf> {
         if depth > 6 {
             return None; // the template is 3 deep; this is a symlink-loop guard
         }
@@ -463,7 +505,7 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
             }
             // The thumbnail yt-dlp writes shares the stem exactly, so match on
             // extension too or the "downloaded file" turns out to be a JPEG.
-            if !is_media_ext(&p) || is_scratch(&p) {
+            if !is_media_ext(&p) || is_scratch(&p) || !keep(&p) {
                 continue;
             }
             if p.file_stem()
@@ -480,9 +522,10 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
         if best.is_some() {
             return best;
         }
-        dirs.into_iter().find_map(|d| walk(&d, marker, depth + 1))
+        dirs.into_iter()
+            .find_map(|d| walk(&d, marker, keep, depth + 1))
     }
-    let found = walk(root, &marker, 0)?;
+    let found = walk(root, &marker, keep, 0)?;
     // The walk starts at the library root, but assert containment anyway: this
     // path is about to be handed to ffmpeg and then to the asset protocol.
     is_within(root, &found).then_some(found)
@@ -494,6 +537,12 @@ fn find_by_id(root: &Path, id: &str) -> Option<PathBuf> {
 /// finished MP3 without extracting anything, and the video path never extracts
 /// at all. Cleanup that only runs on one branch leaves a 64 MB `.webm` next to
 /// every interrupted job, and a stray cover next to every video.
+///
+/// Video containers are not on the list. A finished video next to an MP3 is
+/// not scratch, it is the other kind's result, and the audio path derives its
+/// MP3 *from* it (D3) — so stripping `.mp4` here deleted the user's video the
+/// moment they asked for the audio as well (#22, D80). The audio path's own
+/// intermediate is a webm or an m4a, which are still stripped.
 fn tidy_intermediates(keep: &Path) {
     for ext in [
         "webm",
@@ -501,8 +550,6 @@ fn tidy_intermediates(keep: &Path) {
         "opus",
         "ogg",
         "oga",
-        "mp4",
-        "mkv",
         "aac",
         "wav",
         "jpg",
@@ -726,8 +773,11 @@ pub async fn import_job(
     // itself that way.
     if want_video {
         // A video is finished when it's downloaded — there is no transcode
-        // step, so `already_mp3` reasoning doesn't apply.
-        let file = match find_by_id(&root, &probed.id) {
+        // step, so `already_mp3` reasoning doesn't apply. Only a video
+        // container counts as finished: after an audio-only import the id's
+        // file is an MP3, and taking it as the video "done" is #22. The MP3's
+        // source was tidied away, so this really does download again (D80).
+        let file = match find_video_by_id(&root, &probed.id) {
             Some(p) => p,
             None => download_media(app, url, &probed, job_id, true).await?,
         };
@@ -983,6 +1033,117 @@ mod tests {
             "a .part is not a result"
         );
         assert!(find_by_id(&tmp, "nope").is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// #22: after an audio-only import the id's only file is the MP3, and the
+    /// video branch used to take it as the finished video. A finished video is
+    /// a video container, and a webm is not one (it is the audio path's
+    /// intermediate, left behind by a dead job).
+    #[test]
+    fn a_video_lookup_ignores_the_mp3_and_the_audio_intermediate() {
+        let tmp = std::env::temp_dir().join("hp-find-video-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let dir = tmp.join("youtube");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Song [abc123].mp3"), b"x").unwrap();
+        std::fs::write(dir.join("Song [abc123].webm"), b"x").unwrap();
+        assert!(
+            find_video_by_id(&tmp, "abc123").is_none(),
+            "an mp3 and a webm are not a finished video"
+        );
+        assert_eq!(
+            find_by_id(&tmp, "abc123").unwrap().file_name().unwrap(),
+            "Song [abc123].mp3",
+            "the audio lookup still prefers the finished mp3"
+        );
+
+        std::fs::write(dir.join("Song [abc123].mp4"), b"x").unwrap();
+        assert_eq!(
+            find_video_by_id(&tmp, "abc123")
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "Song [abc123].mp4"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// D3 says the MP3 derives from the video; D80 says the video is then a
+    /// finished import of its own kind. Cleanup after the extract must leave
+    /// it, while still stripping the audio path's own intermediates.
+    #[test]
+    fn tidy_after_an_audio_import_keeps_a_finished_video() {
+        let tmp = std::env::temp_dir().join("hp-tidy-keep-video-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mp3 = tmp.join("Clip [abc123].mp3");
+        for f in [
+            "Clip [abc123].mp3",
+            "Clip [abc123].mp4",
+            "Clip [abc123].mkv",
+            "Clip [abc123].m4a",
+            "Clip [abc123].jpg",
+        ] {
+            std::fs::write(tmp.join(f), b"x").unwrap();
+        }
+
+        tidy_intermediates(&mp3);
+
+        assert!(mp3.exists());
+        assert!(
+            tmp.join("Clip [abc123].mp4").exists(),
+            "the video is a result, not scratch"
+        );
+        assert!(tmp.join("Clip [abc123].mkv").exists());
+        assert!(
+            !tmp.join("Clip [abc123].m4a").exists(),
+            "the audio intermediate goes"
+        );
+        assert!(!tmp.join("Clip [abc123].jpg").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Found by hand test: the video downloaded, then the job reported the
+    /// MP3's path, because the general lookup prefers it. The row collided
+    /// with the audio row and the MP4 never reached the library.
+    #[test]
+    fn a_video_download_reports_its_mp4_even_beside_an_older_mp3() {
+        let tmp = std::env::temp_dir().join("hp-downloaded-output-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("Song [abc123].mp3"), b"x").unwrap();
+        std::fs::write(tmp.join("Song [abc123].mp4"), b"x").unwrap();
+        assert_eq!(
+            downloaded_output(&tmp, "abc123", true)
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "Song [abc123].mp4"
+        );
+        assert_eq!(
+            downloaded_output(&tmp, "abc123", false)
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "Song [abc123].mp3"
+        );
+        assert!(downloaded_output(&tmp, "nope", true).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The audio path resumes from whatever source is there, and a finished
+    /// video from an earlier import is a source (D3): no second download.
+    #[test]
+    fn the_audio_lookup_offers_a_finished_video_as_the_source() {
+        let tmp = std::env::temp_dir().join("hp-find-source-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("Clip [abc123].mp4"), b"x").unwrap();
+        assert_eq!(
+            find_by_id(&tmp, "abc123").unwrap().file_name().unwrap(),
+            "Clip [abc123].mp4"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
