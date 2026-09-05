@@ -275,6 +275,15 @@ fn wm_focus(app: AppHandle, label: String) {
     }
 }
 
+/// Playback started from another window: bring the group forward, and back
+/// from minimized, without stealing focus from where the user is working.
+#[tauri::command]
+fn wm_raise(app: AppHandle, label: String) {
+    if let Some(id) = wm::id_of(&label) {
+        wm::raise_group(&app, id);
+    }
+}
+
 // ---- playlists --------------------------------------------------------------
 
 #[tauri::command]
@@ -524,6 +533,7 @@ pub fn run() {
             wm_drag_move,
             wm_drag_end,
             wm_focus,
+            wm_raise,
             wm_hello,
             wm_toggle_shade,
             wm_seam_down,

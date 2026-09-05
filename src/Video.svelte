@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { emitTo, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { applyTheme } from "./lib/theme";
 
@@ -92,8 +92,13 @@
         if (Number.isFinite(id)) await invoke("video_ready", { id });
       });
 
+    // One transport (D69): the Main window starting a track pauses this one.
+    // The window stays open on its frame; nothing resumes it.
+    const pauseSub = listen("hp://pause", () => video?.pause());
+
     return () => {
       sub.then((unlisten) => unlisten());
+      pauseSub.then((unlisten) => unlisten()).catch(() => {});
     };
   });
 </script>
@@ -103,7 +108,16 @@
     <p class="error">{error}</p>
   {:else if track}
     <!-- svelte-ignore a11y_media_has_caption -->
-    <video bind:this={video} src={convertFileSrc(track.path)} controls autoplay></video>
+    <!-- A file that has moved used to leave this blank and silent (#43). The
+         element reports it; it just has to be listened to. -->
+    <video
+      bind:this={video}
+      src={convertFileSrc(track.path)}
+      controls
+      autoplay
+      onerror={() => (error = "Can't open this file. Moved or deleted?")}
+      onended={() => emitTo("library", "player:step", 1).catch(() => {})}
+    ></video>
     <footer>
       <span class="title">{track.title}</span>
       {#if track.uploader}<span class="by">{track.uploader}</span>{/if}
