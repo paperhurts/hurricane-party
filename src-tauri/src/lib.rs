@@ -291,6 +291,16 @@ fn wm_set_double(app: AppHandle, on: bool) {
     wm::set_double(&app, on);
 }
 
+/// The playlist window's ADD button: the library is where tracks come from.
+#[tauri::command]
+fn show_library(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("library") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 // ---- playlists --------------------------------------------------------------
 
 #[tauri::command]
@@ -542,6 +552,7 @@ pub fn run() {
             wm_focus,
             wm_raise,
             wm_set_double,
+            show_library,
             wm_hello,
             wm_toggle_shade,
             wm_seam_down,

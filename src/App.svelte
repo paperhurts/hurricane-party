@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { emitTo, listen } from "@tauri-apps/api/event";
+  import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
 
@@ -100,6 +100,16 @@
         nowId = e.payload.id;
         isPlaying = e.payload.playing;
       }),
+      // The classic playlist window mirrors the list showing here. It asks
+      // once on mount, in case the first broadcast went out before it had a
+      // listener, and sends its clicks back here so the audio/video branch
+      // stays in one place.
+      listen("queue:hello", announceQueue),
+      listen<number>("queue:play", (e) => {
+        const t = shown.find((x) => x.id === e.payload);
+        if (t) play(t);
+      }),
+      listen<number>("queue:remove", (e) => removeAt(e.payload)),
     ];
     // The DB is the source of truth for progress, and it's written throttled
     // to ~4Hz. Polling it while work is in flight beats trying to reconcile a
@@ -127,6 +137,27 @@
       error = String(e);
     }
   }
+
+  /** Broadcast the play queue: whatever list is showing, as the playlist window sees it. */
+  function announceQueue() {
+    const name =
+      selectedList == null ? "Library" : (playlists.find((p) => p.id === selectedList)?.name ?? "Playlist");
+    const items = shown.map((t) => ({
+      id: t.id,
+      title: t.title,
+      uploader: t.uploader,
+      duration_s: t.duration_s,
+      kind: t.kind,
+      position: t.position,
+    }));
+    emit("queue:set", { name, listId: selectedList, items }).catch(() => {});
+  }
+
+  // Re-broadcast whenever the queue changes: a list switch, a scan, a
+  // reorder, a removal.
+  $effect(() => {
+    announceQueue();
+  });
 
   async function openList(id: number | null) {
     selectedList = id;
