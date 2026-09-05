@@ -44,10 +44,13 @@ $sizeLabel = if ($SizeMb -gt 0) { "$SizeMb MB" } else { "about 100 MB" }
 New-Item -ItemType Directory -Force (Join-Path $dist "img") | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $dist "shots") | Out-Null
 
-$html = Get-Content (Join-Path $site "index.html") -Raw -Encoding UTF8
-$html = $html.Replace("{{tokens}}", $cssVars).Replace("{{version}}", $Version).Replace("{{size}}", $sizeLabel)
-if ($html -match "\{\{[a-z]+\}\}") { throw "unfilled field in site/index.html: $($Matches[0])" }
-[System.IO.File]::WriteAllText((Join-Path $dist "index.html"), $html, (New-Object System.Text.UTF8Encoding $false))
+# index.html and 404.html are both templates; Pages serves 404.html itself.
+foreach ($page in "index.html", "404.html") {
+    $html = Get-Content (Join-Path $site $page) -Raw -Encoding UTF8
+    $html = $html.Replace("{{tokens}}", $cssVars).Replace("{{version}}", $Version).Replace("{{size}}", $sizeLabel)
+    if ($html -match "\{\{[a-z]+\}\}") { throw "unfilled field in site/${page}: $($Matches[0])" }
+    [System.IO.File]::WriteAllText((Join-Path $dist $page), $html, (New-Object System.Text.UTF8Encoding $false))
+}
 [System.IO.File]::WriteAllText((Join-Path $dist ".nojekyll"), "", (New-Object System.Text.UTF8Encoding $false))
 
 # ---- art ----------------------------------------------------------------------
@@ -80,6 +83,7 @@ $art = @{
     "capybara-lounging.png"    = "capybara-lounging-1254.png"
     "capybara-desk.png"        = "capybara-desk-1254.png"
     "hurricane-party-flag.png" = "hurricane-party-flag-1254.png"
+    "capybara-404.png"         = "capybara-404-1254.png"
 }
 foreach ($name in $art.Keys) {
     Resize-Png (Join-Path $root "design\icon\$($art[$name])") (Join-Path $dist "img\$name") $ImageWidth
