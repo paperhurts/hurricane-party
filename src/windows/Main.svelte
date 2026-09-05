@@ -4,7 +4,7 @@
   // out; the library window is a remote that says "play this" and mirrors what
   // is playing. Transport arriving from the control pipe lands here too.
   import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-  import { emitTo, listen } from "@tauri-apps/api/event";
+  import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
   import { AudioGraph } from "../lib/audio";
@@ -133,9 +133,9 @@
     push();
   }
 
-  /** Tell the library what is playing so its list can highlight the row. */
+  /** Tell every window what is playing, so the library's and the playlist's rows can light up. */
   function tell() {
-    emitTo("library", "player:now", { id: track?.id ?? null, playing }).catch(() => {});
+    emit("player:now", { id: track?.id ?? null, playing }).catch(() => {});
   }
 
   /** Mirror into Rust so the control channel answers `status` truthfully. */
