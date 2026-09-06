@@ -237,6 +237,10 @@ pub struct WmState {
     pub double: bool,
     /// Set for the duration of a corner-grip resize of the playlist.
     pub resize: Option<ResizeState>,
+    /// #86: the group is in the taskbar because Main's minimise put it there.
+    /// The display watchdog (D57) reads "minimised" as "display lost" and
+    /// would restore it two seconds later; this is how it tells the two apart.
+    pub minimized: bool,
 }
 
 /// A title-bar drag in flight.
@@ -1443,6 +1447,99 @@ pub fn raise_group(app: &AppHandle, id: WindowId) {
     apply_ownership(&plan);
 }
 
+// ---- minimise (#86) ---------------------------------------------------------
+
+/// Main's minimise button (D86). Main speaks for the group, so the whole
+/// connected component goes to the taskbar behind Main's one button; the
+/// satellites have none (D59), which is why only Main offers the gesture.
+/// Satellites first, Main last, so the taskbar animation is Main's. The way
+/// back is `watch_restore`: when the taskbar button (or Alt+Tab) brings Main
+/// up, the satellites come with it.
+pub fn minimize_group(app: &AppHandle) {
+    let members = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        s.minimized = true;
+        minimize_plan(&s)
+    }; // D54: the lock is gone before any window is touched.
+    for id in members {
+        if let Some(w) = app.get_webview_window(label_of(id)) {
+            let _ = w.minimize();
+        }
+    }
+    watch_restore(app);
+}
+
+/// While the group is down, watch for Main coming back and bring the
+/// satellites with it. Polled, like the display watchdog (D62), and not
+/// driven by focus: minimising a satellite makes Windows activate whatever is
+/// next, and that arrives as a focus gain for Main before Main has even gone,
+/// which restored the whole group in the same event-loop turn that minimised
+/// it. 100 ms is well under the taskbar's own restore animation.
+fn watch_restore(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let down = app.state::<Wm>().0.lock().unwrap().minimized;
+            if !down {
+                break;
+            }
+            let handle = app.clone();
+            if app
+                .run_on_main_thread(move || restore_if_back(&handle))
+                .is_err()
+            {
+                break; // app is shutting down
+            }
+        }
+    });
+}
+
+/// One poll of the watch: once Main is up again, restore the rest of its group
+/// without activating anything (Main already has the focus the OS gave it),
+/// and clear the flag so the watch and the display watchdog both stand down.
+fn restore_if_back(app: &AppHandle) {
+    let (main, members) = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        if !s.minimized {
+            return;
+        }
+        let members = s
+            .graph
+            .component(MAIN)
+            .iter()
+            .map(|w| s.handle(*w))
+            .collect::<Vec<_>>();
+        (s.handle(MAIN), members)
+    }; // D54: the lock is gone before is_minimized touches a window.
+    let p = platform::platform();
+    if main.is_none() || p.is_minimized(main) {
+        return;
+    }
+    for w in members
+        .iter()
+        .filter(|w| !w.is_none() && p.is_minimized(**w))
+    {
+        p.restore_no_activate(*w);
+    }
+    app.state::<Wm>().0.lock().unwrap().minimized = false;
+}
+
+/// The windows Main's minimise takes with it: its component, Main last.
+pub fn minimize_plan(state: &WmState) -> Vec<WindowId> {
+    let mut members: Vec<WindowId> = state
+        .graph
+        .component(MAIN)
+        .into_iter()
+        .filter(|id| *id != MAIN)
+        .collect();
+    members.sort();
+    members.push(MAIN);
+    members
+}
+
 // ---- chrome zoom (#47) ------------------------------------------------------
 
 /// Settings key for the chrome zoom. "1" is 2x; anything else is 1x.
@@ -1766,19 +1863,24 @@ pub fn check_displays(app: &AppHandle) {
     // D57: losing a display *minimizes* the group rather than relocating it,
     // and `IsVisible` stays true throughout — so visibility is not the signal
     // and a z-order walk still lists the windows. `IsIconic` is the signal.
-    let (handles, topology_changed) = {
+    let (handles, topology_changed, by_user) = {
         let state = app.state::<Wm>();
         let s = state.0.lock().unwrap();
         (
             CLASSIC.iter().map(|id| s.handle(*id)).collect::<Vec<_>>(),
             monitors != s.monitors,
+            s.minimized,
         )
     }; // D54: the lock is gone before is_minimized touches a window.
+    let main_iconic = !handles[0].is_none() && p.is_minimized(handles[0]);
     let minimized: Vec<NativeWindow> = handles
         .into_iter()
         .filter(|w| !w.is_none() && p.is_minimized(*w))
         .collect();
-    if !topology_changed && minimized.is_empty() {
+    // #86: a group Main's button put in the taskbar is not stranded. The flag
+    // is believed only while Main is actually iconic, so a stale one (the
+    // group came back some other way) cannot mask a real display loss.
+    if !topology_changed && (minimized.is_empty() || (by_user && main_iconic)) {
         return;
     }
 
@@ -1792,6 +1894,7 @@ pub fn check_displays(app: &AppHandle) {
     let (layout, moved) = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
+        s.minimized = false;
         s.monitors = monitors.clone();
         s.scale = monitors.first().map(|m| m.scale).unwrap_or(s.scale);
         let rescued = rescue_layout(&s.layout, &s.graph, &s.monitors);
@@ -2623,6 +2726,18 @@ mod tests {
     /// The default stack: main on top, eq under it, playlist under that.
     fn stacked() -> WmState {
         state_with(&[(MAIN, EQ), (EQ, PLAYLIST)])
+    }
+
+    // ---- minimise (#86) ----
+
+    #[test]
+    fn main_minimises_its_whole_component_main_last() {
+        assert_eq!(minimize_plan(&stacked()), vec![EQ, PLAYLIST, MAIN]);
+    }
+
+    #[test]
+    fn main_off_the_group_minimises_alone() {
+        assert_eq!(minimize_plan(&state_with(&[(EQ, PLAYLIST)])), vec![MAIN]);
     }
 
     #[test]
