@@ -225,6 +225,12 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         // Measured so the hand test can judge ACK_TIMEOUT's margin.
         eprintln!("video: switch to {id} acked in {:?}", started.elapsed());
+        // Restored first: `set_focus` raises and activates but never unminimizes
+        // (#39, D59), so a switch into a minimized window succeeded invisibly.
+        // All three best-effort: failing to raise the window is not failing to
+        // switch the track (D67).
+        let _ = w.unminimize();
+        let _ = w.show();
         let _ = w.set_focus();
         return Ok(());
     }
