@@ -159,8 +159,11 @@ pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>) -> Result<(), String>
     // user pressed play to watch it, and it may have gone behind something
     // while it sat paused. Only when the command would start it, so a toggle
     // that pauses does not pull a window forward on its way to stopping.
+    // Restored first, as in `open_video`: `set_focus` does not unminimize (#39).
     if to_video && (cmd == "play" || (cmd == "toggle" && video_paused)) {
         if let Some(w) = app.get_webview_window("video") {
+            let _ = w.unminimize();
+            let _ = w.show();
             let _ = w.set_focus();
         }
     }
