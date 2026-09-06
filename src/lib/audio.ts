@@ -21,6 +21,14 @@ import { BANDS, dbToGain, trimDb, type EqState } from "./eq";
 const PEAK_Q = 1.2;
 /** Time constant for parameter ramps: no zipper noise under a dragged slider. */
 const RAMP_S = 0.02;
+/**
+ * Grace between the element pausing and the graph letting go of the device
+ * (#88). Long enough that a pause-and-resume inside it never stops and
+ * restarts the context (a click), and that both analysers have decayed to
+ * silence before they freeze, so the spectrum and the viz tap read zeros
+ * rather than the last block that played.
+ */
+const IDLE_MS = 2000;
 
 export class AudioGraph {
   readonly ctx: AudioContext;
@@ -31,6 +39,10 @@ export class AudioGraph {
   private readonly preamp: GainNode;
   private readonly filters: BiquadFilterNode[];
   private readonly trim: GainNode;
+  /** The pending idle suspend, if any (#88). */
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A suspend in flight: `resume()` must queue behind it, not skip it. */
+  private suspending = false;
 
   constructor(el: HTMLMediaElement) {
     this.ctx = new AudioContext();
@@ -73,9 +85,42 @@ export class AudioGraph {
     node.connect(this.ctx.destination);
   }
 
-  /** A context created without a user gesture starts suspended. */
+  /**
+   * A context created without a user gesture starts suspended, and an idle
+   * one was suspended on purpose (#88); the call back is the same. Cancels a
+   * pending idle. While a suspend is still in flight the state still reads
+   * "running", so that case resumes unconditionally: the two queue in order.
+   */
   resume(): Promise<void> {
-    return this.ctx.state === "running" ? Promise.resolve() : this.ctx.resume();
+    this.cancelIdle();
+    if (!this.suspending && this.ctx.state === "running") return Promise.resolve();
+    return this.ctx.resume();
+  }
+
+  /**
+   * Nothing is playing. After the grace, suspend the context so the app stops
+   * streaming silence to the device (#88): a running context holds it open
+   * for as long as the window lives, which is what an idle player looks like
+   * to `powercfg /requests`. The next `resume()` cancels or undoes it.
+   */
+  idle(): void {
+    this.cancelIdle();
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.ctx.state !== "running") return;
+      this.suspending = true;
+      this.ctx
+        .suspend()
+        .catch(() => {})
+        .finally(() => (this.suspending = false));
+    }, IDLE_MS);
+  }
+
+  private cancelIdle(): void {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
   }
 
   /** Push an EQ state into the chain. Off means every stage at unity. */
