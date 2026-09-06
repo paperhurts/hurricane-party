@@ -525,6 +525,9 @@
       }}
       onpause={() => {
         playing = false;
+        // Pause, stop, ended, unload: every way of going quiet ends here, so
+        // this is where the graph is told to let go of the device (#88).
+        graph?.idle();
         push();
         tell();
       }}
