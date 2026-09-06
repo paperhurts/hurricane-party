@@ -196,6 +196,8 @@ Three fields carry most of the design:
 - **`"syncTo": "beat"`** makes `dance` advance on beat flags from the viz stream rather than on a frame rate. That's the difference between dancing and merely animating, and it's one field
 - **`palette`** decides whether the companion drifts hue with the kaleidoscope or keeps its own colors. Kittens want `theme`. Unicorns emphatically want `fixed`
 
+How the art for a pack comes into existence, with an image model or a pencil, and the script that packs the frames into this shape: `companion-art.md`.
+
 ### Validation and failure
 
 Packs are untrusted input from the internet, even without code in them. So:

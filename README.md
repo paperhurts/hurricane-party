@@ -67,6 +67,7 @@ pnpm check                                                  # svelte-check + tsc
 pnpm test                                                   # vitest: the frontend's pure logic (analyser math)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main   # screenshot a running window into .sid/
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\keyout.ps1 -In art.jpg -Out icon.png   # flat background -> transparent square PNG, then: pnpm tauri icon icon.png
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Frame 64   # pose PNGs -> companion sprite sheet + manifest (docs/companion-art.md)
 pnpm tauri build --no-bundle                                # release binary, no installer
 
 cargo test --manifest-path src-tauri/Cargo.toml --lib               # app tests
@@ -113,7 +114,7 @@ the two remaining Claude Code commands, are in `CLAUDE.md`.
 | `crates/hp-control/` | The public control protocol. Unstable until v1.0 |
 | `docs/` | Specs. `decisions.md` wins over everything |
 | `design/screens/` | Claude Design prototypes. **Visual reference only** — the prototype is not the spec |
-| `tools/` | Prerequisite check, sidecar fetch, git hooks, control-pipe harness, screenshot and real-input helpers, icon background remover |
+| `tools/` | Prerequisite check, sidecar fetch, git hooks, control-pipe harness, screenshot and real-input helpers, icon background remover, companion sheet packer |
 | `design/icon/` | The capybara. Icon source and README art |
 | `.github/` | CI, the on-demand release build, issue and PR templates |
 | `.claude/` | Claude Code skills, hooks, and agents for the workflow in `CLAUDE.md` |
