@@ -13,6 +13,13 @@
     is a one-pixel feather. Then crops to the art with a margin, pads to a
     square, and resamples to -Size.
 
+    -Despill (default 3 px) takes the key colour's cast out of the pixels that
+    touch the background: an outline anti-aliased against a green screen is
+    dark green, and at sprite size (docs/companion-art.md) each such pixel
+    becomes a green dot. Within that many pixels of the background, the key's
+    leading channel is clamped to the larger of the other two; a white or
+    grey key has no leading channel and nothing happens. 0 turns it off.
+
     Windows PowerShell 5.1, System.Drawing only. No ImageMagick needed.
 #>
 param(
@@ -22,7 +29,8 @@ param(
     [int]$SeedTol = 160,
     [int]$StepTol = 14,
     [int]$Feather = 90,
-    [double]$Margin = 0.04
+    [double]$Margin = 0.04,
+    [int]$Despill = 3
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -38,7 +46,7 @@ public static class KeyOut {
              + Math.Abs(((a >> 8) & 255) - ((b >> 8) & 255))
              + Math.Abs((a & 255) - (b & 255));
     }
-    public static Bitmap Run(string path, int seedTol, int stepTol, int feather) {
+    public static Bitmap Run(string path, int seedTol, int stepTol, int feather, int despill) {
         var src = new Bitmap(path);
         int w = src.Width, h = src.Height, n = w * h;
         var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
@@ -85,6 +93,42 @@ public static class KeyOut {
                 px[i] = (a << 24) | (px[i] & 0xFFFFFF);
             }
         }
+        // Despill: the key colour's cast, taken out of the band of pixels that
+        // touch the background. An outline anti-aliased against green is dark
+        // green there, and once the art is a sprite each such pixel is a green
+        // dot. Only the key's leading channel is touched, only in the band, so
+        // a green light on the boombox's face keeps its colour.
+        if (despill > 0) {
+            int sr = (seed >> 16) & 255, sg = (seed >> 8) & 255, sb = seed & 255;
+            int lead = -1;
+            if (sg > Math.Max(sr, sb) + 32) lead = 1;
+            else if (sb > Math.Max(sr, sg) + 32) lead = 2;
+            else if (sr > Math.Max(sg, sb) + 32) lead = 0;
+            if (lead >= 0) {
+                var near = (bool[])bg.Clone();
+                for (int step = 0; step < despill; step++) {
+                    var next = (bool[])near.Clone();
+                    for (int i = 0; i < n; i++) {
+                        if (!near[i]) continue;
+                        int x = i % w, y = i / w;
+                        if (x > 0) next[i - 1] = true;
+                        if (x < w - 1) next[i + 1] = true;
+                        if (y > 0) next[i - w] = true;
+                        if (y < h - 1) next[i + w] = true;
+                    }
+                    near = next;
+                }
+                for (int i = 0; i < n; i++) {
+                    if (bg[i] || !near[i]) continue;
+                    int c = px[i];
+                    int a = (c >> 24) & 255, r = (c >> 16) & 255, gg = (c >> 8) & 255, b = c & 255;
+                    if (lead == 1 && gg > Math.Max(r, b)) gg = Math.Max(r, b);
+                    else if (lead == 2 && b > Math.Max(r, gg)) b = Math.Max(r, gg);
+                    else if (lead == 0 && r > Math.Max(gg, b)) r = Math.Max(gg, b);
+                    px[i] = (a << 24) | (r << 16) | (gg << 8) | b;
+                }
+            }
+        }
         Marshal.Copy(px, 0, data.Scan0, n);
         bmp.UnlockBits(data);
         return bmp;
@@ -106,7 +150,7 @@ public static class KeyOut {
 }
 "@
 
-$src = [KeyOut]::Run((Resolve-Path $In).Path, $SeedTol, $StepTol, $Feather)
+$src = [KeyOut]::Run((Resolve-Path $In).Path, $SeedTol, $StepTol, $Feather, $Despill)
 $b = [KeyOut]::Bounds($src)
 "art bounds: x=$($b.X) y=$($b.Y) w=$($b.Width) h=$($b.Height) of $($src.Width)x$($src.Height)"
 
