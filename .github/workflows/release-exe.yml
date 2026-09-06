@@ -80,6 +80,9 @@ jobs:
       # changes, attached to a GitHub Release so releases/latest/download/…
       # is a permanent link that needs no login. The notes are the tag's
       # annotation, then the two lines a stranger needs.
+      # The awk keeps one blank line between paragraphs and drops the rest:
+      # the earlier `sed '/^$/d'` deleted every blank line, and Markdown ran
+      # v0.4.1's five paragraphs into one.
       - name: Publish the release
         if: github.ref_type == 'tag'
         env:
@@ -88,7 +91,7 @@ jobs:
           (cd out && 7z a -tzip ../hurricane-party-windows.zip . > /dev/null)
           ls -la hurricane-party-windows.zip
           {
-            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed '/^$/d'
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | awk 'NF || prev { print } { prev = NF }'
             echo
             echo '**To run it:** unzip anywhere and start `hurricane-party.exe`. No installer. Windows 11 already has the WebView2 runtime it needs.'
             echo
