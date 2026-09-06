@@ -818,8 +818,6 @@ pub fn drag_move(app: &AppHandle) {
     push_to_os(app, &layout, &moving);
 }
 
-/// End a drag: form whatever bonds the final position earned, then re-apply the
-/// ownership topology so the new group shape is real in the z-order too.
 /// Recompute every bond's span from where the windows actually are.
 ///
 /// The span is the overlapping extent of a shared boundary, so it moves when
@@ -840,6 +838,8 @@ pub fn resync_spans(graph: &mut WindowGraph, layout: &Layout) {
     }
 }
 
+/// End a drag: form whatever bonds the final position earned, then re-apply the
+/// ownership topology so the new group shape is real in the z-order too.
 pub fn drag_end(app: &AppHandle) {
     let plan = {
         let state = app.state::<Wm>();
@@ -853,7 +853,7 @@ pub fn drag_end(app: &AppHandle) {
             .copied()
             .filter(|c| !drag.moving.contains(c))
             .collect();
-        for b in bonds_after_drag(&s.layout, &drag.moving, &others) {
+        for b in bonds_on_release(&drag.origin_layout, &s.layout, &drag.moving, &others) {
             s.graph.insert(b);
         }
         let layout = s.layout.clone();
@@ -864,6 +864,23 @@ pub fn drag_end(app: &AppHandle) {
     apply_ownership(&plan);
     emit_state(app);
     save_now(app);
+}
+
+/// The bonds a finished drag has earned. None for a drag that never moved: a
+/// click on a title bar is a zero-length drag, and a window demagnetised a
+/// moment ago is still flush with its old neighbour, so bonding on the click
+/// would undo the double-click before it (#10, D85). The gesture table says
+/// "drag a window near another"; a click is not a drag.
+pub fn bonds_on_release(
+    origin: &Layout,
+    layout: &Layout,
+    moving: &[WindowId],
+    others: &[WindowId],
+) -> Vec<Bond> {
+    if layout == origin {
+        return Vec::new();
+    }
+    bonds_after_drag(layout, moving, others)
 }
 
 // ---- seams ------------------------------------------------------------------
@@ -2779,6 +2796,23 @@ mod tests {
         assert_eq!(s.graph.bonds.len(), 2);
         assert_eq!(s.graph.components(&CLASSIC).len(), 1);
         assert!(bond::violations(&s.graph, &s.layout).is_empty());
+    }
+
+    #[test]
+    fn a_click_is_not_a_drag_and_re_forms_nothing() {
+        // #10: after a demagnetise the windows are still flush. A click on a
+        // title bar is a zero-length drag; it must not put the bond back.
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        let origin = s.layout.clone();
+        assert!(bonds_on_release(&origin, &s.layout, &[PLAYLIST], &[MAIN, EQ]).is_empty());
+        // The same position reached by a drag that moved does bond.
+        let mut away = origin.clone();
+        away.get_mut(&PLAYLIST).unwrap().x += 30;
+        assert_eq!(
+            bonds_on_release(&away, &s.layout, &[PLAYLIST], &[MAIN, EQ]).len(),
+            1
+        );
     }
 
     #[test]
