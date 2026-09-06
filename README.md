@@ -63,6 +63,7 @@ Release with the stable asset name the download page links to (#66).
 
 ```sh
 pnpm tauri dev                                              # run it
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\dev.ps1   # the same, after freeing port 1420 and a stray exe (#11)
 pnpm check                                                  # svelte-check + tsc
 pnpm test                                                   # vitest: the frontend's pure logic (analyser math)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main   # screenshot a running window into .sid/
