@@ -409,6 +409,12 @@ fn wm_resize_end(app: AppHandle) {
     wm::resize_end(&app);
 }
 
+/// #86: Main's minimise button. The whole group goes; see `wm::minimize_group`.
+#[tauri::command]
+fn wm_minimize(app: AppHandle) {
+    wm::minimize_group(&app);
+}
+
 /// The playlist window's ADD button: the library is where tracks come from.
 #[tauri::command]
 fn show_library(app: AppHandle) {
@@ -691,6 +697,7 @@ pub fn run() {
             wm_resize_start,
             wm_resize_move,
             wm_resize_end,
+            wm_minimize,
             show_library,
             wm_hello,
             wm_toggle_shade,

@@ -41,6 +41,7 @@ You changed this and I think it's better than classic Winamp. Stating it precise
 | Drag a **shared edge between two bonded windows** | **Resize.** Both neighbors adjust, like an Excel column divider |
 | **Double-click a shared edge** | Demagnetize. The bond breaks; windows are independent again |
 | Drag a window near another | Bond forms within ~10px |
+| **Minimise** on Main's title bar | The whole bonded group goes to the taskbar behind Main's one button; restoring Main brings it back. The satellites have no button of their own (D59, D86) |
 
 This is a tiling-window-manager model wearing Winamp's clothes, and it's genuinely nicer than positional adhesion. It also means the graph edges carry more than an offset:
 
