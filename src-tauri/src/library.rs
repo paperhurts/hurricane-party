@@ -161,7 +161,10 @@ pub fn delete_file(conn: &Connection, path: &str) -> Result<(), DbError> {
     if !real.is_file() {
         return Err(DbError::Io(format!("{path} is not a file")));
     }
-    std::fs::remove_file(&real).map_err(|e| DbError::Io(format!("couldn't delete {path}: {e}")))
+    std::fs::remove_file(&real).map_err(|e| DbError::Io(format!("couldn't delete {path}: {e}")))?;
+    // The one destructive action, on the record beside the removals.
+    eprintln!("library: deleted file {path}");
+    Ok(())
 }
 
 #[cfg(test)]
