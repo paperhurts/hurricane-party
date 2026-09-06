@@ -2,7 +2,7 @@
     sheet.ps1 - pack companion frames into an hp-companion/1 sprite sheet.
 
       powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In design\sprites\captain -Out skins\companions\captain -Frame 64 -Name "Cap'n Capy"
-      powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Smooth      # painted sources, not pixel art
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Filter nearest   # real pixel art at its own size
 
     Reads <state>-<n>.png from -In (idle-0.png, idle-1.png, walk-0.png ...), each a
     transparent PNG of one pose at any size, and writes -Out\sheet.png plus
@@ -11,7 +11,9 @@
     Every frame is scaled by ONE factor, chosen so the tallest and widest
     poses fit a -Frame cell: a crouch stays small and a jump stays tall, and
     the feet land on the cell's bottom edge, which is what `anchor` points at.
-    Nearest-neighbour keeps pixel art crisp; -Smooth resamples painted art.
+    The default -Filter, area, averages what each cell pixel covers, which is
+    even across frames; nearest is for pixel art drawn at (or an integer
+    multiple of) the cell size, where there is nothing to average.
     Rows are the format's states in the format's order, eight cells each; a
     state with no files is left out of the manifest and the app falls back to
     idle for it. No idle is an error here, as it is in the app.
@@ -25,8 +27,16 @@ param(
     [string]$Name = "Companion",
     [ValidateSet("fixed", "theme")][string]$Palette = "fixed",
     [int]$WalkPxPerSec = 24,
+    # nearest: real pixel art at or near its native size. area: an image
+    # model's "pixel art", which is drawn at ~10 px per fake pixel and does not
+    # divide evenly into the cell, so nearest keeps or drops whole fake pixels
+    # by where the grid falls and every frame comes out blocky differently;
+    # averaging over the area each cell pixel covers is even across frames and
+    # keeps the outline. bicubic: painted sources.
+    [ValidateSet("nearest", "area", "bicubic")][string]$Filter = "area",
     [switch]$Smooth
 )
+if ($Smooth) { $Filter = "bicubic" }
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
@@ -108,12 +118,21 @@ $sheet = New-Object System.Drawing.Bitmap ($Columns * $Frame), ($rows * $Frame),
 $g = [System.Drawing.Graphics]::FromImage($sheet)
 try {
     $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-    if ($Smooth) {
-        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    } else {
-        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
-        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+    switch ($Filter) {
+        "nearest" {
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+            $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+        }
+        "area" {
+            # GDI+'s high-quality bilinear prefilters when shrinking, which is
+            # the box average this wants; bicubic rings and softens.
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+            $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        }
+        "bicubic" {
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        }
     }
     $g.Clear([System.Drawing.Color]::Transparent)
 
