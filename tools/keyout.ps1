@@ -20,6 +20,12 @@
     leading channel is clamped to the larger of the other two; a white or
     grey key has no leading channel and nothing happens. 0 turns it off.
 
+    -NoCrop keeps the whole canvas instead of cropping to the art. A set of
+    frames drawn on one canvas then keeps the scale they were drawn at
+    relative to each other, which is what sheet.ps1 (docs/companion-art.md)
+    scales by: a crouch drawn shorter than the stand stays shorter. Cropped,
+    every pose fills its square and the packer has nothing left to keep.
+
     Windows PowerShell 5.1, System.Drawing only. No ImageMagick needed.
 #>
 param(
@@ -30,7 +36,8 @@ param(
     [int]$StepTol = 14,
     [int]$Feather = 90,
     [double]$Margin = 0.04,
-    [int]$Despill = 3
+    [int]$Despill = 3,
+    [switch]$NoCrop
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -154,10 +161,17 @@ $src = [KeyOut]::Run((Resolve-Path $In).Path, $SeedTol, $StepTol, $Feather, $Des
 $b = [KeyOut]::Bounds($src)
 "art bounds: x=$($b.X) y=$($b.Y) w=$($b.Width) h=$($b.Height) of $($src.Width)x$($src.Height)"
 
-# Square canvas around the art with a margin, art centred.
-$side = [Math]::Max($b.Width, $b.Height)
-$side = [int][Math]::Ceiling($side * (1 + 2 * $Margin))
-$cx = $b.X + $b.Width / 2.0; $cy = $b.Y + $b.Height / 2.0
+if ($NoCrop) {
+    # The whole canvas, squared on its longer side: frames drawn on one
+    # canvas keep the scale they were drawn at relative to each other.
+    $side = [Math]::Max($src.Width, $src.Height)
+    $cx = $src.Width / 2.0; $cy = $src.Height / 2.0
+} else {
+    # Square canvas around the art with a margin, art centred.
+    $side = [Math]::Max($b.Width, $b.Height)
+    $side = [int][Math]::Ceiling($side * (1 + 2 * $Margin))
+    $cx = $b.X + $b.Width / 2.0; $cy = $b.Y + $b.Height / 2.0
+}
 $sq = New-Object System.Drawing.Bitmap $side, $side, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $g = [System.Drawing.Graphics]::FromImage($sq)
 $g.Clear([System.Drawing.Color]::Transparent)
