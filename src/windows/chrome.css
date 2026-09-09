@@ -100,8 +100,9 @@ body {
 }
 
 /* Focus is a group property (v0.4-brief): when any bonded window has focus,
- * every member renders active. Getting this wrong looks broken immediately, so
- * the inactive state is defined up front even though nothing sets it yet. */
+ * every member renders active, and none does when it leaves. Rust decides
+ * (`focus_plan`) and Classic.svelte carries the answer into `data-active`;
+ * checked on a real screen for #10. */
 .chrome[data-active="false"] .titlebar {
   color: color-mix(in srgb, var(--filament) 45%, transparent);
   background: color-mix(in srgb, var(--filament) 6%, transparent);
