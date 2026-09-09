@@ -306,6 +306,16 @@
     {:else}
       <span class="ttl">{title}</span>
     {/if}
+    {#if label === "main"}
+      <!-- #86, D86: minimise is Main's gesture and takes the whole group; a
+           satellite has no taskbar button to come back from (D59). -->
+      <button
+        class="tbtn"
+        title="Minimise"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={() => invoke("wm_minimize")}>&ndash;</button
+      >
+    {/if}
     <!-- Stops the pointerdown so a click here is neither a drag nor a
          double-tap on the title bar. -->
     <button
