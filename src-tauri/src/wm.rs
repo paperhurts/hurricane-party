@@ -30,6 +30,9 @@ pub const CHROME_W: f64 = 275.0;
 pub const CHROME_H: f64 = 116.0;
 /// Windowshade collapses a window to a 275 x 14 bar.
 pub const SHADE_H: f64 = 14.0;
+/// #101, D88: how much of a title bar's width must stay inside a display's
+/// work area for the window to count as reachable. A hand needs a grab.
+pub const REACH_W: f64 = 40.0;
 
 /// D30: every valid playlist size is `275 + 25n` by `116 + 29m`. Verified
 /// against Webamp's source. The design prototype says `step:10, min:58`, which
@@ -106,6 +109,9 @@ pub fn is_resizable(id: WindowId) -> bool {
 pub struct MonitorInfo {
     pub rect: Rect,
     pub scale: f64,
+    /// The part of the display the taskbar leaves free. A title bar outside
+    /// it cannot be grabbed (#101, D88).
+    pub work: Rect,
 }
 
 /// D55: the topology is cached, never queried live.
@@ -353,6 +359,9 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     // space. Same rigid-translation rescue the display watchdog uses, so a
     // group that comes back does so with its bonds intact.
     layout = rescue_layout(&layout, &graph, &monitors);
+    // #101, D88: and a group whose title bars sit off the usable screen, or
+    // under the taskbar, is pulled to where a hand can reach it.
+    layout = reach_layout(&layout, &graph, &monitors, zoom);
 
     // Re-collapse whatever was left shaded. The stored height is the *unshaded*
     // one, so this is a fresh collapse from a known-good size rather than a
@@ -511,6 +520,15 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
                 m.size().height as Px,
             ),
             scale: m.scale_factor(),
+            work: {
+                let wa = m.work_area();
+                Rect::new(
+                    wa.position.x,
+                    wa.position.y,
+                    wa.size.width as Px,
+                    wa.size.height as Px,
+                )
+            },
         })
         .collect();
 
@@ -815,6 +833,13 @@ pub fn drag_move(app: &AppHandle) {
             threshold,
             screen,
         );
+        // #101, D88: a title bar never leaves a display's work area. After
+        // the magnet, so a snap cannot put one out of reach either.
+        let mut layout = layout;
+        let (cx, cy) = reach_clamp(&layout, &drag.moving, &s.monitors, s.zoom());
+        if (cx, cy) != (0, 0) {
+            bond::translate_group(&mut layout, &drag.moving, cx, cy);
+        }
         s.layout = layout.clone();
         (layout, drag.moving)
     }; // D54: lock released before the OS is touched.
@@ -1705,6 +1730,7 @@ pub fn set_double(app: &AppHandle, on: bool) {
         // A group that doubled may now hang off the display; same rescue as a
         // topology change, so it comes back rigidly with its bonds intact.
         let mut layout = rescue_layout(&rezoomed, &graph, &s.monitors);
+        layout = reach_layout(&layout, &graph, &s.monitors, new_zoom);
 
         s.double = on;
         let shaded: Vec<WindowId> = s.shaded.iter().copied().collect();
@@ -1827,6 +1853,95 @@ pub fn rescue_layout(layout: &Layout, graph: &WindowGraph, monitors: &[MonitorIn
     out
 }
 
+/// #101: can a hand reach this window? Its title bar has to sit inside some
+/// display's work area: the bar's whole height, and `REACH_W` of its width.
+/// The work area rather than the display, so the taskbar cannot hide it.
+pub fn is_reachable(r: Rect, monitors: &[MonitorInfo], title_h: Px, grab: Px) -> bool {
+    monitors.iter().any(|m| {
+        let w = m.work;
+        r.y >= w.y && r.y + title_h <= w.bottom() && r.right().min(w.right()) - r.x.max(w.x) >= grab
+    })
+}
+
+/// The rigid translation that brings every member of a group within reach
+/// (#101, D88), or (0, 0) when they all already are. Toward the display
+/// nearest the group, the choice the display rescue makes too. When a group
+/// is larger than the work area the top edge wins over the bottom and the
+/// left over the right: the windows up there carry the bars a hand goes for.
+pub fn reach_clamp(
+    layout: &Layout,
+    group: &[WindowId],
+    monitors: &[MonitorInfo],
+    zoom: f64,
+) -> (Px, Px) {
+    let Some(bounds) = bond::bounds(layout, group) else {
+        return (0, 0);
+    };
+    let Some(m) = nearest_monitor(monitors, bounds) else {
+        return (0, 0);
+    };
+    let title_h = bond::d40::physical(SHADE_H * zoom, m.scale);
+    let grab = bond::d40::physical(REACH_W * zoom, m.scale);
+    let rects: Vec<Rect> = group
+        .iter()
+        .filter_map(|id| layout.get(id).copied())
+        .collect();
+    if rects
+        .iter()
+        .all(|r| is_reachable(*r, monitors, title_h, grab))
+    {
+        return (0, 0);
+    }
+    let w = m.work;
+    let min_y = rects.iter().map(|r| r.y).min().unwrap_or(w.y);
+    let max_y = rects.iter().map(|r| r.y).max().unwrap_or(w.y);
+    let dy = if min_y < w.y {
+        w.y - min_y
+    } else if max_y + title_h > w.bottom() {
+        w.bottom() - title_h - max_y
+    } else {
+        0
+    };
+    // Every bar keeps `grab` of its width inside: the shift right some member
+    // needs, against the shift right the furthest-right member can still take.
+    let need = rects
+        .iter()
+        .map(|r| w.x + grab - r.right())
+        .max()
+        .unwrap_or(0);
+    let room = rects
+        .iter()
+        .map(|r| w.right() - grab - r.x)
+        .min()
+        .unwrap_or(0);
+    let dx = if need > 0 {
+        need
+    } else if room < 0 {
+        room
+    } else {
+        0
+    };
+    (dx, dy)
+}
+
+/// `reach_clamp` for every connected component (#101): launch, the display
+/// rescue and a re-zoom, so a layout saved with a bar off the screen heals.
+pub fn reach_layout(
+    layout: &Layout,
+    graph: &WindowGraph,
+    monitors: &[MonitorInfo],
+    zoom: f64,
+) -> Layout {
+    let mut out = layout.clone();
+    for comp in graph.components(&CLASSIC) {
+        let (dx, dy) = reach_clamp(&out, &comp, monitors, zoom);
+        if (dx, dy) != (0, 0) {
+            bond::translate_group(&mut out, &comp, dx, dy);
+        }
+    }
+    out
+}
+
 /// Read the display topology from the OS.
 ///
 /// D57: `scale_factor()` on a window goes **stale** after a topology change —
@@ -1845,6 +1960,15 @@ pub fn read_monitors(app: &AppHandle) -> Vec<MonitorInfo> {
                         m.size().height as Px,
                     ),
                     scale: m.scale_factor(),
+                    work: {
+                        let wa = m.work_area();
+                        Rect::new(
+                            wa.position.x,
+                            wa.position.y,
+                            wa.size.width as Px,
+                            wa.size.height as Px,
+                        )
+                    },
                 })
                 .collect()
         })
@@ -1898,6 +2022,7 @@ pub fn check_displays(app: &AppHandle) {
         s.monitors = monitors.clone();
         s.scale = monitors.first().map(|m| m.scale).unwrap_or(s.scale);
         let rescued = rescue_layout(&s.layout, &s.graph, &s.monitors);
+        let rescued = reach_layout(&rescued, &s.graph, &s.monitors, s.zoom());
         let moved: Vec<WindowId> = CLASSIC
             .iter()
             .copied()
@@ -2435,6 +2560,16 @@ mod tests {
         MonitorInfo {
             rect: Rect::new(x, y, w, h),
             scale,
+            work: Rect::new(x, y, w, h),
+        }
+    }
+
+    /// A display with a taskbar along its bottom edge.
+    fn mon_tb(x: Px, y: Px, w: Px, h: Px, scale: f64, taskbar: Px) -> MonitorInfo {
+        MonitorInfo {
+            rect: Rect::new(x, y, w, h),
+            scale,
+            work: Rect::new(x, y, w, h - taskbar),
         }
     }
 
@@ -3166,6 +3301,80 @@ mod tests {
         // and wait for one to come back.
         let s = stacked();
         assert_eq!(rescue_layout(&s.layout, &s.graph, &[]), s.layout);
+    }
+
+    // ---- reach (#101, D88) --------------------------------------------------
+
+    #[test]
+    fn a_title_bar_above_the_work_area_is_pulled_down() {
+        let s = stacked();
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        let mut l = s.layout.clone();
+        bond::translate_group(&mut l, &CLASSIC, 0, -150);
+        // Main's title bar is at y = -30 while the EQ and playlist are still
+        // on screen, so the display rescue leaves this alone. The reach rule
+        // does not.
+        assert_eq!(rescue_layout(&l, &s.graph, &ms), l);
+        assert_eq!(reach_clamp(&l, &CLASSIC, &ms, 1.0), (0, -l[&MAIN].y));
+        let out = reach_layout(&l, &s.graph, &ms, 1.0);
+        assert_eq!(out[&MAIN].y, 0);
+        assert!(bond::violations(&s.graph, &out).is_empty());
+    }
+
+    #[test]
+    fn a_reachable_group_is_left_alone() {
+        let s = stacked();
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        assert_eq!(reach_clamp(&s.layout, &CLASSIC, &ms, 1.0), (0, 0));
+        assert_eq!(reach_layout(&s.layout, &s.graph, &ms, 1.0), s.layout);
+    }
+
+    #[test]
+    fn a_group_off_a_side_keeps_a_grab_of_every_title_bar() {
+        let s = stacked();
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        let mut l = s.layout.clone();
+        bond::translate_group(&mut l, &CLASSIC, 1900, 0);
+        let x = l[&MAIN].x;
+        assert_eq!(reach_clamp(&l, &CLASSIC, &ms, 1.0), (1920 - 40 - x, 0));
+        let mut l = s.layout.clone();
+        bond::translate_group(&mut l, &CLASSIC, -400, 0);
+        let right = l[&MAIN].right();
+        assert_eq!(reach_clamp(&l, &CLASSIC, &ms, 1.0), (40 - right, 0));
+    }
+
+    #[test]
+    fn a_title_bar_under_the_taskbar_is_pulled_up() {
+        let s = stacked();
+        let ms = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        let mut l = s.layout.clone();
+        // The playlist's bar lands at y = 1050, under a 48 px taskbar.
+        let dy = 1050 - l[&PLAYLIST].y;
+        bond::translate_group(&mut l, &CLASSIC, 0, dy);
+        assert_eq!(reach_clamp(&l, &CLASSIC, &ms, 1.0), (0, 1032 - 14 - 1050));
+    }
+
+    #[test]
+    fn a_member_on_each_display_is_reachable_where_it_is() {
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        let ms = two_monitors();
+        let mut l = s.layout.clone();
+        bond::translate_group(&mut l, &[PLAYLIST], 3000, 0);
+        assert_eq!(reach_layout(&l, &s.graph, &ms, 1.0), l);
+    }
+
+    #[test]
+    fn the_clamp_moves_only_the_component_that_is_out_of_reach() {
+        let mut s = stacked();
+        s.graph.break_bond(EQ, PLAYLIST);
+        let ms = vec![mon(0, 0, 1920, 1080, 1.0)];
+        let mut l = s.layout.clone();
+        bond::translate_group(&mut l, &[PLAYLIST], 0, -600);
+        let out = reach_layout(&l, &s.graph, &ms, 1.0);
+        assert_eq!(out[&MAIN], l[&MAIN]);
+        assert_eq!(out[&EQ], l[&EQ]);
+        assert_eq!(out[&PLAYLIST].y, 0);
     }
 
     #[test]
