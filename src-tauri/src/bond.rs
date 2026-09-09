@@ -36,6 +36,10 @@ impl Rect {
     pub fn bottom(&self) -> Px {
         self.y + self.h
     }
+    /// Do the two bodies share any area? Edges that merely touch do not.
+    pub fn intersects(&self, o: Rect) -> bool {
+        self.x < o.right() && self.right() > o.x && self.y < o.bottom() && self.bottom() > o.y
+    }
     pub fn translated(&self, dx: Px, dy: Px) -> Rect {
         Rect {
             x: self.x + dx,
@@ -227,6 +231,33 @@ fn overlap(a0: Px, a1: Px, b0: Px, b1: Px) -> Option<(Px, Px)> {
     } else {
         None
     }
+}
+
+/// #100, D89: pairs of windows whose bodies share area. The seam rules cannot
+/// see this (a window can be exactly flush with one edge while lying on
+/// another window), so it is checked on its own.
+pub fn overlapping_pairs(layout: &Layout, ids: &[WindowId]) -> Vec<(WindowId, WindowId)> {
+    let mut out = vec![];
+    for (i, a) in ids.iter().enumerate() {
+        for b in &ids[i + 1..] {
+            if let (Some(ra), Some(rb)) = (layout.get(a), layout.get(b)) {
+                if ra.intersects(*rb) {
+                    out.push((*a, *b));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Does any window in `moving` lie on the body of any in `others`?
+pub fn any_overlap(layout: &Layout, moving: &[WindowId], others: &[WindowId]) -> bool {
+    moving.iter().any(|m| {
+        others.iter().any(|f| match (layout.get(m), layout.get(f)) {
+            (Some(a), Some(b)) => a.intersects(*b),
+            _ => false,
+        })
+    })
 }
 
 /// Would `moving` bond to `fixed`?

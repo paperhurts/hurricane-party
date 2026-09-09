@@ -63,6 +63,7 @@ Rules:
 - Title-bar drag moves every member of the connected component
 - Breaking a bond runs **connected-components again** — A–B–C, break the A–B bond, and you get two groups. This is where the bugs live; model it as a real graph, not a flat list
 - Windows also bond to screen edges (movement constraint only, no resize)
+- A window never bonds where its body lies over another member, and no magnet pulls it there: it stays loose until dragged clear. Within the snap threshold of the neighbour's far edge it snaps there instead (D89)
 
 #### The conflict you need to resolve before design
 

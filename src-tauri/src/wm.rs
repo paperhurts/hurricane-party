@@ -703,6 +703,14 @@ pub fn drag_frame(
                 continue;
             };
             if let Some(snap) = bond::probe(mr, fr, threshold) {
+                // #100, D89: a magnet never pulls a window onto another's body.
+                // A window snapped flush to one edge can still be lying on a
+                // third window that shares it; that candidate is not a bond.
+                let mut trial = layout.clone();
+                bond::translate_group(&mut trial, moving, snap.dx, snap.dy);
+                if bond::any_overlap(&trial, moving, others) {
+                    continue;
+                }
                 let cost = snap.dx.abs() + snap.dy.abs();
                 if best.is_none_or(|(c, _, _)| cost < c) {
                     best = Some((cost, snap.dx, snap.dy));
@@ -733,6 +741,13 @@ pub fn drag_frame(
 /// user had just demagnetized would silently re-form on the next unrelated
 /// drag, and the break would look like it had never worked.
 pub fn bonds_after_drag(layout: &Layout, moving: &[WindowId], others: &[WindowId]) -> Vec<Bond> {
+    // #100, D89: a window whose body lies over another never bonds. It stays
+    // loose, above whatever it landed on, and the next drag of the group
+    // leaves it behind. The edge test alone cannot tell a docked window from
+    // one dropped on a neighbour's body when a third window shares the edge.
+    if bond::any_overlap(layout, moving, others) {
+        return vec![];
+    }
     let mut out = vec![];
     for m in moving {
         let Some(mr) = layout.get(m).copied() else {
@@ -2828,6 +2843,62 @@ mod tests {
         let mut l = drag_layout();
         l.insert(PLAYLIST, Rect::new(276, 0, 275, 116));
         assert!(bonds_after_drag(&l, &[PLAYLIST], &[MAIN, EQ]).is_empty());
+    }
+
+    // ---- bodies (#100, D89) -------------------------------------------------
+
+    /// Main with the playlist shaded flush under it, and the EQ elsewhere.
+    fn main_over_shaded_playlist() -> Layout {
+        let mut l = Layout::new();
+        l.insert(MAIN, Rect::new(0, 0, 275, 116));
+        l.insert(PLAYLIST, Rect::new(0, 116, 275, 14));
+        l.insert(EQ, Rect::new(600, 0, 275, 116));
+        l
+    }
+
+    #[test]
+    fn a_window_dropped_on_a_members_body_stays_loose() {
+        // The EQ dropped flush under Main, right on the shaded playlist: exactly
+        // flush with Main's bottom, and lying on the playlist. No bond.
+        let mut l = main_over_shaded_playlist();
+        l.insert(EQ, Rect::new(0, 116, 275, 116));
+        assert!(bonds_after_drag(&l, &[EQ], &[MAIN, PLAYLIST]).is_empty());
+        // Clear of the playlist, the same edge does bond.
+        let mut l = main_over_shaded_playlist();
+        l.remove(&PLAYLIST);
+        l.insert(EQ, Rect::new(0, 116, 275, 116));
+        assert_eq!(bonds_after_drag(&l, &[EQ], &[MAIN]).len(), 1);
+    }
+
+    #[test]
+    fn a_magnet_never_pulls_a_window_onto_a_body() {
+        // Four pixels below Main's bottom edge, over the playlist. The nearer
+        // magnet (Main's bottom, cost 4) would land it on the playlist, so the
+        // further one wins: flush under the playlist instead, cost 10.
+        let mut origin = main_over_shaded_playlist();
+        origin.insert(EQ, Rect::new(0, 120, 275, 116));
+        let out = drag_frame(&origin, &[EQ], (0, 0), &[MAIN, PLAYLIST], 10, None);
+        assert_eq!(out[&EQ].y, 130);
+        assert!(bond::overlapping_pairs(&out, &CLASSIC).is_empty());
+        // Too deep in a body for any magnet: it stays where it is, loose.
+        let mut origin = main_over_shaded_playlist();
+        origin.insert(PLAYLIST, Rect::new(0, 116, 275, 116));
+        origin.insert(EQ, Rect::new(0, 150, 275, 116));
+        let out = drag_frame(&origin, &[EQ], (0, 0), &[MAIN, PLAYLIST], 10, None);
+        assert_eq!(out[&EQ].y, 150);
+        assert!(bonds_after_drag(&out, &[EQ], &[MAIN, PLAYLIST]).is_empty());
+    }
+
+    #[test]
+    fn overlapping_pairs_sees_bodies_that_cross_and_not_edges_that_touch() {
+        let l = main_over_shaded_playlist();
+        assert!(bond::overlapping_pairs(&l, &CLASSIC).is_empty());
+        let mut l = l;
+        l.insert(EQ, Rect::new(100, 100, 275, 116));
+        assert_eq!(
+            bond::overlapping_pairs(&l, &CLASSIC),
+            vec![(MAIN, EQ), (EQ, PLAYLIST)]
+        );
     }
 
     #[test]
