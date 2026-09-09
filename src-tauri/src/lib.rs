@@ -7,6 +7,7 @@ mod localimport;
 mod pipeline;
 pub mod platform;
 mod playlist;
+mod tray;
 mod video;
 mod viz;
 pub mod wm;
@@ -416,13 +417,10 @@ fn wm_minimize(app: AppHandle) {
 }
 
 /// The playlist window's ADD button: the library is where tracks come from.
+/// A library hidden to the tray (#87) comes back the same way.
 #[tauri::command]
 fn show_library(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("library") {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    tray::reveal_library(&app);
 }
 
 // ---- playlists --------------------------------------------------------------
@@ -559,26 +557,30 @@ fn wire_focus_events(app: &AppHandle) {
     }
 }
 
-/// D63, the other half: the library window is an ordinary decorated window, so
-/// closing it closes it — but it must not be able to leave the app running with
-/// no way out either. If the classic windows are somehow already gone, closing
-/// the library is the last window the user can actually see, and the hidden
-/// roots would keep the process alive invisibly.
+/// D63, the other half, and #87: the library's × hides it behind a tray icon
+/// (D87) rather than closing it, and the music keeps playing. It must not be
+/// able to leave the app running with no way out either: if the classic
+/// windows are somehow already gone, the library is the last window the user
+/// can actually see, the hidden roots would keep the process alive invisibly,
+/// and a tray icon is not a way out, so that case still exits.
 fn wire_library_close(app: &AppHandle) {
     let Some(win) = app.get_webview_window("library") else {
         return;
     };
     let handle = app.clone();
     win.on_window_event(move |event| {
-        if !matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+        let tauri::WindowEvent::CloseRequested { api, .. } = event else {
             return;
-        }
+        };
         let any_classic_left = wm::CLASSIC
             .iter()
             .any(|id| handle.get_webview_window(wm::label_of(*id)).is_some());
         if !any_classic_left {
             handle.exit(0);
+            return;
         }
+        api.prevent_close();
+        tray::hide_library(&handle);
     });
 }
 
