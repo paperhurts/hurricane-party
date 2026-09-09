@@ -73,7 +73,7 @@ body {
   white-space: nowrap;
 }
 
-/* The one button in the title bar: 1x / 2x chrome (#47). */
+/* The title bar's buttons: minimise (#86, Main only) and 1x / 2x chrome (#47). */
 .tbtn {
   flex: 0 0 auto;
   width: 13px;
