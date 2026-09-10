@@ -25,11 +25,11 @@ So this schema is deliberately closer to Winamp's model than to the web's — ab
   "format": "hp-skin/1",
   "name": "Eyewall",
   "author": "paperhurts",
-  "authoredScale": 1,          // 1 or 2. the scale the art is drawn at (O3)
+  "authoredScale": 1,          // 1 or 2: the scale a sheet named by a plain file is drawn at (O3, D92)
 
   "sheets": {                  // logical name -> file, relative to the skin root
-    "chrome":  "chrome.png",
-    "buttons": "buttons.png",
+    "chrome":  { "1": "chrome.png", "2": "chrome@2x.png" },   // one file per scale (D73, D92)
+    "buttons": "buttons.png",                                    // or one file, at authoredScale
     "numbers": "numbers.png",
     "text":    "text.png",
     "pledit":  "pledit.png"
@@ -54,7 +54,7 @@ So this schema is deliberately closer to Winamp's model than to the web's — ab
   "visualizer": { "component": "spectrum-bars", "options": { "bars": 19, "peakHold": true } },
 
   "fonts": {
-    "chrome": { "type": "bitmap", "sheet": "text", "glyphSize": [5, 6], "map": " ABCDEFG..." },
+    "chrome": { "type": "system", "size": 9, "case": "upper", "tracking": 0.08 },   // the theme's typeface (D92)
     "time":   { "type": "bitmap", "sheet": "numbers", "glyphSize": [9, 13], "map": "0123456789 -" }
   },
 
@@ -65,6 +65,18 @@ So this schema is deliberately closer to Winamp's model than to the web's — ab
   "regions": { … }             // optional, best-effort, v0.5+
 }
 ```
+
+### Rects are logical, sheets come per scale (D92)
+
+Every `rect` in a manifest is in logical pixels at 1x, whatever the sheet. A sheet named by a plain file name is drawn at `authoredScale`; one named by `{ "1": file, "2": file }` ships both, and the renderer decodes the one the screen can show (the `2` file when `devicePixelRatio` is 2 or more) and multiplies every rect by that scale when it cuts a sprite. Eyewall ships both (D73); a `.wsz` is a plain 1x file. Round once (D40): logical is the source of truth and the multiply happens at the cut, nowhere else.
+
+### `tint` on a sprite, for `art: mask` (D92)
+
+A sprite reference is `{ "sheet", "rect" }`, plus `"tint"`, a palette token name, when the skin is `art: mask`: the sprite's alpha is the shape and the token is its colour, so a theme reaches every piece of chrome live. Default `filament`. Ignored under `art: final`, and absent from every imported skin. A `text` element carries a `tint` the same way, and an `inactive: { "tint" }` for when the group loses focus.
+
+### Fonts: bitmap or system (D92)
+
+`fonts.<name>` is `{ "type": "bitmap", "sheet", "glyphSize", "map" }`, the classic glyph strip, or `{ "type": "system", "size", "case": "upper" | "none", "tracking": <em> }`, the theme's chrome typeface (`design/tokens.json`, `type.chrome`) at that size. Eyewall's title bar is a system font, the look v0.4b shipped; every `.wsz` font is a bitmap. A skin never names a family: that is the theme's.
 
 ### `viscolor` is one array, used twice
 
@@ -103,10 +115,12 @@ Only the three classic windows are skinnable (**O13**). Library, Video, Download
 
 | Field | Meaning |
 |---|---|
-| `size` | Base size in logical px at `authoredScale`. Main and EQ are `[275,116]` and immutable |
+| `size` | Base size in logical px at 1x (D92). Main and EQ are `[275,116]` and immutable |
 | `resizable` | **The capability flag D35 checks at hover time.** Determines whether a shared edge offers a splitter cursor or a move cursor |
 | `resizeStep` | Quantization for the splitter. Playlist is `[25,29]`; omit when not resizable |
 | `shade` | The windowshade layout — a separate element set at `[275,14]`, not a clipped version of the full one |
+
+**Every element set, full and shade, has a `titlebar` image with `"role": "drag"`.** It is the one move handle (D35) and carries the double-click that toggles shade (D60); a set without one is refused.
 
 **`shade` is not optional for these three.** The Main shade doubles as the always-on-top mini-player and is, per the design brief, the single most important screen in the project. A skin that omits it fails validation rather than rendering a clipped main window.
 
@@ -118,7 +132,7 @@ Every element that varies with focus declares an `inactive` variant. The rendere
 
 ## Elements
 
-Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at `authoredScale`.
+Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom"` to keep its distance from that edge instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x and its buttons anchor right.
 
 ```jsonc
 "elements": {
@@ -155,16 +169,16 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 
 | `type` | Purpose | Required |
 |---|---|---|
-| `image` | Static sprite | `rect`, `sprite` |
+| `image` | Static sprite | `rect`, `sprite`; `inactive` and `role: "drag"` optional |
 | `nineslice` | Stretchable frame. `rect: "fill"` tracks the window | `sprite`, `insets` |
-| `button` | Clickable. `action` names an app command | `rect`, `sprite`, `action` |
-| `toggle` | Two-state button | `rect`, `sprite`, `on`, `action` |
+| `button` | Clickable. `action` names an app command | `rect`, `sprite`, `action`; `hover`, `active` (pressed), `inactive` optional |
+| `toggle` | Two-state button | `rect`, `sprite`, `on` (`{ sprite, hover?, active?, inactive? }` for the on state), `action` |
 | `slider` | Continuous control | `rect`, `track`, `thumb`, `bind` |
 | `text` | Bitmap or system text | `rect`, `font`, `bind` |
 | `list` | Playlist rows | `rect`, `rowHeight`, row color bindings |
 | `visualizer` | Where the component from `visualizer` draws | `rect` |
 
-`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns.
+`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `balance`.
 
 ### Glow is declared, not assumed
 
@@ -246,4 +260,4 @@ The asymmetry is deliberate: structural errors fail loudly at load time, missing
 ## Open
 
 - **The conventional `.wsz` sprite offset table** hasn't been transcribed yet. It's mechanical, it's public in Webamp's source, and it's a v0.5 task — but it's the thing that makes the mapping table above real rather than aspirational
-- **Fixed rectangles for the Eyewall default skin** still have to be derived from the Pass 1 prototypes, which are flexbox. That's a v0.4 task and the first real test of whether this schema is expressive enough
+- ~~**Fixed rectangles for the Eyewall default skin** still have to be derived from the Pass 1 prototypes, which are flexbox. That's a v0.4 task and the first real test of whether this schema is expressive enough~~ **Done for the shell chrome in #3's first PR** (D90, D92): `skins/eyewall/` is derived from the CSS chrome that shipped, and it is the template a person copies. The interiors follow, one window per PR

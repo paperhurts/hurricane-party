@@ -33,6 +33,7 @@ If no decision covers a choice, make the obvious call, write it down (a row in `
 | `docs/purricane.md` | Kaleidoscope theme + desktop kittens. v0.5 and v0.7. Not needed before then |
 | `design/tokens.json` | Machine-readable palette. **Import this; never hardcode a hex value** |
 | `.claude/skills/*/SKILL.md` | `/land` runs the gates and opens the PR; `/decide` appends a decision row. Those are the only workflow commands |
+| `skins/eyewall/` | The skin that ships, and the template a person copies to make their own (D90). `tools\chrome-sheet.ps1` redraws its sheets from the manifest |
 
 ---
 
@@ -55,7 +56,7 @@ These have burned into the design. Don't quietly relax them.
 
 Work one at a time. Don't build ahead.
 
-**v0.0 through v0.4a are built, and most of v0.4b.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). v0.4b so far: chrome drawn from tokens in CSS (D72), Main owns playback and shows the spectrum on the radar ramp (D74), the 10-band EQ (D75), the playlist window, seams that glow and discharge (#9), 2x chrome (D76), the playlist's corner grip, the viz stream on its own pipe, the windowshade as a mini-player, Main as the one transport (D81), the download page and tagged Releases (D82), removal from the library (D83, D84), the captain's frames and the recipe that made them (`docs/companion-art.md`, `design/sprites/captain/`), minimise as a group (D86), the library to the tray (D87), and three bond-model rules that hand tests forced: a click is not a drag (D85), a title bar stays within reach (D88), a window never bonds over another's body (D89). Left in v0.4b: the windowshade contents (#8) and the sprite renderer (#3), both waiting on the Eyewall sheet, which the session derives from the shipping CSS chrome; nobody draws it by hand (D73, D90). Tracked as the v0.4b milestone on GitHub.
+**v0.0 through v0.4a are built, and most of v0.4b.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). v0.4b so far: chrome drawn from tokens in CSS (D72), Main owns playback and shows the spectrum on the radar ramp (D74), the 10-band EQ (D75), the playlist window, seams that glow and discharge (#9), 2x chrome (D76), the playlist's corner grip, the viz stream on its own pipe, the windowshade as a mini-player, Main as the one transport (D81), the download page and tagged Releases (D82), removal from the library (D83, D84), the captain's frames and the recipe that made them (`docs/companion-art.md`, `design/sprites/captain/`), minimise as a group (D86), the library to the tray (D87), and three bond-model rules that hand tests forced: a click is not a drag (D85), a title bar stays within reach (D88), a window never bonds over another's body (D89). Left in v0.4b: the sprite renderer (#3), whose first PR draws the shell chrome of all three windows from `skins/eyewall/` through `hp-skin/1` (D90, D92) and puts the shade button on every title bar (#8); the three interiors follow, one PR each. Tracked as the v0.4b milestone on GitHub.
 
 ---
 
