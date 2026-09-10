@@ -69,6 +69,7 @@ pnpm test                                                   # vitest: the fronte
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main   # screenshot a running window into .sid/
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\keyout.ps1 -In art.jpg -Out icon.png   # flat background -> transparent square PNG, then: pnpm tauri icon icon.png
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Frame 64   # pose PNGs -> companion sprite sheet + manifest (docs/companion-art.md)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\chrome-sheet.ps1   # redraw skins/eyewall/*.png from its manifest (docs/skin-manifest.md)
 pnpm tauri build --no-bundle                                # release binary, no installer
 
 cargo test --manifest-path src-tauri/Cargo.toml --lib               # app tests

@@ -13,11 +13,29 @@ export function colorsFor(name: ThemeName): Record<string, string> {
   return { ...base, ...(theme.colors ?? {}) };
 }
 
-/** Push a theme onto :root as --token custom properties. */
+/** Resolve a theme's typefaces (`type.chrome`, `type.ui`), following
+ * `extends` like the colours. */
+export function typeFor(name: ThemeName): Record<string, string> {
+  const themes = tokens.themes as Record<string, any>;
+  const theme = themes[name];
+  const base = theme.extends ? typeFor(theme.extends as ThemeName) : {};
+  const own: Record<string, string> = {};
+  for (const [role, family] of Object.entries(theme.type ?? {})) {
+    if (role !== "$comment" && typeof family === "string") own[role] = family;
+  }
+  return { ...base, ...own };
+}
+
+/** Push a theme onto :root: --token custom properties for the six colours,
+ * and --type-chrome / --type-ui for its typefaces, so a skin's `system` font
+ * is the theme's face and never names one itself (skin-manifest.md, D92). */
 export function applyTheme(name: ThemeName = "eyewall") {
   const c = colorsFor(name);
   for (const [token, hex] of Object.entries(c)) {
     document.documentElement.style.setProperty(`--${token}`, hex);
+  }
+  for (const [role, family] of Object.entries(typeFor(name))) {
+    document.documentElement.style.setProperty(`--type-${role}`, JSON.stringify(family));
   }
 }
 
