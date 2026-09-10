@@ -120,6 +120,8 @@ Only the three classic windows are skinnable (**O13**). Library, Video, Download
 | `resizeStep` | Quantization for the splitter. Playlist is `[25,29]`; omit when not resizable |
 | `shade` | The windowshade layout — a separate element set at `[275,14]`, not a clipped version of the full one |
 
+**A window supplies values, never geometry.** The skin says where the clock is, what font it is in and how it is lit; the window hands the shell a `binds` record (what the clock reads) and a `slots` record of content to place inside a named element's box — the analyser goes in whatever rectangle the manifest gave the `visualizer`. Nothing outside the manifest knows a pixel.
+
 **Every element set, full and shade, has a `titlebar` image with `"role": "drag"`.** It is the one move handle (D35) and carries the double-click that toggles shade (D60); a set without one is refused.
 
 **`shade` is not optional for these three.** The Main shade doubles as the always-on-top mini-player and is, per the design brief, the single most important screen in the project. A skin that omits it fails validation rather than rendering a clipped main window.
@@ -169,16 +171,30 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 
 | `type` | Purpose | Required |
 |---|---|---|
-| `image` | Static sprite | `rect`, `sprite`; `inactive` and `role: "drag"` optional |
-| `nineslice` | Stretchable frame. `rect: "fill"` tracks the window | `sprite`, `insets` |
+| `image` | Static sprite | `rect`, `sprite`; `inactive`, `role: "drag"` and `opacity` optional |
+| `nineslice` | Stretchable frame. `rect: "fill"` tracks the window; a rect of its own edges a control | `sprite`, `insets`; `opacity` optional |
 | `button` | Clickable. `action` names an app command | `rect`, `sprite`, `action`; `hover`, `active` (pressed), `inactive` optional |
-| `toggle` | Two-state button | `rect`, `sprite`, `on` (`{ sprite, hover?, active?, inactive? }` for the on state), `action` |
-| `slider` | Continuous control | `rect`, `track`, `thumb`, `bind` |
-| `text` | Bitmap or system text | `rect`, `font`, `bind` |
+| `toggle` | Two-state button, or an indicator | `rect`, `sprite`, `on` (`{ sprite, hover?, active?, inactive? }`), and either `action` (clickable) or `bind` + `when` (state-driven) |
+| `slider` | Continuous control | `rect`, `bind`, and at least one of `track`, `fill`, `thumb` |
+| `text` | Bitmap or system text | `rect`, `font`, and either `bind` or a literal `value`; `opacity`, `glow`, `lit`, `overflow` optional |
 | `list` | Playlist rows | `rect`, `rowHeight`, row color bindings |
 | `visualizer` | Where the component from `visualizer` draws | `rect` |
 
-`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `balance`.
+A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter.
+
+`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`).
+
+### `opacity`, so one sprite serves every strength (D93)
+
+Mask art carries strength in its own alpha, which would mean a near-identical sprite for every place a skin wants the same shape a little dimmer. An element may instead declare `opacity`, 0..1, over its tint: Eyewall draws one full-alpha `ring` and uses it as the window's frame at `0.3` and as the edge of the title strip, the seek bar and the volume bar at `0.14`, and one full-alpha `solid` as every well. Available on `image`, `nineslice` and `text`. An imported skin never sets it — its alpha is already in its pixels.
+
+### A `text` says what it shows (D93)
+
+`bind` names a value the app supplies; `value` is a literal, and a `{}` in it is replaced by the bound value, so `"value": "VOL {}"` with `"bind": "volumePercent"` is one element rather than two. One of the two is required. `glow: true` asks for the theme's static glow, for text a `.wsz` would have baked into glyph art — Eyewall's clock. `lit` is a second appearance chosen by state, `{ bind, when, tint?, opacity?, glow? }`: the PLAY tag lights when `playState` is `"playing"`, and STOP lights `strike` where the others light `arc`.
+
+### A `toggle` that watches instead of clicking (D93)
+
+`action` makes a toggle clickable and the app decides its on state. `bind` and `when` make it state-driven: the on art shows while that binding holds that value. A transport button has both — it plays when clicked and lights while playing. A toggle with a binding and no action is an indicator, which is why the format has no separate type for one. At least one of the two is required.
 
 ### Glow is declared, not assumed
 
