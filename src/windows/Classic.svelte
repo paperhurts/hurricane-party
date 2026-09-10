@@ -127,8 +127,14 @@
     }
   }
 
+  // A toggle shows its `on` art for the state it names: the 2x button while
+  // the chrome is doubled, the shade button while the window is the strip
+  // (its arrow points the way the window will go).
   function toggleOn(el: Element): boolean {
-    return el.type === "toggle" && el.action === "zoom" ? double : false;
+    if (el.type !== "toggle") return false;
+    if (el.action === "zoom") return double;
+    if (el.action === "shade") return shaded;
+    return false;
   }
 
   // The discharge (#9, theme.md): a bond that just broke blooms for ~120 ms

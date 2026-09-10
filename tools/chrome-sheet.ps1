@@ -54,8 +54,20 @@ $glyphs = @{
         ".............",
         "............."
     )
-    # Windowshade: the window rolls up into its strip (D60, #8).
+    # Windowshade (D60, #8): the arrow says which way the window goes. Down
+    # while it is full (a click rolls it up), up while it is the strip.
     "shade" = @(
+        ".............",
+        ".............",
+        ".............",
+        "...#######...",
+        "....#####....",
+        ".....###.....",
+        "......#......",
+        ".............",
+        "............."
+    )
+    "shade.on" = @(
         ".............",
         ".............",
         "......#......",
