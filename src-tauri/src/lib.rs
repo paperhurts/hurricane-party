@@ -416,6 +416,18 @@ fn wm_minimize(app: AppHandle) {
     wm::minimize_group(&app);
 }
 
+/// #3: the close button the sprite chrome gave Main's title bar. It asks the
+/// window to close rather than exiting here, so D63's `CloseRequested` handler
+/// stays the single exit — one place that saves the layout and calls it a day,
+/// whether the click landed on this button, the taskbar or Alt+F4. A satellite
+/// refuses to close there, and so refuses here.
+#[tauri::command]
+fn wm_close(app: AppHandle, label: String) {
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.close();
+    }
+}
+
 /// The playlist window's ADD button: the library is where tracks come from.
 /// A library hidden to the tray (#87) comes back the same way.
 #[tauri::command]
@@ -700,6 +712,7 @@ pub fn run() {
             wm_resize_move,
             wm_resize_end,
             wm_minimize,
+            wm_close,
             show_library,
             wm_hello,
             wm_toggle_shade,

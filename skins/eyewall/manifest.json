@@ -30,7 +30,11 @@
   "visualizer": { "component": "spectrum-bars", "options": { "bars": 19, "peakHold": true } },
 
   "fonts": {
-    "chrome": { "type": "system", "size": 9, "case": "upper", "tracking": 0.08 }
+    "chrome": { "type": "system", "size": 9, "case": "upper", "tracking": 0.08 },
+    "clock":  { "type": "system", "size": 17, "case": "none", "tracking": -0.03 },
+    "tag":    { "type": "system", "size": 6, "case": "upper", "tracking": 0.1 },
+    "strip":  { "type": "system", "size": 11, "case": "none", "tracking": 0 },
+    "label":  { "type": "system", "size": 6, "case": "none", "tracking": 0.08 }
   },
 
   "windows": {
@@ -40,20 +44,21 @@
       "elements": {
         "frame": { "type": "nineslice", "rect": "fill",
                    "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
-                   "insets": [2, 2, 2, 2] },
+                   "insets": [1, 1, 1, 1], "opacity": 0.3 },
+
         "titlebar": { "type": "image", "rect": [0, 0, 275, 14],
                       "sprite":   { "sheet": "chrome", "rect": [0, 16, 275, 14], "tint": "arc" },
                       "inactive": { "sheet": "chrome", "rect": [0, 32, 275, 14], "tint": "filament" },
                       "role": "drag" },
-        "title": { "type": "text", "rect": [4, 0, 216, 14], "font": "chrome", "bind": "windowTitle",
+        "title": { "type": "text", "rect": [4, 0, 199, 14], "font": "chrome", "bind": "windowTitle",
                    "tint": "arc", "inactive": { "tint": "filament" } },
-        "minimize": { "type": "button", "rect": [224, 2, 13, 9],
+        "minimize": { "type": "button", "rect": [207, 2, 13, 9],
                       "sprite":   { "sheet": "chrome", "rect": [0, 48, 13, 9], "tint": "arc" },
                       "hover":    { "sheet": "chrome", "rect": [14, 48, 13, 9], "tint": "arc" },
                       "active":   { "sheet": "chrome", "rect": [28, 48, 13, 9], "tint": "arc" },
                       "inactive": { "sheet": "chrome", "rect": [42, 48, 13, 9], "tint": "filament" },
                       "action": "minimize" },
-        "shade": { "type": "toggle", "rect": [241, 2, 13, 9],
+        "shade": { "type": "toggle", "rect": [224, 2, 13, 9],
                    "sprite":   { "sheet": "chrome", "rect": [0, 58, 13, 9], "tint": "arc" },
                    "hover":    { "sheet": "chrome", "rect": [14, 58, 13, 9], "tint": "arc" },
                    "active":   { "sheet": "chrome", "rect": [28, 58, 13, 9], "tint": "arc" },
@@ -65,7 +70,7 @@
                      "inactive": { "sheet": "chrome", "rect": [42, 88, 13, 9], "tint": "filament" }
                    },
                    "action": "shade" },
-        "zoom": { "type": "toggle", "rect": [258, 2, 13, 9],
+        "zoom": { "type": "toggle", "rect": [241, 2, 13, 9],
                   "sprite":   { "sheet": "chrome", "rect": [0, 68, 13, 9], "tint": "arc" },
                   "hover":    { "sheet": "chrome", "rect": [14, 68, 13, 9], "tint": "arc" },
                   "active":   { "sheet": "chrome", "rect": [28, 68, 13, 9], "tint": "arc" },
@@ -76,27 +81,118 @@
                     "active":   { "sheet": "chrome", "rect": [28, 78, 13, 9], "tint": "arc" },
                     "inactive": { "sheet": "chrome", "rect": [42, 78, 13, 9], "tint": "filament" }
                   },
-                  "action": "zoom" }
+                  "action": "zoom" },
+        "close": { "type": "button", "rect": [258, 2, 13, 9],
+                   "sprite":   { "sheet": "chrome", "rect": [0, 98, 13, 9], "tint": "arc" },
+                   "hover":    { "sheet": "chrome", "rect": [14, 98, 13, 9], "tint": "strike" },
+                   "active":   { "sheet": "chrome", "rect": [28, 98, 13, 9], "tint": "strike" },
+                   "inactive": { "sheet": "chrome", "rect": [42, 98, 13, 9], "tint": "filament" },
+                   "action": "close" },
+
+        "clock": { "type": "text", "rect": [4, 31, 56, 17], "font": "clock", "bind": "elapsed",
+                   "tint": "arc", "glow": true },
+        "tagPlay": { "type": "text", "rect": [4, 51, 15, 8], "font": "tag", "value": "PLAY",
+                     "tint": "filament", "opacity": 0.35,
+                     "lit": { "bind": "playState", "when": "playing", "tint": "arc", "opacity": 1 } },
+        "tagPause": { "type": "text", "rect": [22, 51, 18, 8], "font": "tag", "value": "PAUSE",
+                      "tint": "filament", "opacity": 0.35,
+                      "lit": { "bind": "playState", "when": "paused", "tint": "arc", "opacity": 1 } },
+        "tagStop": { "type": "text", "rect": [44, 51, 16, 8], "font": "tag", "value": "STOP",
+                     "tint": "filament", "opacity": 0.35,
+                     "lit": { "bind": "playState", "when": "stopped", "tint": "strike", "opacity": 1 } },
+
+        "vis": { "type": "visualizer", "rect": [65, 18, 206, 41] },
+
+        "stripWell": { "type": "image", "rect": [4, 63, 267, 17],
+                       "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "stripFrame": { "type": "nineslice", "rect": [4, 63, 267, 17],
+                        "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
+                        "insets": [1, 1, 1, 1], "opacity": 0.14 },
+        "trackTitle": { "type": "text", "rect": [8, 63, 259, 17], "font": "strip",
+                        "bind": "trackTitle", "tint": "filament", "overflow": "scroll" },
+
+        "seekWell": { "type": "image", "rect": [4, 84, 267, 9],
+                      "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "seekFrame": { "type": "nineslice", "rect": [4, 84, 267, 9],
+                       "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
+                       "insets": [1, 1, 1, 1], "opacity": 0.14 },
+        "seek": { "type": "slider", "rect": [4, 84, 267, 9], "orientation": "horizontal",
+                  "bind": "position",
+                  "fill":  { "sheet": "chrome", "rect": [0, 110, 32, 9], "tint": "arc" },
+                  "thumb": { "sheet": "chrome", "rect": [48, 110, 9, 13], "tint": "arc" } },
+
+        "prev": { "type": "button", "rect": [4, 97, 17, 14],
+                  "sprite": { "sheet": "chrome", "rect": [0, 126, 17, 14], "tint": "arc" },
+                  "hover":  { "sheet": "chrome", "rect": [18, 126, 17, 14], "tint": "arc" },
+                  "active": { "sheet": "chrome", "rect": [36, 126, 17, 14], "tint": "arc" },
+                  "action": "prev" },
+        "play": { "type": "toggle", "rect": [22, 97, 17, 14],
+                  "sprite": { "sheet": "chrome", "rect": [0, 156, 17, 14], "tint": "arc" },
+                  "hover":  { "sheet": "chrome", "rect": [18, 156, 17, 14], "tint": "arc" },
+                  "active": { "sheet": "chrome", "rect": [36, 156, 17, 14], "tint": "arc" },
+                  "on": {
+                    "sprite": { "sheet": "chrome", "rect": [0, 171, 17, 14], "tint": "arc" },
+                    "hover":  { "sheet": "chrome", "rect": [18, 171, 17, 14], "tint": "arc" },
+                    "active": { "sheet": "chrome", "rect": [36, 171, 17, 14], "tint": "arc" }
+                  },
+                  "action": "play", "bind": "playState", "when": "playing" },
+        "pause": { "type": "toggle", "rect": [40, 97, 17, 14],
+                   "sprite": { "sheet": "chrome", "rect": [0, 186, 17, 14], "tint": "arc" },
+                   "hover":  { "sheet": "chrome", "rect": [18, 186, 17, 14], "tint": "arc" },
+                   "active": { "sheet": "chrome", "rect": [36, 186, 17, 14], "tint": "arc" },
+                   "on": {
+                     "sprite": { "sheet": "chrome", "rect": [0, 201, 17, 14], "tint": "arc" },
+                     "hover":  { "sheet": "chrome", "rect": [18, 201, 17, 14], "tint": "arc" },
+                     "active": { "sheet": "chrome", "rect": [36, 201, 17, 14], "tint": "arc" }
+                   },
+                   "action": "pause", "bind": "playState", "when": "paused" },
+        "stop": { "type": "toggle", "rect": [58, 97, 17, 14],
+                  "sprite": { "sheet": "chrome", "rect": [0, 216, 17, 14], "tint": "arc" },
+                  "hover":  { "sheet": "chrome", "rect": [18, 216, 17, 14], "tint": "arc" },
+                  "active": { "sheet": "chrome", "rect": [36, 216, 17, 14], "tint": "arc" },
+                  "on": {
+                    "sprite": { "sheet": "chrome", "rect": [0, 231, 17, 14], "tint": "strike" },
+                    "hover":  { "sheet": "chrome", "rect": [18, 231, 17, 14], "tint": "strike" },
+                    "active": { "sheet": "chrome", "rect": [36, 231, 17, 14], "tint": "strike" }
+                  },
+                  "action": "stop", "bind": "playState", "when": "stopped" },
+        "next": { "type": "button", "rect": [76, 97, 17, 14],
+                  "sprite": { "sheet": "chrome", "rect": [0, 141, 17, 14], "tint": "arc" },
+                  "hover":  { "sheet": "chrome", "rect": [18, 141, 17, 14], "tint": "arc" },
+                  "active": { "sheet": "chrome", "rect": [36, 141, 17, 14], "tint": "arc" },
+                  "action": "next" },
+
+        "volWell": { "type": "image", "rect": [98, 97, 173, 5],
+                     "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "volFrame": { "type": "nineslice", "rect": [98, 97, 173, 5],
+                      "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
+                      "insets": [1, 1, 1, 1], "opacity": 0.14 },
+        "volume": { "type": "slider", "rect": [98, 97, 173, 5], "orientation": "horizontal",
+                    "bind": "volume",
+                    "fill": { "sheet": "chrome", "rect": [36, 110, 8, 5], "tint": "arc" } },
+        "volLabel": { "type": "text", "rect": [98, 105, 173, 8], "font": "label",
+                      "value": "VOL {}", "bind": "volumePercent",
+                      "tint": "filament", "opacity": 0.4 }
       },
       "shade": {
         "size": [275, 14],
         "elements": {
           "frame": { "type": "nineslice", "rect": "fill",
                      "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
-                     "insets": [2, 2, 2, 2] },
+                     "insets": [1, 1, 1, 1], "opacity": 0.3 },
           "titlebar": { "type": "image", "rect": [0, 0, 275, 14],
                         "sprite":   { "sheet": "chrome", "rect": [0, 16, 275, 14], "tint": "arc" },
                         "inactive": { "sheet": "chrome", "rect": [0, 32, 275, 14], "tint": "filament" },
                         "role": "drag" },
-          "title": { "type": "text", "rect": [4, 0, 216, 14], "font": "chrome", "bind": "windowTitle",
+          "title": { "type": "text", "rect": [4, 0, 199, 14], "font": "chrome", "bind": "windowTitle",
                      "tint": "arc", "inactive": { "tint": "filament" } },
-          "minimize": { "type": "button", "rect": [224, 2, 13, 9],
+          "minimize": { "type": "button", "rect": [207, 2, 13, 9],
                         "sprite":   { "sheet": "chrome", "rect": [0, 48, 13, 9], "tint": "arc" },
                         "hover":    { "sheet": "chrome", "rect": [14, 48, 13, 9], "tint": "arc" },
                         "active":   { "sheet": "chrome", "rect": [28, 48, 13, 9], "tint": "arc" },
                         "inactive": { "sheet": "chrome", "rect": [42, 48, 13, 9], "tint": "filament" },
                         "action": "minimize" },
-          "shade": { "type": "toggle", "rect": [241, 2, 13, 9],
+          "shade": { "type": "toggle", "rect": [224, 2, 13, 9],
                      "sprite":   { "sheet": "chrome", "rect": [0, 58, 13, 9], "tint": "arc" },
                      "hover":    { "sheet": "chrome", "rect": [14, 58, 13, 9], "tint": "arc" },
                      "active":   { "sheet": "chrome", "rect": [28, 58, 13, 9], "tint": "arc" },
@@ -108,7 +204,7 @@
                        "inactive": { "sheet": "chrome", "rect": [42, 88, 13, 9], "tint": "filament" }
                      },
                      "action": "shade" },
-          "zoom": { "type": "toggle", "rect": [258, 2, 13, 9],
+          "zoom": { "type": "toggle", "rect": [241, 2, 13, 9],
                     "sprite":   { "sheet": "chrome", "rect": [0, 68, 13, 9], "tint": "arc" },
                     "hover":    { "sheet": "chrome", "rect": [14, 68, 13, 9], "tint": "arc" },
                     "active":   { "sheet": "chrome", "rect": [28, 68, 13, 9], "tint": "arc" },
@@ -119,7 +215,13 @@
                       "active":   { "sheet": "chrome", "rect": [28, 78, 13, 9], "tint": "arc" },
                       "inactive": { "sheet": "chrome", "rect": [42, 78, 13, 9], "tint": "filament" }
                     },
-                    "action": "zoom" }
+                    "action": "zoom" },
+          "close": { "type": "button", "rect": [258, 2, 13, 9],
+                     "sprite":   { "sheet": "chrome", "rect": [0, 98, 13, 9], "tint": "arc" },
+                     "hover":    { "sheet": "chrome", "rect": [14, 98, 13, 9], "tint": "strike" },
+                     "active":   { "sheet": "chrome", "rect": [28, 98, 13, 9], "tint": "strike" },
+                     "inactive": { "sheet": "chrome", "rect": [42, 98, 13, 9], "tint": "filament" },
+                     "action": "close" }
         }
       }
     },
@@ -130,7 +232,7 @@
       "elements": {
         "frame": { "type": "nineslice", "rect": "fill",
                    "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
-                   "insets": [2, 2, 2, 2] },
+                   "insets": [1, 1, 1, 1], "opacity": 0.3 },
         "titlebar": { "type": "image", "rect": [0, 0, 275, 14],
                       "sprite":   { "sheet": "chrome", "rect": [0, 16, 275, 14], "tint": "arc" },
                       "inactive": { "sheet": "chrome", "rect": [0, 32, 275, 14], "tint": "filament" },
@@ -167,7 +269,7 @@
         "elements": {
           "frame": { "type": "nineslice", "rect": "fill",
                      "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
-                     "insets": [2, 2, 2, 2] },
+                     "insets": [1, 1, 1, 1], "opacity": 0.3 },
           "titlebar": { "type": "image", "rect": [0, 0, 275, 14],
                         "sprite":   { "sheet": "chrome", "rect": [0, 16, 275, 14], "tint": "arc" },
                         "inactive": { "sheet": "chrome", "rect": [0, 32, 275, 14], "tint": "filament" },
@@ -210,7 +312,7 @@
       "elements": {
         "frame": { "type": "nineslice", "rect": "fill",
                    "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
-                   "insets": [2, 2, 2, 2] },
+                   "insets": [1, 1, 1, 1], "opacity": 0.3 },
         "titlebar": { "type": "image", "rect": [0, 0, 275, 14],
                       "sprite":   { "sheet": "chrome", "rect": [0, 16, 275, 14], "tint": "arc" },
                       "inactive": { "sheet": "chrome", "rect": [0, 32, 275, 14], "tint": "filament" },
@@ -247,7 +349,7 @@
         "elements": {
           "frame": { "type": "nineslice", "rect": "fill",
                      "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
-                     "insets": [2, 2, 2, 2] },
+                     "insets": [1, 1, 1, 1], "opacity": 0.3 },
           "titlebar": { "type": "image", "rect": [0, 0, 275, 14],
                         "sprite":   { "sheet": "chrome", "rect": [0, 16, 275, 14], "tint": "arc" },
                         "inactive": { "sheet": "chrome", "rect": [0, 32, 275, 14], "tint": "filament" },

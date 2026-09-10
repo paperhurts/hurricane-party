@@ -93,10 +93,8 @@
   let uiDur = $derived(remote ? (remote.duration_s ?? 0) : dur);
   let uiVol = $derived(remote ? remote.volume : vol);
   let elapsed = $derived(mmss(uiPos));
-  let posPct = $derived(uiDur > 0 ? Math.min(100, (uiPos / uiDur) * 100) : 0);
   let title = $derived(remote ? nameOf(remote) : nameOf(track));
   // Scroll only when there is something to scroll and something happening.
-  let marquee = $derived(uiPlaying && title.length > 34);
   // The shade's line is narrower: three buttons and the clock share it.
   let shadeMarquee = $derived(uiPlaying && title.length > 28);
   // A control in the title strip: neither a drag nor a double-tap (Classic).
@@ -373,30 +371,35 @@
     };
   });
 
-  // A horizontal slider: press or drag anywhere on the node to set 0..1.
-  function slider(node: HTMLElement, set: (frac: number) => void) {
-    const at = (e: PointerEvent) => {
-      const r = node.getBoundingClientRect();
-      set(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
-    };
-    const move = (e: PointerEvent) => at(e);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    const down = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      at(e);
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    };
-    node.addEventListener("pointerdown", down);
-    return {
-      destroy() {
-        node.removeEventListener("pointerdown", down);
-        up();
-      },
-    };
+  // ---- what the skin draws (#3) ----
+  //
+  // The manifest says where the clock, the tags, the seek bar and the
+  // transport are and how they are drawn; this window says what they read.
+  // Nothing below knows a pixel.
+  let playState = $derived(
+    uiPlaying ? "playing" : uiPaused ? "paused" : uiStopped ? "stopped" : "none",
+  );
+  let binds = $derived({
+    elapsed,
+    // The strip is the one line the window has, so the error takes it (#43).
+    trackTitle: error ?? title,
+    position: uiDur > 0 ? uiPos / uiDur : 0,
+    volume: uiVol,
+    volumePercent: Math.round(uiVol * 100),
+    playState,
+  });
+
+  function action(name: string) {
+    if (name === "prev") step(-1);
+    else if (name === "next") step(1);
+    else if (name === "play") uiPlay();
+    else if (name === "pause") uiPause();
+    else if (name === "stop") uiStop();
+  }
+
+  function slide(bind: string, frac: number) {
+    if (bind === "position") uiSeek(frac);
+    else if (bind === "volume") uiVolume(frac);
   }
 </script>
 
@@ -429,180 +432,114 @@
   </div>
 {/snippet}
 
-<Classic label="main" title="MAIN" {shade}>
-  <div class="player">
-    <div class="top">
-      <div class="clock">
-        <div class="time">{elapsed}</div>
-        <div class="tags">
-          <span class:lit={uiPlaying}>PLAY</span>
-          <span class:lit={uiPaused}>PAUSE</span>
-          <span class:lit={uiStopped} class="strike">STOP</span>
-        </div>
-      </div>
-      <div
-        class="visbox"
-        class:off={visMode === "off"}
-        role="button"
-        tabindex="0"
-        onclick={cycleVis}
-        onkeydown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            cycleVis();
-          }
-        }}
-        title={visMode === "bars" ? "Spectrum. Click for scope" : visMode === "scope" ? "Scope. Click for off" : "Off. Click for spectrum"}
-      >
-        {#if error}
-          <img class="oops" src={cooler} alt="" draggable="false">
-        {:else if visMode === "bars"}
-          <SpectrumBars {analyser} {palette} active={playing} />
-        {:else if visMode === "scope"}
-          <Oscilloscope {analyser} {palette} active={playing} />
-        {/if}
-      </div>
-    </div>
-
-    <div class="strip" class:err={!!error} title={error ?? undefined}>
-      {#if error}
-        <span class="static">{error}</span>
-        {#if missing && track}
-          <!-- The way out, on the message itself (#78). The file is gone;
-               there is nothing to offer to delete. -->
-          <button class="act" onpointerdown={eat} onclick={removeMissing} title="Remove from the library">remove</button>
-        {/if}
-      {:else if marquee}
-        <span class="scroll" style:animation-duration="{title.length * 0.35}s">
-          {title}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{title}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
-        </span>
-      {:else}
-        <span class="static">{title}</span>
-      {/if}
-    </div>
-
-    <div class="seek" use:slider={uiSeek}>
-      <div class="fill" style:width="{posPct}%"></div>
-      <div class="thumb" style:left="{posPct}%"></div>
-    </div>
-
-    <div class="bottom">
-      <div class="transport">
-        <button class="tb" onclick={() => step(-1)} title="Previous">◀◀</button>
-        <button class="tb" class:lit={uiPlaying} onclick={uiPlay} title="Play">▶</button>
-        <button class="tb" class:lit={uiPaused} onclick={uiPause} title="Pause">‖</button>
-        <button class="tb stop" class:lit={uiStopped} onclick={uiStop} title="Stop">■</button>
-        <button class="tb" onclick={() => step(1)} title="Next">▶▶</button>
-      </div>
-      <div class="volume">
-        <div class="vbar" use:slider={uiVolume}>
-          <div class="fill" style:width="{uiVol * 100}%"></div>
-        </div>
-        <div class="vlabel">VOL {Math.round(uiVol * 100)}</div>
-      </div>
-    </div>
-
-    <!-- crossorigin is load-bearing. The file comes from the asset protocol,
-         which is another origin, and a media element inside a Web Audio graph
-         outputs SILENCE for a cross-origin resource fetched without CORS: the
-         element plays, the clock runs, and nothing reaches the speakers or
-         the analyser. Tauri's asset handler answers with Access-Control-Allow-
-         Origin for the app's origin, so anonymous mode is enough. -->
-    <!-- svelte-ignore a11y_media_has_caption -->
-    <audio
-      bind:this={audio}
-      crossorigin="anonymous"
-      hidden
-      onplay={() => {
-        playing = true;
-        // One transport (D69), on the element's own event so it holds for
-        // every way of starting: this window's button, the pipe, a key. The
-        // library's row click already did this; this window's play did not,
-        // and a video kept running under a resumed track.
-        emitTo("video", "hp://pause").catch(() => {});
-        push();
-        tell();
-      }}
-      onpause={() => {
-        playing = false;
-        // Pause, stop, ended, unload: every way of going quiet ends here, so
-        // this is where the graph is told to let go of the device (#88).
-        graph?.idle();
-        push();
-        tell();
-      }}
-      onended={() => step(1)}
-      ontimeupdate={() => {
-        pos = audio.currentTime;
-        push();
-      }}
-      ondurationchange={() => {
-        if (Number.isFinite(audio.duration)) dur = audio.duration;
-      }}
-      onerror={onError}
-    ></audio>
+<!-- The analyser, in whatever rectangle the skin gave the visualizer. Click
+     it to cycle bars, scope, off, as the classic did (D20: the visualizer is
+     a swappable component; the theme names the default). -->
+{#snippet vis()}
+  <div
+    class="visbox"
+    class:off={visMode === "off"}
+    role="button"
+    tabindex="0"
+    onclick={cycleVis}
+    onkeydown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        cycleVis();
+      }
+    }}
+    title={visMode === "bars"
+      ? "Spectrum. Click for scope"
+      : visMode === "scope"
+        ? "Scope. Click for off"
+        : "Off. Click for spectrum"}
+  >
+    {#if error}
+      <img class="oops" src={cooler} alt="" draggable="false" />
+    {:else if visMode === "bars"}
+      <SpectrumBars {analyser} {palette} active={playing} />
+    {:else if visMode === "scope"}
+      <Oscilloscope {analyser} {palette} active={playing} />
+    {/if}
   </div>
-</Classic>
+
+  <!-- crossorigin is load-bearing. The file comes from the asset protocol,
+       which is another origin, and a media element inside a Web Audio graph
+       outputs SILENCE for a cross-origin resource fetched without CORS: the
+       element plays, the clock runs, and nothing reaches the speakers or
+       the analyser. Tauri's asset handler answers with Access-Control-Allow-
+       Origin for the app's origin, so anonymous mode is enough.
+
+       It lives in the visualizer's slot because it is hidden and the skin
+       owns every other box in this window. -->
+  <!-- svelte-ignore a11y_media_has_caption -->
+  <audio
+    bind:this={audio}
+    crossorigin="anonymous"
+    hidden
+    onplay={() => {
+      playing = true;
+      // One transport (D69), on the element's own event so it holds for
+      // every way of starting: this window's button, the pipe, a key. The
+      // library's row click already did this; this window's play did not,
+      // and a video kept running under a resumed track.
+      emitTo("video", "hp://pause").catch(() => {});
+      push();
+      tell();
+    }}
+    onpause={() => {
+      playing = false;
+      // Pause, stop, ended, unload: every way of going quiet ends here, so
+      // this is where the graph is told to let go of the device (#88).
+      graph?.idle();
+      push();
+      tell();
+    }}
+    onended={() => step(1)}
+    ontimeupdate={() => {
+      pos = audio.currentTime;
+      push();
+    }}
+    ondurationchange={() => {
+      if (Number.isFinite(audio.duration)) dur = audio.duration;
+    }}
+    onerror={onError}
+  ></audio>
+{/snippet}
+
+<!-- A file that will not open takes the title strip, and the way out rides on
+     the message itself (#78). The skin drew the strip; this is what goes in
+     it while there is something wrong, in place of the track's name. -->
+{#snippet strip()}
+  <span class="errline">{error}</span>
+  {#if missing && track}
+    <button class="act" onpointerdown={eat} onclick={removeMissing} title="Remove from the library">
+      remove
+    </button>
+  {/if}
+{/snippet}
+
+<Classic
+  label="main"
+  title="MAIN"
+  {shade}
+  {binds}
+  slots={error ? { vis, trackTitle: strip } : { vis }}
+  onaction={action}
+  onslide={slide}
+/>
 
 <style>
-  .player {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 4px 4px 3px;
-    font-size: 8px;
-    letter-spacing: 0.06em;
-  }
-
-  /* ---- top row: clock and the analyser ---- */
-  .top {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    gap: 5px;
-    align-items: stretch;
-  }
-  .clock {
-    flex: 0 0 56px;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: 3px;
-  }
-  .time {
-    font-size: 17px;
-    line-height: 17px;
-    letter-spacing: -0.03em;
-    color: var(--arc);
-    /* Static glow on a static element: this is not on the 60 Hz path and
-     * never animates (theme.md). */
-    text-shadow:
-      0 0 7px color-mix(in srgb, var(--arc) 65%, transparent),
-      0 0 18px color-mix(in srgb, var(--arc) 25%, transparent);
-  }
-  .tags {
-    display: flex;
-    gap: 4px;
-    font-size: 6px;
-    letter-spacing: 0.1em;
-    color: color-mix(in srgb, var(--filament) 35%, transparent);
-  }
-  .tags .lit {
-    color: var(--arc);
-  }
-  .tags .strike.lit {
-    color: var(--strike);
-  }
+  /* The analyser's box. The skin positions it; what is inside is the app's,
+     and it is the one place in this window that draws per frame -- no
+     filter here or on anything above it, ever (D73). */
   .visbox {
-    flex: 1 1 auto;
-    min-width: 0;
+    width: 100%;
+    height: 100%;
     cursor: pointer;
-    /* The visualizer and everything above it: no filter, ever (D73). */
   }
   /* A file that cannot be opened: the cooler capybara where the bars were,
-   * the well behind him, the message in the strip below. */
+     the well behind him, the message in the strip below. */
   .visbox .oops {
     display: block;
     height: 100%;
@@ -620,27 +557,13 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
   }
 
-  /* ---- title strip ---- */
-  .strip {
-    flex: 0 0 17px;
-    display: flex;
-    align-items: center;
-    padding: 0 4px;
+  .errline {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
-    font-size: 11px;
-    letter-spacing: 0;
-    color: var(--filament);
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
-  }
-  .strip.err {
-    color: var(--ember);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ember) 45%, transparent);
-  }
-  .static {
-    overflow: hidden;
     text-overflow: ellipsis;
+    color: var(--ember);
   }
   /* The action on the message: a word in the strip's own type, boxed so it
      reads as a control, ember like the state it belongs to. The message
@@ -658,124 +581,10 @@
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--ember) 55%, transparent);
     cursor: pointer;
+    pointer-events: auto;
   }
   .act:hover {
     background: color-mix(in srgb, var(--ember) 18%, transparent);
     border-color: var(--ember);
-  }
-  .scroll {
-    display: inline-block;
-    animation: marquee linear infinite;
-  }
-  @keyframes marquee {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .scroll {
-      animation: none;
-    }
-  }
-
-  /* ---- seek ---- */
-  .seek {
-    flex: 0 0 9px;
-    position: relative;
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
-    cursor: pointer;
-  }
-  .seek .fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--arc) 25%, transparent),
-      color-mix(in srgb, var(--arc) 75%, transparent)
-    );
-  }
-  .seek .thumb {
-    position: absolute;
-    top: -1px;
-    bottom: -1px;
-    width: 3px;
-    margin-left: -1px;
-    background: var(--arc);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--arc) 95%, transparent);
-  }
-
-  /* ---- transport and volume ---- */
-  .bottom {
-    flex: 0 0 16px;
-    display: flex;
-    gap: 5px;
-    align-items: stretch;
-  }
-  .transport {
-    display: flex;
-    gap: 1px;
-  }
-  .tb {
-    width: 17px;
-    height: 14px;
-    padding: 0;
-    border: 0;
-    display: grid;
-    place-items: center;
-    font-size: 6px;
-    line-height: 1;
-    color: color-mix(in srgb, var(--filament) 80%, transparent);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 22%, transparent);
-    cursor: pointer;
-  }
-  .tb:hover:not(:disabled) {
-    color: var(--arc);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px var(--arc);
-  }
-  .tb.lit {
-    color: var(--arc);
-    background: color-mix(in srgb, var(--arc) 14%, var(--void));
-    box-shadow:
-      inset 0 0 0 1px var(--arc),
-      0 0 8px color-mix(in srgb, var(--arc) 45%, transparent);
-  }
-  .tb.stop.lit {
-    color: var(--strike);
-    background: color-mix(in srgb, var(--strike) 14%, var(--void));
-    box-shadow:
-      inset 0 0 0 1px var(--strike),
-      0 0 8px color-mix(in srgb, var(--strike) 45%, transparent);
-  }
-  .volume {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 3px;
-  }
-  .vbar {
-    height: 5px;
-    position: relative;
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
-    cursor: pointer;
-  }
-  .vbar .fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    background: var(--arc);
-    box-shadow: 0 0 5px color-mix(in srgb, var(--arc) 70%, transparent);
-  }
-  .vlabel {
-    font-size: 6px;
-    letter-spacing: 0.08em;
-    color: color-mix(in srgb, var(--filament) 40%, transparent);
   }
 </style>
