@@ -34,83 +34,155 @@ body {
   cursor: default;
 }
 
+/* The ground is `void`; everything on it is a sprite from the skin, the frame
+ * included. The frame is drawn inside the window rather than as a border: a
+ * border would occupy a physical pixel that the bond seam also wants, and at
+ * 150% the two disagree about which one owns it. */
 .chrome {
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
   background: var(--void);
   color: var(--filament);
-  /* An inset line rather than a border: a border would occupy a physical pixel
-   * that the bond seam also wants, and at 150% the two disagree about which
-   * one owns it. */
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 30%, transparent);
 }
 
-.titlebar {
-  height: 14px;
-  flex: 0 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 4px;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--arc);
-  background: color-mix(in srgb, var(--arc) 10%, transparent);
-  /* D35: the cursor tells the truth. The title bar is a move handle, and it is
-   * the only move handle -- the gesture table gives the shared edge to the
-   * splitter, so offering a move cursor there would be a lie. */
-  cursor: move;
-}
-
-.titlebar .ttl {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The title bar's buttons: minimise (#86, Main only) and 1x / 2x chrome (#47). */
-.tbtn {
-  flex: 0 0 auto;
-  width: 13px;
-  height: 9px;
-  padding: 0;
-  border: 0;
-  display: grid;
-  place-items: center;
-  font: inherit;
-  font-size: 6px;
-  letter-spacing: 0;
-  line-height: 1;
-  color: var(--arc);
-  background: color-mix(in srgb, var(--void) 70%, var(--well));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 24%, transparent);
-  cursor: pointer;
-}
-.tbtn:hover {
-  background: color-mix(in srgb, var(--void) 70%, var(--well));
-  box-shadow: inset 0 0 0 1px var(--arc);
-}
-.chrome[data-active="false"] .tbtn {
-  color: color-mix(in srgb, var(--filament) 45%, transparent);
-}
-
-/* Focus is a group property (v0.4-brief): when any bonded window has focus,
+/* ---- the skin (#3, D73) ----
+ *
+ * Every piece of chrome is a Sprite: an absolutely positioned box whose art
+ * is a data: URL in --sp and whose colour is a token in --tc, one pair per
+ * state. `mask` art paints the token through the sprite's alpha, so a theme
+ * change reaches the chrome live; `final` art shows the picture as it is.
+ * The cascade is the state machine: normal, then the group inactive (at low
+ * specificity, via :where), then hover and pressed on top, so a hovered
+ * button lights even in an inactive group -- it is about to make it active.
+ *
+ * Focus is a group property (v0.4-brief): when any bonded window has focus,
  * every member renders active, and none does when it leaves. Rust decides
  * (`focus_plan`) and Classic.svelte carries the answer into `data-active`;
  * checked on a real screen for #10. */
-.chrome[data-active="false"] .titlebar {
-  color: color-mix(in srgb, var(--filament) 45%, transparent);
-  background: color-mix(in srgb, var(--filament) 6%, transparent);
+.sp {
+  display: block;
+  box-sizing: border-box;
+}
+.sp.mask {
+  background-color: var(--tc);
+  -webkit-mask-image: var(--sp);
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: var(--sp);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+}
+.sp.final {
+  background-image: var(--sp);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+.chrome[data-active="false"] :where(.sp.mask) {
+  background-color: var(--tc-i, var(--tc));
+  -webkit-mask-image: var(--sp-i, var(--sp));
+  mask-image: var(--sp-i, var(--sp));
+}
+.chrome[data-active="false"] :where(.sp.final) {
+  background-image: var(--sp-i, var(--sp));
 }
 
-.body {
+/* The nine-slice frame: nine boxes filling the window, under everything. */
+.sp-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.sp-frame .sp {
+  position: absolute;
+}
+
+.sp-image {
+  position: absolute;
+  pointer-events: none;
+}
+/* D35: the cursor tells the truth. The title bar is a move handle, and it is
+ * the only move handle -- the gesture table gives the shared edge to the
+ * splitter, so offering a move cursor there would be a lie. */
+.sp-image.drag {
+  pointer-events: auto;
+  cursor: move;
+}
+
+/* The renderer's glow (D73): a halo from `arc` on the chrome the pointer is
+ * on. It sits on the wrapper because a filter runs before a mask, so on the
+ * masked element itself the halo would be cut away. Chrome only; the
+ * visualizer and its ancestors never carry a filter. */
+.sp-glow {
+  position: absolute;
+}
+.sp-glow.glow:hover,
+.sp-glow.glow:active {
+  filter: drop-shadow(0 0 3px var(--arc));
+}
+.sp-button {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.sp-button.mask:hover {
+  background-color: var(--tc-h, var(--tc));
+  -webkit-mask-image: var(--sp-h, var(--sp));
+  mask-image: var(--sp-h, var(--sp));
+}
+.sp-button.mask:active {
+  background-color: var(--tc-a, var(--tc-h, var(--tc)));
+  -webkit-mask-image: var(--sp-a, var(--sp-h, var(--sp)));
+  mask-image: var(--sp-a, var(--sp-h, var(--sp)));
+}
+.sp-button.final:hover {
+  background-image: var(--sp-h, var(--sp));
+}
+.sp-button.final:active {
+  background-image: var(--sp-a, var(--sp-h, var(--sp)));
+}
+
+/* Text in the chrome: the skin's font, the token in --tc, and the windowshade
+ * snippet in the same box when there is one (D79). The box lets the drag
+ * through to the title bar; only a button in the snippet takes the pointer. */
+.sp-text {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  /* The theme's chrome face (design/tokens.json, pushed by applyTheme). */
+  font-family: var(--type-chrome), ui-monospace, monospace;
+  color: var(--tc);
+  line-height: 1;
+  pointer-events: none;
+}
+.sp-text.upper {
+  text-transform: uppercase;
+}
+.sp-text .t {
   flex: 1 1 auto;
-  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.chrome[data-active="false"] .sp-text {
+  color: var(--tc-i, var(--tc));
+}
+.sp-text .shade button,
+.sp-text .shade .sb {
+  pointer-events: auto;
+}
+
+/* The interior, under the title bar. Where it starts is the skin's to say
+ * (Classic.svelte sets `top`); the rest of the window is its. */
+.body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
 }

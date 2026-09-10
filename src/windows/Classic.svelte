@@ -3,6 +3,10 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { applyTheme } from "../lib/theme";
+  import { elementsOf, type Element } from "../lib/skin";
+  import { loadSkin, type LoadedSkin } from "../lib/skinsheet";
+  import { EYEWALL, eyewallFile, windowNameOf } from "../lib/skins";
+  import Sprite from "./Sprite.svelte";
 
   // Shared shell for the three classic 275px windows. They differ only in what
   // is inside them — the drag, seam and focus wiring is identical for all three
@@ -53,6 +57,85 @@
   // only drives the toggle's label.
   let double = $state(false);
   let edges = $state<Edges>({ top: null, right: null, bottom: null, left: null });
+
+  // The skin (#3, D73). Every window loads it itself, like the theme: three
+  // documents, a few small sheets each. Until it arrives the window is its
+  // `void` ground and nothing else; a skin that fails validation is refused
+  // whole and logged, never half-drawn (skin-manifest.md).
+  let skin = $state<LoadedSkin | null>(null);
+  let win = $derived(windowNameOf(label));
+  function reloadSkin() {
+    loadSkin(EYEWALL, eyewallFile, window.devicePixelRatio).then(
+      (s) => (skin = s),
+      (e) => console.error(e),
+    );
+  }
+  reloadSkin();
+  // The sheet is chosen for the screen's pixel ratio, and that changes under
+  // the window: the 2x toggle re-zooms the webview (D76) and a drag across a
+  // DPI boundary re-scales it. A media query on the current ratio fires once
+  // when it stops being true; re-arm it on the new one and load again.
+  $effect(() => {
+    let mq: MediaQueryList | null = null;
+    const onChange = () => {
+      reloadSkin();
+      arm();
+    };
+    const arm = () => {
+      mq?.removeEventListener("change", onChange);
+      mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      mq.addEventListener("change", onChange);
+    };
+    arm();
+    return () => mq?.removeEventListener("change", onChange);
+  });
+
+  // The window's logical size, for the playlist's right-anchored and
+  // stretched elements (D30). CSS px are logical px whatever the zoom (D76).
+  let current = $state<[number, number]>([window.innerWidth, window.innerHeight]);
+  $effect(() => {
+    const onResize = () => (current = [window.innerWidth, window.innerHeight]);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  });
+
+  let set = $derived(skin ? elementsOf(skin.skin, win, shaded) : null);
+  // The interior starts under the title bar, and the title bar's height is
+  // the skin's to say.
+  let bodyTop = $derived.by(() => {
+    const bar = set?.elements.find((e) => e.name === "titlebar");
+    return bar && bar.type === "image" ? bar.rect[1] + bar.rect[3] : 14;
+  });
+
+  // A button's `action` is a name from the app's list (skin.ts ACTIONS).
+  // The shell owns these three; the rest belong to the interiors.
+  function act(action: string) {
+    switch (action) {
+      case "minimize":
+        // #86, D86: minimise is Main's gesture and takes the whole group; a
+        // satellite has no taskbar button to come back from (D59).
+        invoke("wm_minimize");
+        break;
+      case "shade":
+        toggleShade();
+        break;
+      case "zoom":
+        toggleDouble();
+        break;
+      default:
+        break;
+    }
+  }
+
+  // A toggle shows its `on` art for the state it names: the 2x button while
+  // the chrome is doubled, the shade button while the window is the strip
+  // (its arrow points the way the window will go).
+  function toggleOn(el: Element): boolean {
+    if (el.type !== "toggle") return false;
+    if (el.action === "zoom") return double;
+    if (el.action === "shade") return shaded;
+    return false;
+  }
 
   // The discharge (#9, theme.md): a bond that just broke blooms for ~120 ms
   // and is gone. Detected here, from the edge going from bonded to null in a
@@ -300,32 +383,30 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="chrome" data-active={active} data-shaded={shaded} onpointerdown={raise}>
-  <div class="titlebar" onpointerdown={titleDown}>
-    {#if shaded && shade}
-      {@render shade()}
-    {:else}
-      <span class="ttl">{title}</span>
-    {/if}
-    {#if label === "main"}
-      <!-- #86, D86: minimise is Main's gesture and takes the whole group; a
-           satellite has no taskbar button to come back from (D59). -->
-      <button
-        class="tbtn"
-        title="Minimise"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={() => invoke("wm_minimize")}>&ndash;</button
-      >
-    {/if}
-    <!-- Stops the pointerdown so a click here is neither a drag nor a
-         double-tap on the title bar. -->
-    <button
-      class="tbtn"
-      title={double ? "Normal size" : "Double size"}
-      onpointerdown={(e) => e.stopPropagation()}
-      onclick={toggleDouble}>{double ? "1×" : "2×"}</button
-    >
-  </div>
-  <div class="body">
+  {#if skin && set}
+    <!-- The chrome, element by element in the manifest's order, which is the
+         z-order: the frame first. The title bar is the one move handle (D35)
+         and keeps the double-tap that toggles shade (D60); a button on it
+         stops the pointerdown, so a click there is neither. The windowshade
+         snippet (D79) renders where the title would, so the strip stays the
+         move handle around it. -->
+    {#each set.elements as el (el.name)}
+      {#if el.type === "image" && el.role === "drag"}
+        <Sprite {el} {skin} base={set.size} {current} onpointerdown={titleDown} />
+      {:else if el.type === "button" || el.type === "toggle"}
+        <Sprite {el} {skin} base={set.size} {current} on={toggleOn(el)} onclick={() => act(el.action)} />
+      {:else if el.type === "text" && el.bind === "windowTitle"}
+        {#if shaded && shade}
+          <Sprite {el} {skin} base={set.size} {current}>{@render shade()}</Sprite>
+        {:else}
+          <Sprite {el} {skin} base={set.size} {current} text={title} />
+        {/if}
+      {:else}
+        <Sprite {el} {skin} base={set.size} {current} />
+      {/if}
+    {/each}
+  {/if}
+  <div class="body" style:top="{bodyTop}px">
     {#if children}
       {@render children()}
     {:else}
