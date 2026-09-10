@@ -191,12 +191,13 @@ describe("sheets per scale", () => {
 
   it("bounds are checked in the sheet's own pixels", () => {
     const { skin } = parseSkin(eyewall);
-    const tooSmall = checkSheetBounds(skin, { "chrome.png": { w: 275, h: 87 }, "chrome@2x.png": { w: 550, h: 100 } });
+    const one = pngSize("chrome.png");
+    const tooSmall = checkSheetBounds(skin, { "chrome.png": one, "chrome@2x.png": { w: one.w * 2, h: 100 } });
     expect(tooSmall.length).toBeGreaterThan(0);
     expect(tooSmall.every((p) => p.includes("2x"))).toBe(true);
     const huge = checkSheetBounds(skin, {
-      "chrome.png": { w: 5000, h: 87 },
-      "chrome@2x.png": { w: 550, h: 174 },
+      "chrome.png": { w: 5000, h: one.h },
+      "chrome@2x.png": { w: one.w * 2, h: one.h * 2 },
     });
     expect(huge).toHaveLength(1);
     expect(huge[0]).toMatch(/over the cap/);
