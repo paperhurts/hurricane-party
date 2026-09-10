@@ -57,7 +57,7 @@ Charter and Crimson Pro are lovely and wrong here — serifs at 11px on dark wit
 
 This matters for performance, and the answer differs by window type.
 
-**Classic chrome (main, EQ, playlist): the sprites carry the shape; the renderer paints the glow from `--arc`** (D73). That is what lets a hand-drawn sheet follow the theme instead of freezing one palette into its pixels. A skin whose halo is already in the art says `"glow": "baked"` in its manifest and gets no second one — every imported `.wsz` is that, so native and imported skins still take one path. The one hard rule is scoped to the 60 Hz path: **no CSS filter on the visualizer surface or any ancestor of it**, whatever the skin declares, because a filter on a parent runs the child through it every frame. The analyser's own glow stays pre-rendered in its ramp art for the same reason.
+**Classic chrome (main, EQ, playlist): the sprites carry the shape; the renderer paints the glow from `--arc`** (D73). That is what lets a committed PNG sheet follow the theme instead of freezing one palette into its pixels. A skin whose halo is already in the art says `"glow": "baked"` in its manifest and gets no second one — every imported `.wsz` is that, so native and imported skins still take one path. The one hard rule is scoped to the 60 Hz path: **no CSS filter on the visualizer surface or any ancestor of it**, whatever the skin declares, because a filter on a parent runs the child through it every frame. The analyser's own glow stays pre-rendered in its ramp art for the same reason.
 
 **Modern windows (library, settings, import): compute it in CSS**, but sparingly:
 
