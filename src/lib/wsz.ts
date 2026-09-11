@@ -166,7 +166,11 @@ const L = {
   minimize: [244, 3, 9, 9] as Rect,
   shade: [254, 3, 9, 9] as Rect,
   close: [264, 3, 9, 9] as Rect,
-  clock: [36, 26, 63, 13] as Rect,
+  // The clock is four digits with the colon painted into MAIN.BMP between
+  // them, so it is two elements, not one string (D104). Each pair is two
+  // 9-wide glyphs 3 apart, which is the font's tracking.
+  clockMinutes: [48, 26, 21, 13] as Rect,
+  clockSeconds: [78, 26, 21, 13] as Rect,
   state: [26, 28, 9, 9] as Rect,
   title: [111, 27, 153, 6] as Rect,
   kbps: [111, 43, 15, 6] as Rect,
@@ -334,7 +338,9 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
 
   const fonts: Record<string, unknown> = {};
   if (has("text")) fonts.chrome = { type: "bitmap", sheet: "text", glyphSize: [5, 6], map: TEXT_MAP };
-  if (has("numbers")) fonts.time = { type: "bitmap", sheet: "numbers", glyphSize: [9, 13], map: NUMBERS_MAP };
+  if (has("numbers")) {
+    fonts.time = { type: "bitmap", sheet: "numbers", glyphSize: [9, 13], map: NUMBERS_MAP, tracking: 3 };
+  }
 
   const main = mainWindow(sheets, fonts, warnings);
   const equalizer = eqWindow(sheets, warnings);
@@ -408,7 +414,10 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
     ...buttons,
   };
 
-  if (fonts.time) els.clock = { type: "text", rect: L.clock, font: "time", bind: "elapsed" };
+  if (fonts.time) {
+    els.clockMinutes = { type: "text", rect: L.clockMinutes, font: "time", bind: "elapsedMinutes" };
+    els.clockSeconds = { type: "text", rect: L.clockSeconds, font: "time", bind: "elapsedSeconds" };
+  }
   if (fonts.chrome) {
     els.trackTitle = { type: "text", rect: L.title, font: "chrome", bind: "trackTitle", overflow: "scroll" };
     els.kbps = { type: "text", rect: L.kbps, font: "chrome", bind: "kbps" };

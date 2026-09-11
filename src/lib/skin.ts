@@ -53,6 +53,10 @@ export const BINDS = [
   "windowTitle",
   "trackTitle",
   "elapsed",
+  // The same time in two halves, for a clock whose colon is painted into the
+  // window behind its digits (D104): minutes blank-padded, seconds zero-padded.
+  "elapsedMinutes",
+  "elapsedSeconds",
   "remaining",
   "kbps",
   "khz",
@@ -104,7 +108,16 @@ export type SpriteRef = { sheet: string; rect: Rect; tint: Token };
 
 export type Font =
   | { type: "system"; size: number; case: "upper" | "none"; tracking: number }
-  | { type: "bitmap"; sheet: string; glyphSize: [number, number]; map: string };
+  | {
+      type: "bitmap";
+      sheet: string;
+      glyphSize: [number, number];
+      map: string;
+      /** Pixels between one glyph's box and the next. Classic text runs flush
+       * (0); the classic clock's digits sit 3 apart, because the colon
+       * between its pairs is painted into the window behind them (D104). */
+      tracking: number;
+    };
 
 type Placed = {
   name: string;
@@ -659,7 +672,13 @@ function font(v: unknown, sheets: Skin["sheets"], path: string): Font {
   }
   const sheet = str(v, "sheet", path);
   if (!(sheet in sheets)) fail(`${path}.sheet`, "names no sheet");
-  return { type, sheet, glyphSize: pair(v.glyphSize, `${path}.glyphSize`, 1), map: str(v, "map", path) };
+  return {
+    type,
+    sheet,
+    glyphSize: pair(v.glyphSize, `${path}.glyphSize`, 1),
+    map: str(v, "map", path),
+    tracking: v.tracking === undefined ? 0 : int(v.tracking, `${path}.tracking`, 0),
+  };
 }
 
 function sheetsOf(v: unknown, authored: Scale, path: string): Skin["sheets"] {

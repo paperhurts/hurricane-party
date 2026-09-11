@@ -390,6 +390,11 @@
   );
   let binds = $derived({
     elapsed,
+    // The same time in halves, for a clock drawn as four glyphs with the
+    // colon painted into the window behind them (D104). Minutes are padded
+    // with a blank, seconds with a zero, as the classic did.
+    elapsedMinutes: String(Math.floor(uiPos / 60)).padStart(2, " "),
+    elapsedSeconds: String(Math.floor(uiPos % 60)).padStart(2, "0"),
     // The strip is the one line the window has, so the error takes it (#43).
     trackTitle: error ?? title,
     position: uiDur > 0 ? uiPos / uiDur : 0,
