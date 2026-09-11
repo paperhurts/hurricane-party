@@ -171,9 +171,18 @@ body {
     0 0 18px color-mix(in srgb, var(--tc) 25%, transparent);
 }
 /* A title too long for its box. Measured, not guessed (Sprite.svelte), and
- * `transform` on a composited layer rather than anything that reflows. */
+ * `transform` on a composited layer rather than anything that reflows.
+ *
+ * The box clips and the span does not: the span is as wide as its doubled
+ * text, so -50% is exactly one copy and the loop is seamless. Clipping only
+ * the scrolling kind, because `overflow: hidden` on every text box would cut
+ * the clock's glow off at its edges. */
+.sp-text.scroll {
+  overflow: hidden;
+}
 .sp-text .rolling {
   display: inline-block;
+  flex: none;
   white-space: nowrap;
   animation: sp-marquee linear infinite;
 }
