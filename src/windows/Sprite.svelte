@@ -4,39 +4,45 @@
   import { placeRect } from "../lib/skin";
   import { type LoadedSkin, nineSliceRefs, ninePieceStyle, type Slice } from "../lib/skinsheet";
 
-  // One element of an hp-skin/1 window, drawn from its sprites (#3, D73).
+  // One element of an hp-skin/1 window, drawn from its sprites (#3, D73, D93).
   //
   // A sprite is a data: URL of its own rectangle. For `art: mask` it is an
   // alpha mask over a token colour, so the palette reaches the chrome live
   // through the custom property; for `art: final` it is the picture. Each
   // state's slice and tint go into custom properties on the element, and
   // chrome.css picks the one for :hover, :active and the group's focus.
-  // Nothing here is a colour: a tint is the name of a token.
+  // Nothing here is a colour: a tint is the name of a token, and `opacity`
+  // is how strong that token is drawn — the way a sheet's own alpha would
+  // say it, for the sprites several elements share.
   let {
     el,
     skin,
     base,
     current,
     on = false,
-    text = "",
-    children,
+    binds = {},
+    slot,
     onpointerdown,
     onclick,
+    onslide,
   }: {
     el: Element;
     skin: LoadedSkin;
     /** The element set's base size and the window's current size, logical px. */
     base: [number, number];
     current: [number, number];
-    /** A toggle's state. */
+    /** A toggle's state, when the shell rather than a bind decides it. */
     on?: boolean;
-    /** What a text element shows. */
-    text?: string;
-    /** Rendered inside a text element instead of `text`. The windowshade
-     * snippet goes here, so it sits where the title sits. */
-    children?: Snippet;
+    /** What the window is showing, by binding name. */
+    binds?: Record<string, unknown>;
+    /** Rendered inside this element's box, above its art: the analyser in the
+     * visualizer, the windowshade strip in the title, an error affordance
+     * over the title bar. The skin positions it; the window fills it. */
+    slot?: Snippet;
     onpointerdown?: (e: PointerEvent) => void;
     onclick?: (e: MouseEvent) => void;
+    /** A slider was pressed or dragged, 0..1 along its length. */
+    onslide?: (frac: number) => void;
   } = $props();
 
   let mask = $derived(skin.skin.art === "mask");
@@ -50,13 +56,19 @@
     return parts.join(";");
   }
 
-  function box(): string {
-    if (el.type === "nineslice") return "";
+  let box = $derived.by(() => {
+    if (el.type === "nineslice" && el.fill) return "inset:0";
     const r = placeRect(el, base, current);
     return `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`;
-  }
+  });
 
-  // Which sprite set a toggle shows: its own, or the `on` set.
+  // Which sprite set a toggle shows: its own, or the `on` set. A toggle with
+  // a bind reads its state from the window instead of from the shell, which
+  // is what makes a transport button light while that is what is happening.
+  let lit = $derived(
+    el.type === "toggle" && el.bind && el.when !== null ? String(binds[el.bind] ?? "") === el.when : on,
+  );
+
   let states = $derived.by(() => {
     if (el.type === "button") {
       return {
@@ -67,7 +79,7 @@
       };
     }
     if (el.type === "toggle") {
-      const s = on ? el.on : el;
+      const s = lit ? el.on : el;
       return {
         n: skin.slice(s.sprite),
         h: s.hover && skin.slice(s.hover),
@@ -82,12 +94,110 @@
   });
 
   let font = $derived(el.type === "text" ? skin.skin.fonts[el.font] : null);
+
+  // A text element's look: its own, or the `lit` one while the binding it
+  // names holds the value it names (the PLAY tag while the transport plays).
+  let look = $derived.by(() => {
+    if (el.type !== "text") return null;
+    const l = el.lit;
+    if (l && l.bind && String(binds[l.bind] ?? "") === l.when) return l;
+    return { tint: el.tint, opacity: el.opacity, glow: el.glow };
+  });
+
+  let shown = $derived.by(() => {
+    if (el.type !== "text") return "";
+    const bound = el.bind === null ? "" : String(binds[el.bind] ?? "");
+    if (el.value === null) return bound;
+    return el.value.includes("{}") ? el.value.replace("{}", bound) : el.value;
+  });
+
+  // A title longer than its box scrolls (the manifest's `overflow: "scroll"`).
+  // Measured rather than guessed from a character count: the box is the
+  // skin's to size, and a 2x chrome or another font changes what fits. The
+  // reset-then-measure is what keeps it honest when the text gets shorter.
+  let textBox = $state<HTMLElement | undefined>(undefined);
+  let roll = $state(false);
+  // The text last measured. Plain, not $state, and that is the fix: this
+  // effect re-runs whenever the window's bindings change, which is every
+  // clock tick while a track plays, and resetting `roll` on each of those
+  // restarted the animation four times a second — a title that jinked a
+  // pixel back and forth and only scrolled once the clock stopped. Now a
+  // re-run with the same text leaves a running marquee alone.
+  let measured: string | null = null;
+  // The one measurement in flight. Also plain: it is cancelled only when the
+  // text changes, never by a re-run. Unshading rebuilds this element while
+  // several bindings land in the same instant, and when each re-run cancelled
+  // the last one's frame, the re-run that followed saw the text already
+  // "measured" and scheduled nothing, so the title sat behind an ellipsis.
+  let pending = 0;
+  $effect(() => {
+    const text = shown;
+    // Read before any early return, so a `bind:this` that lands after the
+    // first run is a dependency and brings this back to measure.
+    const host = textBox;
+    if (el.type !== "text" || el.overflow !== "scroll" || !host) return;
+    if (text === measured) return;
+    measured = text;
+    roll = false;
+    cancelAnimationFrame(pending);
+    if (text === "") return;
+    pending = requestAnimationFrame(() => {
+      pending = 0;
+      const span = host.querySelector(".t");
+      if (span) roll = span.scrollWidth > host.clientWidth + 1;
+    });
+  });
+  // …and the frame dies with the element, and only then.
+  $effect(() => () => cancelAnimationFrame(pending));
+
+  // ---- slider ----
+
+  let frac = $derived.by(() => {
+    if (el.type !== "slider" || el.bind === null) return 0;
+    const v = Number(binds[el.bind]);
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+  });
+
+  // Press or drag anywhere along it, the way the CSS sliders behaved. The
+  // pointer is captured on <html>, not on this element: a state push
+  // re-renders the sprite mid-drag and capture dies with the element it was
+  // taken on — the same lesson the title-bar drag records in Classic.
+  function slideDown(e: PointerEvent, node: HTMLElement) {
+    if (e.button !== 0 || !onslide) return;
+    e.stopPropagation();
+    const at = (ev: PointerEvent) => {
+      const r = node.getBoundingClientRect();
+      const t =
+        el.type === "slider" && el.orientation === "vertical"
+          ? 1 - (ev.clientY - r.top) / r.height
+          : (ev.clientX - r.left) / r.width;
+      onslide!(Math.min(1, Math.max(0, t)));
+    };
+    const root = document.documentElement;
+    const move = (ev: PointerEvent) => at(ev);
+    const up = () => {
+      root.removeEventListener("pointermove", move);
+      root.removeEventListener("pointerup", up);
+      root.removeEventListener("pointercancel", up);
+      try {
+        root.releasePointerCapture(e.pointerId);
+      } catch {
+        // The capture is gone already; nothing to release.
+      }
+    };
+    at(e);
+    root.setPointerCapture(e.pointerId);
+    root.addEventListener("pointermove", move);
+    root.addEventListener("pointerup", up);
+    root.addEventListener("pointercancel", up);
+  }
 </script>
 
 {#if el.type === "nineslice"}
-  <!-- Nine boxes filling the window: corners at their size, edges stretched
-       along one axis, the centre along both. Below every other element. -->
-  <div class="sp-frame" aria-hidden="true">
+  <!-- Nine boxes filling the element's box: corners at their size, edges
+       stretched along one axis, the centre along both. `rect: "fill"` tracks
+       the whole window; a rect of its own edges a control. -->
+  <div class="sp-frame" aria-hidden="true" style="{box};opacity:{el.opacity}">
     {#each nineSliceRefs(el.sprite, el.insets) as { piece, ref } (piece)}
       {@const s = skin.slice(ref)}
       <div class="sp" class:mask class:final={!mask} style="{ninePieceStyle(piece, el.insets)};{vars({ n: s })}"></div>
@@ -100,15 +210,17 @@
     class:mask
     class:final={!mask}
     class:drag={el.role === "drag"}
-    style="{box()};{vars(states)}"
+    style="{box};opacity:{el.opacity};{vars(states)}"
     {onpointerdown}
-  ></div>
+  >
+    {#if slot}{@render slot()}{/if}
+  </div>
 {:else if (el.type === "button" || el.type === "toggle") && states}
   <!-- The glow, when the skin leaves it to the renderer (D73), sits on a
        wrapper: a filter is applied before a mask, so on the masked element
        itself the halo would be cut away with everything else outside the
        shape. Never on the visualizer's ancestors; this is a sibling. -->
-  <div class="sp-glow" class:glow style={box()}>
+  <div class="sp-glow" class:glow style={box}>
     <button
       class="sp sp-button"
       class:mask
@@ -123,19 +235,66 @@
       {onclick}
     ></button>
   </div>
-{:else if el.type === "text" && font}
+{:else if el.type === "text" && font && look}
   <div
+    bind:this={textBox}
     class="sp-text"
     class:upper={font.type === "system" && font.case === "upper"}
     class:scroll={el.overflow === "scroll"}
-    style="{box()};--tc:var(--{el.tint});--tc-i:var(--{el.inactive?.tint ?? el.tint});{font.type === 'system'
+    class:lit={look.glow}
+    style="{box};--tc:var(--{look.tint});--tc-i:var(--{el.inactive?.tint ?? look.tint});opacity:{look.opacity};{font.type ===
+    'system'
       ? `font-size:${font.size}px;letter-spacing:${font.tracking}em`
       : ''}"
   >
-    {#if children}
-      {@render children()}
+    {#if slot}
+      {@render slot()}
+    {:else if roll}
+      <!-- Not `.t`: that class clips and ellipsizes, which is right for a
+           title that fits and wrong for one that moves. -->
+      <span class="rolling" style="animation-duration:{Math.max(6, shown.length * 0.35)}s">
+        {shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
+      </span>
     {:else}
-      <span class="t">{text}</span>
+      <span class="t">{shown}</span>
     {/if}
+  </div>
+{:else if el.type === "slider"}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="sp-slider"
+    style={box}
+    onpointerdown={(e) => slideDown(e, e.currentTarget as HTMLElement)}
+  >
+    {#if el.track}
+      {@const s = skin.slice(el.track)}
+      <div class="sp sp-track" class:mask class:final={!mask} style={vars({ n: s })}></div>
+    {/if}
+    {#if el.fill}
+      {@const s = skin.slice(el.fill)}
+      <div
+        class="sp sp-fill"
+        class:mask
+        class:final={!mask}
+        style="{vars({ n: s })};{el.orientation === 'vertical'
+          ? `height:${frac * 100}%`
+          : `width:${frac * 100}%`}"
+      ></div>
+    {/if}
+    {#if el.thumb}
+      {@const s = skin.slice(el.thumb)}
+      <div
+        class="sp sp-thumb"
+        class:mask
+        class:final={!mask}
+        style="{vars({ n: s })};width:{s.w}px;height:{s.h}px;{el.orientation === 'vertical'
+          ? `bottom:${frac * 100}%`
+          : `left:${frac * 100}%`}"
+      ></div>
+    {/if}
+  </div>
+{:else if el.type === "visualizer"}
+  <div class="sp-vis" style={box}>
+    {#if slot}{@render slot()}{/if}
   </div>
 {/if}

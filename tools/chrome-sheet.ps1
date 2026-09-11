@@ -11,10 +11,10 @@
     looks like, and writes the sheet at every scale the manifest lists (1x and
     2x, D73), with strokes that thick.
 
-    The look is the CSS chrome that shipped in v0.4b, transcribed: a hairline
-    frame at 30%, a title bar wash at 10% (6% when the group is inactive), and
-    13 x 9 title-bar buttons with a 24% ring that goes full on hover, fills at
-    14% while pressed, and dims to 45% when inactive.
+    The look is the CSS chrome that shipped in v0.4b, transcribed. Two sprites
+    are shared by many elements and drawn at full alpha, because the element
+    carries the strength as `opacity` (D93): `ring`, a one-pixel border, is the
+    window frame at 0.3 and a control's edge at 0.14; `solid` is every well.
 
     Windows PowerShell 5.1, System.Drawing only. Re-run after editing the
     manifest's rectangles or the glyphs below; commit the PNGs it writes.
@@ -39,9 +39,16 @@ $states = @{
     "inactive" = @{ ring = 0.24; fill = 0.00; glyph = 0.45 }
 }
 
-# Glyphs on a 13 x 9 button: "#" is a pixel. Row 0 and 8, column 0 and 12 are
-# the ring, so a glyph lives in the 11 x 7 inside.
+# A latched button (playing, paused, stopped) fills at 0.14 and carries a soft
+# bloom around its glyph, baked into the alpha rather than added by a filter --
+# the same reason the analyser's glow lives in its ramp art (D73).
+$bloom = @(@{ r = 3; a = 0.16 }, @{ r = 2; a = 0.24 }, @{ r = 1; a = 0.38 })
+
+# Glyphs. Each string grid must be exactly the sprite's logical size: 13 x 9 on
+# a title-bar button, 17 x 14 on a transport button. Row 0 and the last row,
+# column 0 and the last column, are the ring.
 $glyphs = @{
+    # ---- title bar, 13 x 9 ----
     # Minimise: a bar (#86).
     "minimize" = @(
         ".............",
@@ -102,6 +109,100 @@ $glyphs = @{
         ".............",
         "............."
     )
+    # Close: Main only, and it is the app's exit (D63).
+    "close" = @(
+        ".............",
+        ".............",
+        "....#...#....",
+        ".....#.#.....",
+        "......#......",
+        ".....#.#.....",
+        "....#...#....",
+        ".............",
+        "............."
+    )
+
+    # ---- transport, 17 x 14 ----
+    "prev" = @(
+        ".................",
+        ".................",
+        ".................",
+        ".......#....#....",
+        "......##...##....",
+        ".....###..###....",
+        "....####.####....",
+        "....####.####....",
+        ".....###..###....",
+        "......##...##....",
+        ".......#....#....",
+        ".................",
+        ".................",
+        "................."
+    )
+    "next" = @(
+        ".................",
+        ".................",
+        ".................",
+        "....#....#.......",
+        "....##...##......",
+        "....###..###.....",
+        "....####.####....",
+        "....####.####....",
+        "....###..###.....",
+        "....##...##......",
+        "....#....#.......",
+        ".................",
+        ".................",
+        "................."
+    )
+    "play" = @(
+        ".................",
+        ".................",
+        "......#..........",
+        "......##.........",
+        "......###........",
+        "......####.......",
+        "......#####......",
+        "......#####......",
+        "......####.......",
+        "......###........",
+        "......##.........",
+        "......#..........",
+        ".................",
+        "................."
+    )
+    "pause" = @(
+        ".................",
+        ".................",
+        ".................",
+        "......##..##.....",
+        "......##..##.....",
+        "......##..##.....",
+        "......##..##.....",
+        "......##..##.....",
+        "......##..##.....",
+        "......##..##.....",
+        "......##..##.....",
+        ".................",
+        ".................",
+        "................."
+    )
+    "stop" = @(
+        ".................",
+        ".................",
+        ".................",
+        ".................",
+        "......#####......",
+        "......#####......",
+        "......#####......",
+        "......#####......",
+        "......#####......",
+        ".................",
+        ".................",
+        ".................",
+        ".................",
+        "................."
+    )
 }
 
 # ---- collect every sprite the manifest draws, keyed by (sheet, rect) ----
@@ -115,29 +216,31 @@ function Add-Job([string]$sheet, $rect, [string]$kind, [string]$state) {
     }
 }
 
+function Add-States($e, [string]$kind) {
+    foreach ($s in "sprite", "hover", "active", "inactive") {
+        $ref = $e.$s
+        if ($ref) {
+            $state = if ($s -eq "sprite") { "normal" } else { $s }
+            Add-Job $ref.sheet $ref.rect $kind $state
+        }
+    }
+}
+
 function Add-Element([string]$name, $e) {
     switch ($e.type) {
-        "nineslice" { Add-Job $e.sprite.sheet $e.sprite.rect "frame" "normal" }
+        "nineslice" { Add-Job $e.sprite.sheet $e.sprite.rect $name "normal" }
         "image" {
             Add-Job $e.sprite.sheet $e.sprite.rect $name "normal"
             if ($e.inactive) { Add-Job $e.inactive.sheet $e.inactive.rect $name "inactive" }
         }
         { $_ -eq "button" -or $_ -eq "toggle" } {
-            foreach ($s in "sprite", "hover", "active", "inactive") {
-                $ref = $e.$s
-                if ($ref) {
-                    $state = if ($s -eq "sprite") { "normal" } else { $s }
-                    Add-Job $ref.sheet $ref.rect $name $state
-                }
-            }
-            if ($e.on) {
-                foreach ($s in "sprite", "hover", "active", "inactive") {
-                    $ref = $e.on.$s
-                    if ($ref) {
-                        $state = if ($s -eq "sprite") { "normal" } else { $s }
-                        Add-Job $ref.sheet $ref.rect "$name.on" $state
-                    }
-                }
+            Add-States $e $name
+            if ($e.on) { Add-States $e.on "$name.on" }
+        }
+        "slider" {
+            foreach ($part in "track", "fill", "thumb") {
+                $ref = $e.$part
+                if ($ref) { Add-Job $ref.sheet $ref.rect "$name.$part" "normal" }
             }
         }
     }
@@ -148,6 +251,15 @@ foreach ($w in "main", "equalizer", "playlist") {
     foreach ($set in $win.elements, $win.shade.elements) {
         foreach ($p in $set.PSObject.Properties) { Add-Element $p.Name $p.Value }
     }
+}
+
+# An element's name says what to draw. Two suffixes are conventions rather than
+# glyphs, because many elements share one sprite: anything named *Frame (and
+# the window's own `frame`) is the ring, anything named *Well is the solid.
+function Resolve-Recipe([string]$name) {
+    if ($name -eq "frame" -or $name.EndsWith("Frame")) { return "ring" }
+    if ($name.EndsWith("Well")) { return "solid" }
+    return $name
 }
 
 # ---- draw ----
@@ -183,21 +295,95 @@ function Draw-Glyph($g, [int]$x, [int]$y, [int]$s, [string[]]$rows, [double]$a) 
     }
 }
 
+# The bloom, stamped widest-and-dimmest first so a later, brighter pass wins
+# under SourceCopy. Clipped to the box interior so the ring survives.
+function Draw-Bloom($g, [int]$x, [int]$y, [int]$w, [int]$h, [int]$s, [string[]]$rows) {
+    foreach ($ring in $bloom) {
+        $r = $ring.r
+        for ($gr = 0; $gr -lt $rows.Count; $gr++) {
+            $row = $rows[$gr]
+            for ($gc = 0; $gc -lt $row.Length; $gc++) {
+                if ($row[$gc] -ne "#") { continue }
+                $px = $x + ($gc - $r) * $s
+                $py = $y + ($gr - $r) * $s
+                $pw = (2 * $r + 1) * $s
+                $ph = (2 * $r + 1) * $s
+                # Clamp inside the ring.
+                $lo = $x + $s; $to = $y + $s
+                $hi = $x + $w - $s; $bo = $y + $h - $s
+                if ($px -lt $lo) { $pw -= ($lo - $px); $px = $lo }
+                if ($py -lt $to) { $ph -= ($to - $py); $py = $to }
+                if ($px + $pw -gt $hi) { $pw = $hi - $px }
+                if ($py + $ph -gt $bo) { $ph = $bo - $py }
+                Fill $g $px $py $pw $ph $ring.a
+            }
+        }
+    }
+}
+
 function Draw-Sprite($g, $job, [int]$s) {
     $x = [int]$job.rect[0] * $s; $y = [int]$job.rect[1] * $s
     $w = [int]$job.rect[2] * $s; $h = [int]$job.rect[3] * $s
-    switch ($job.kind) {
-        "frame"    { Draw-Box $g $x $y $w $h $s 0.30 0.00 }
+    $recipe = Resolve-Recipe $job.kind
+    switch ($recipe) {
+        # A one-pixel border at full alpha. The element says how strong it is.
+        "ring"  { Draw-Box $g $x $y $w $h $s 1.00 0.00 }
+        # A plain fill, stretched by the renderer to whatever box wants it.
+        "solid" { Fill $g $x $y $w $h 1.00 }
         "titlebar" {
             $a = if ($job.state -eq "inactive") { 0.06 } else { 0.10 }
             Fill $g $x $y $w $h $a
         }
+        # The seek bar's progress: the CSS gradient, as alpha.
+        "seek.fill" {
+            for ($i = 0; $i -lt $w; $i++) {
+                $t = if ($w -le 1) { 1.0 } else { $i / ($w - 1.0) }
+                Fill $g ($x + $i) $y 1 $h (0.25 + 0.50 * $t)
+            }
+        }
+        # The volume level: brightest along its centre line, so a bar five
+        # pixels tall still reads as lit rather than as a block.
+        "volume.fill" {
+            for ($j = 0; $j -lt $h; $j++) {
+                $t = if ($h -le 1) { 0.0 } else { [Math]::Abs($j / ($h - 1.0) - 0.5) * 2.0 }
+                # Six arguments, always: PowerShell binds positionally and
+                # silently, so a missing height takes the alpha's place and
+                # the sprite comes out empty rather than wrong.
+                Fill $g $x ($y + $j) $w 1 (1.0 - 0.45 * $t)
+            }
+        }
+        # The seek thumb: a hard core with its halo baked around it, never a
+        # filter (D73). Three logical pixels wide, and the falloff is the rest.
+        "seek.thumb" {
+            $cx = ($w - 1) / 2.0
+            $core = 1.5 * $s
+            for ($i = 0; $i -lt $w; $i++) {
+                $d = [Math]::Abs($i - $cx)
+                $a = if ($d -le $core) { 1.0 } else { 0.55 * [Math]::Exp(-([double]($d - $core)) / (1.4 * $s)) }
+                for ($j = 0; $j -lt $h; $j++) {
+                    # Soften the two ends so the thumb does not read as a bar.
+                    $ty = [Math]::Abs($j / ($h - 1.0) - 0.5) * 2.0
+                    $edge = if ($ty -gt 0.82) { 0.45 } else { 1.0 }
+                    Fill $g ($x + $i) ($y + $j) 1 1 ($a * $edge)
+                }
+            }
+        }
         default {
             $st = $states[$job.state]
             if (-not $st) { throw "no state '$($job.state)' for $($job.kind)" }
-            $rows = $glyphs[$job.kind]
+            $base = $recipe -replace '\.on$', ''
+            $rows = $glyphs[$recipe]
+            if (-not $rows) { $rows = $glyphs[$base] }
             if (-not $rows) { throw "no glyph for element '$($job.kind)'" }
-            Draw-Box $g $x $y $w $h $s $st.ring $st.fill
+            if ($rows.Count -ne [int]$job.rect[3] -or $rows[0].Length -ne [int]$job.rect[2]) {
+                throw "glyph for '$($job.kind)' is $($rows[0].Length) x $($rows.Count), sprite is $($job.rect[2]) x $($job.rect[3])"
+            }
+            $latched = $recipe.EndsWith(".on")
+            # `if` is a statement, not an argument: PS 5.1 rejects it inline.
+            $boxFill = $st.fill
+            if ($latched) { $boxFill = 0.14 }
+            Draw-Box $g $x $y $w $h $s $st.ring $boxFill
+            if ($latched) { Draw-Bloom $g $x $y $w $h $s $rows }
             Draw-Glyph $g $x $y $s $rows $st.glyph
         }
     }
