@@ -21,6 +21,7 @@
     current,
     on = false,
     binds = {},
+    glowing = true,
     slot,
     onpointerdown,
     onclick,
@@ -35,6 +36,9 @@
     on?: boolean;
     /** What the window is showing, by binding name. */
     binds?: Record<string, unknown>;
+    /** The person's glow toggle (#108, D100). Off, the renderer adds no
+     * halo: no filter on a button, no glow on a text. */
+    glowing?: boolean;
     /** Rendered inside this element's box, above its art: the analyser in the
      * visualizer, the windowshade strip in the title, an error affordance
      * over the title bar. The skin positions it; the window fills it. */
@@ -46,7 +50,10 @@
   } = $props();
 
   let mask = $derived(skin.skin.art === "mask");
-  let glow = $derived(skin.skin.glow === "renderer");
+  // The renderer's halo (D73): only for a skin that leaves the glow to it,
+  // and only while the person has it on (D100). A `baked` skin's halo is in
+  // its pixels either way.
+  let glow = $derived(skin.skin.glow === "renderer" && glowing);
 
   function vars(slices: { n: Slice; h?: Slice; a?: Slice; i?: Slice }): string {
     const parts = [`--sp:url("${slices.n.url}")`, `--tc:var(--${slices.n.tint})`];
@@ -409,7 +416,7 @@
     class="sp-text"
     class:upper={font.type === "system" && font.case === "upper"}
     class:scroll={el.overflow === "scroll"}
-    class:lit={look.glow}
+    class:lit={look.glow && glow}
     style="{box};text-align:{el.align};--tc:var(--{look.tint});--tc-i:var(--{el.inactive?.tint ??
       look.tint});opacity:{look.opacity};{fontStyle(el.font)}"
   >

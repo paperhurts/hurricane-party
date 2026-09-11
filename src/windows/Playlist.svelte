@@ -447,6 +447,10 @@
     color: var(--list-now);
     text-shadow: 0 0 6px color-mix(in srgb, var(--list-now) 55%, transparent);
   }
+  /* The glow toggle off (D100): the colour says which row is playing. */
+  :global(.chrome[data-glow="off"]) .row.now {
+    text-shadow: none;
+  }
   .n {
     flex: 0 0 auto;
     color: color-mix(in srgb, var(--list-hi) 35%, transparent);
