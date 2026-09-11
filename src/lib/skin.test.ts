@@ -583,6 +583,17 @@ describe("placeRect", () => {
       h: 9,
     });
   });
+
+  it("moves a bottom-right-anchored rect with both edges (D103)", () => {
+    // A classic skin's bottom-right block carries the running time and the
+    // grip, and wants the corner, not an edge.
+    expect(placeRect({ name: "a", rect: [125, 78, 150, 38], anchor: "bottom-right" }, base, [300, 145])).toEqual({
+      x: 150,
+      y: 107,
+      w: 150,
+      h: 38,
+    });
+  });
   it("grows a stretched rect along the axes named", () => {
     expect(placeRect({ name: "a", rect: [0, 0, 275, 14], stretch: "x" }, base, [325, 174])).toEqual({
       x: 0,
