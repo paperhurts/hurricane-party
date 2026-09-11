@@ -35,6 +35,10 @@
 
   type Root = { id: number; label: string; path: string; count: number; present: boolean };
 
+  // What a scan says, whether the folder was just added or is being looked at
+  // again: a known root is found by its path, so the same call serves both.
+  type ScanReport = { root_id: number; found: number; added: number; updated: number; missing: number };
+
   type Playlist = { id: number; name: string; count: number };
 
   // What Rust says after a row is removed: the file is still at `path`, and
@@ -159,9 +163,19 @@
     const tick = setInterval(() => {
       if (active.length) refreshJobs();
     }, 400);
+    // A finished download leaves the list five minutes after it lands. Rust
+    // applies that cutoff (jobs::list), but only when asked, and the poll
+    // above stops asking the moment the queue empties, so the finished rows
+    // sat there until the next download or a relaunch. While any are showing
+    // and nothing is in flight, ask again now and then. The cutoff stays in
+    // Rust; this only keeps asking.
+    const age = setInterval(() => {
+      if (!active.length && jobs.some((j) => j.status === "done")) refreshJobs();
+    }, 15_000);
 
     return () => {
       clearInterval(tick);
+      clearInterval(age);
       subs.forEach((s) => s.then((f) => f()));
     };
   });
@@ -432,24 +446,49 @@
 
     scanning = true;
     try {
-      const r = await invoke<{ root_id: number; found: number; added: number; updated: number; missing: number }>(
-        "add_local_folder", { path: picked }
-      );
-      notice =
-        r.found === 0
-          ? `${picked} — no audio or video files found in that folder or below it.`
-          : `Scanned ${r.found} file${r.found === 1 ? "" : "s"} — ${r.added} added, ${r.updated} updated.`;
-      // A known root, rescanned: rows whose files have left are counted, not
-      // dropped. Dropping them is the offer beside the notice (#78).
-      if (r.missing > 0) {
-        notice += ` ${r.missing} row${r.missing === 1 ? "" : "s"} in the library point${r.missing === 1 ? "s" : ""} at a file that is gone.`;
-        pendingPrune = { rootId: r.root_id, count: r.missing };
-      }
+      reportScan(await invoke<ScanReport>("add_local_folder", { path: picked }), picked);
       await refreshLibrary();
     } catch (e) {
       error = String(e);
     } finally {
       scanning = false;
+    }
+  }
+
+  /**
+   * Look at a known root again: files dropped into the folder by hand since
+   * it was last scanned come in, files taken out are counted. The library
+   * never watches its folders (a watcher is v0.6's, beside integrity
+   * checking), so this is how a folder you filled yourself gets noticed.
+   *
+   * An unplugged drive is not offered: it is a missing root, not an empty
+   * one (D28), and the scan could only fail to read it.
+   */
+  async function rescan(r: Root) {
+    if (scanning || !r.present) return;
+    clearNotice();
+    scanning = true;
+    try {
+      reportScan(await invoke<ScanReport>("add_local_folder", { path: r.path, label: r.label }), r.path);
+      await refreshLibrary();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      scanning = false;
+    }
+  }
+
+  /** The one wording for what a scan found, however it was started. */
+  function reportScan(r: ScanReport, where: string) {
+    notice =
+      r.found === 0
+        ? `${where} — no audio or video files found in that folder or below it.`
+        : `Scanned ${r.found} file${r.found === 1 ? "" : "s"} — ${r.added} added, ${r.updated} updated.`;
+    // A known root, rescanned: rows whose files have left are counted, not
+    // dropped. Dropping them is the offer beside the notice (#78).
+    if (r.missing > 0) {
+      notice += ` ${r.missing} row${r.missing === 1 ? "" : "s"} in the library point${r.missing === 1 ? "s" : ""} at a file that is gone.`;
+      pendingPrune = { rootId: r.root_id, count: r.missing };
     }
   }
 
@@ -558,14 +597,23 @@
         </button>
       {/each}
       <button class="new" onclick={newList}>+ New playlist</button>
-      {#if roots.length > 1}
+      <!-- Every root, even a lone one: a click rescans it, and the one folder
+           most people have (where downloads land) is the one they are most
+           likely to fill by hand. -->
+      {#if roots.length}
         <div class="roots">
           <span class="rootlabel">Roots</span>
           {#each roots as r (r.id)}
             <!-- A missing root is an unplugged drive, not a broken library (D28) -->
-            <span class="root" class:gone={!r.present} title={r.path}>
+            <button
+              class="root"
+              class:gone={!r.present}
+              disabled={scanning || !r.present}
+              title={r.present ? `Rescan ${r.path}` : `${r.path} is not connected`}
+              onclick={() => rescan(r)}
+            >
               {r.label} <span class="n">{r.count}</span>
-            </span>
+            </button>
           {/each}
         </div>
       {/if}
@@ -686,7 +734,11 @@
                color: color-mix(in srgb, var(--filament) 30%, transparent); }
   .root { font-size: 11px; padding: 2px 8px; display: flex; justify-content: space-between;
           color: color-mix(in srgb, var(--filament) 70%, transparent); }
+  .root:hover:not(:disabled) { color: var(--arc); }
   .root.gone { color: var(--ember); text-decoration: line-through; }
+  /* Not offered, but still read at full strength: the global disabled dim
+     would wash an unplugged drive's strike-through out to nearly nothing. */
+  .root.gone:disabled { opacity: 1; }
   .conc { margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
   select { font: inherit; font-size: 11px; background: var(--well); color: var(--filament);
            border: 1px solid color-mix(in srgb, var(--arc) 30%, transparent); padding: 2px 4px; }
