@@ -53,6 +53,12 @@ Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` 
 
 **Video (D69, D70).** One thing plays at a time: starting a video pauses the track, starting a track pauses the video, and nothing resumes. `status` and `now_playing_changed` carry **`kind`**, `"audio"` or `"video"`, and describe whichever last started playing; a pause from the other side does not take the channel back. `play` `pause` `toggle` `stop` `seek` `volume` act on whatever is playing (`stop` on a video is pause-and-rewind; the window stays open on its first frame). `next` and `prev` step the library's list, which walks over videos and tracks alike. Closing the video window hands the channel back to the track: `status` describes the audio side again, paused or stopped, which is what a `play` would resume. `kind` is additive; absent means audio. The Main window's own buttons, seek bar and volume go through the same router as these commands (D81), so what a client sees and what the user sees never disagree.
 
+**The play order (D97).** `status` also carries the library's two switches, flat beside the transport's state: `"shuffle": true|false` and `"repeat": "off"|"one"|"all"`. A client written before they existed reads the same keys in the same places. `play` with nothing loaded starts the list the library is showing, on the playlist window's selected row or at the top; `next` and `prev` from a standing start begin at the first and the last row. Only a track *ending* honours repeat one: `next` always moves on, because someone asked it to. A reply looks like:
+
+```jsonc
+{"id":6, "ok":true, "result":{"state":"playing", "kind":"audio", "media_id":89, "title":"…", "duration_s":240, "pos_s":61.5, "volume":0.8, "shuffle":false, "repeat":"all"}}
+```
+
 ### Events (unsolicited, no `id`)
 
 ```jsonc

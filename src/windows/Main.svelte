@@ -145,7 +145,16 @@
   }
 
   async function play() {
-    if (!track) return;
+    // A standing start, nothing loaded or stopped, is the library's call
+    // (#116, D97): it knows the list showing and the row the playlist window
+    // points at, and answers by loading one, which is the stopped track again
+    // when nothing was picked. Stopped used to replay the loaded track here,
+    // so a row clicked after Stop was never heard from. Main is the one
+    // transport (D81), so its Play, the strip's and the pipe's all reach this.
+    if (!track || stopped) {
+      emitTo("library", "player:start", track?.id ?? null).catch(() => {});
+      return;
+    }
     stopped = false;
     ensureGraph();
     try {
@@ -524,7 +533,11 @@
     push();
     tell();
   }}
-  onended={() => step(1)}
+  onended={() => {
+    // Not step(1): an ending is not a press of Next, and only an ending
+    // honours repeat one (#115). The library decides what follows.
+    emitTo("library", "player:ended").catch(() => {});
+  }}
   ontimeupdate={() => {
     pos = audio.currentTime;
     push();

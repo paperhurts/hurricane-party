@@ -13,9 +13,9 @@
 //! free instead of hand-rolling FFT in Rust. Worth it — but it's why the viz
 //! channel (v0.4) needs its latency measured before v1.0 freezes anything.
 
-use hp_control::{hello_result, Command, Event, PlayerState, Request, Response};
+use hp_control::{hello_result, Command, Event, PlayerState, Request, Response, Status};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// What each transport last reported. Not authoritative — a mirror.
 ///
@@ -90,7 +90,20 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
             Response::ok(req.id, hello_result(env!("CARGO_PKG_VERSION")))
         }
         Command::Status => {
-            let s = state.0.lock().unwrap().current();
+            // The transport's state is the mirror's; shuffle and repeat are
+            // the library's, saved in settings (D97). One lock, then the other,
+            // never both held.
+            let player = state.0.lock().unwrap().current();
+            let (shuffle, repeat) = {
+                let db = app.state::<crate::db::Db>();
+                let conn = db.0.lock().unwrap();
+                crate::db::play_mode(&conn)
+            };
+            let s = Status {
+                player,
+                shuffle,
+                repeat,
+            };
             Response::ok(req.id, serde_json::to_value(s).unwrap_or_default())
         }
         // The one command answered here rather than relayed: the pipe is
@@ -242,8 +255,6 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
         }
     });
 }
-
-use tauri::Manager;
 
 /// The webview reporting what it's actually doing. Also the point where
 /// unsolicited events are derived — by diffing against the previous mirror,

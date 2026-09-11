@@ -265,8 +265,17 @@ foreach ($w in "main", "equalizer", "playlist") {
 function Resolve-Recipe([string]$name) {
     if ($name -eq "frame" -or $name.EndsWith("Frame")) { return "ring" }
     if ($name.EndsWith("Well")) { return "solid" }
+    # The EQ's eleven sliders share one rail, one fill and one thumb.
+    if ($name -match '^eq(Pre|Band\d+)\.(track|fill|thumb)$') { return "eq.$($Matches[2])" }
+    # The playlist's six buttons share one box; each carries its own words.
+    if ($name -match '^(add|url|remove|library|shuffle|repeat)Button(\.on)?$') { return "plButton$($Matches[2])" }
     return $name
 }
+
+# Boxes with no glyph: their words are a text element laid over them (the
+# EQ's switch, its preset button, the clip lamp) or the button's own label
+# (the playlist's bar, D99). Drawn by state; "on" is lit.
+$boxKinds = @("eqOnButton", "eqPresetButton", "eqClipLamp", "plButton")
 
 # ---- draw ----
 
@@ -331,7 +340,53 @@ function Draw-Sprite($g, $job, [int]$s) {
     $x = [int]$job.rect[0] * $s; $y = [int]$job.rect[1] * $s
     $w = [int]$job.rect[2] * $s; $h = [int]$job.rect[3] * $s
     $recipe = Resolve-Recipe $job.kind
+
+    $boxBase = $recipe -replace '\.on$', ''
+    if ($boxKinds -contains $boxBase) {
+        $on = $recipe.EndsWith(".on")
+        $st = $states[$job.state]
+        $ring = $st.ring; $fill = $st.fill
+        # Lit: a full ring over a faint fill, as the CSS switch was.
+        if ($on) { $ring = 1.00; $fill = 0.14 }
+        # The clip lamp sits quieter than a button until it fires.
+        if ($boxBase -eq "eqClipLamp" -and -not $on) { $ring = 0.18 }
+        # The preset button's "on" is its menu open: a full ring, no fill.
+        if ($boxBase -eq "eqPresetButton" -and $on) { $fill = 0.00 }
+        Draw-Box $g $x $y $w $h $s $ring $fill
+        # Its ▼, at full strength whatever the ring: the arrow was always arc.
+        if ($boxBase -eq "eqPresetButton") {
+            $ax = $x + $w - 9 * $s; $ay = $y + [int][Math]::Floor(($h - 3 * $s) / 2)
+            Fill $g $ax $ay (5 * $s) $s 1.0
+            Fill $g ($ax + $s) ($ay + $s) (3 * $s) $s 1.0
+            Fill $g ($ax + 2 * $s) ($ay + 2 * $s) $s $s 1.0
+        }
+        return
+    }
+
     switch ($recipe) {
+        # The EQ's rail: one hairline down the middle and the 0 dB tick across
+        # it, both at the CSS rail's strength. One tint: the tick was filament,
+        # now arc like the rail, a 5-pixel difference nobody will miss.
+        "eq.track" {
+            Fill $g ($x + 8 * $s) $y $s $h 0.22
+            Fill $g ($x + 6 * $s) ($y + 34 * $s) (5 * $s) $s 0.22
+        }
+        # The lit part of the rail, 0 dB to the thumb: one column, stretched.
+        "eq.fill" { Fill $g ($x + 8 * $s) $y $s $h 1.0 }
+        # A 9 x 3 bar with its glow baked round it, never a filter (D73).
+        "eq.thumb" {
+            $cx0 = 4 * $s; $cx1 = 13 * $s; $cy0 = 4 * $s; $cy1 = 7 * $s
+            for ($i = 0; $i -lt $w; $i++) {
+                for ($j = 0; $j -lt $h; $j++) {
+                    $dx = 0; if ($i -lt $cx0) { $dx = $cx0 - $i } elseif ($i -ge $cx1) { $dx = $i - $cx1 + 1 }
+                    $dy = 0; if ($j -lt $cy0) { $dy = $cy0 - $j } elseif ($j -ge $cy1) { $dy = $j - $cy1 + 1 }
+                    $d = [Math]::Sqrt([double]($dx * $dx + $dy * $dy)) / $s
+                    $a = 1.0
+                    if ($d -gt 0) { $a = 0.5 * [Math]::Exp(-$d / 1.3) }
+                    if ($a -gt 0.02) { Fill $g ($x + $i) ($y + $j) 1 1 $a }
+                }
+            }
+        }
         # A one-pixel border at full alpha. The element says how strong it is.
         "ring"  { Draw-Box $g $x $y $w $h $s 1.00 0.00 }
         # A plain fill, stretched by the renderer to whatever box wants it.

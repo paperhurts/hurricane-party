@@ -34,6 +34,15 @@ export const ACTIONS = [
   "playlist",
   "shuffle",
   "repeat",
+  // The equalizer's own: its on switch, and its preset menu.
+  "eqOn",
+  "eqPresets",
+  // The playlist's bottom bar (D99): add files, add a link, remove the
+  // selected rows, show the library.
+  "add",
+  "addUrl",
+  "remove",
+  "library",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -52,6 +61,32 @@ export const BINDS = [
   "volumePercent",
   "balance",
   "playState",
+  // The equalizer (D21). `eqOn` is "on" or "off", `eqMenu` "open" or
+  // "closed", `eqClip` "on" while the lamp is lit; `eqTrim` is the readout's
+  // words; the eleven gains are 0..1 fractions, 0.5 being 0 dB.
+  "eqOn",
+  "eqPreset",
+  "eqMenu",
+  "eqTrim",
+  "eqClip",
+  "eqPre",
+  "eqBand1",
+  "eqBand2",
+  "eqBand3",
+  "eqBand4",
+  "eqBand5",
+  "eqBand6",
+  "eqBand7",
+  "eqBand8",
+  "eqBand9",
+  "eqBand10",
+  // The playlist (D99). `shuffle` and `repeatOn` are "on" or "off",
+  // `repeatLabel` is the repeat button's words ("REP", "1x", "ALL"), and
+  // `plCanRemove` is "yes" while a row is selected to remove.
+  "shuffle",
+  "repeatOn",
+  "repeatLabel",
+  "plCanRemove",
 ] as const;
 export type Bind = (typeof BINDS)[number];
 
@@ -109,6 +144,8 @@ export type Element =
       active?: SpriteRef;
       inactive?: SpriteRef;
       action: Action;
+      label?: Label;
+      disabled?: Disabled;
     })
   | (Placed & {
       type: "toggle";
@@ -123,6 +160,8 @@ export type Element =
        * A toggle with a bind and no action is an indicator. */
       bind: Bind | null;
       when: string | null;
+      label?: Label;
+      disabled?: Disabled;
     })
   | (Placed & {
       type: "text";
@@ -143,6 +182,9 @@ export type Element =
        * lighting while the transport is playing. */
       lit?: { bind: Bind | null; when: string; tint: Token; opacity: number; glow: boolean };
       overflow: "clip" | "scroll";
+      /** Where the line sits in its box. Labels under the EQ's sliders are
+       * centred; everything before them read left. */
+      align: "left" | "center" | "right";
     })
   | (Placed & {
       type: "slider";
@@ -153,9 +195,56 @@ export type Element =
       thumb?: SpriteRef;
       orientation: "horizontal" | "vertical";
       bind: Bind | null;
+      /** A centred control, 0..1: the fill runs from here to the value rather
+       * than from the start, the wheel nudges it, and a double-click returns
+       * it here. The EQ's gains sit at 0.5, which is 0 dB. Null for a seek
+       * bar or a level, which run from nothing. */
+      origin: number | null;
+      /** A second look for the fill and thumb while `bind` equals `when`: the
+       * EQ's sliders dim while the EQ is off. */
+      lit?: { bind: Bind | null; when: string; tint: Token; opacity: number };
+      /** The thumb takes `tint` once the value is more than `beyond` from the
+       * origin: a band pushed past 8 dB either way turns `strike`. */
+      hot?: { beyond: number; tint: Token };
     })
   | (Placed & { type: "visualizer" })
-  | (Placed & { type: "list"; rowHeight: number });
+  | (Placed & {
+      type: "list";
+      /** The playlist's rows (D99). The window draws them, since they scroll,
+       * reorder and take the keyboard; the skin says where, how tall a row is,
+       * in what face, and in what colours: the text, the playing row, and the
+       * selection. Those are what a `.wsz`'s `PLEDIT.TXT` gives, and no more. */
+      rowHeight: number;
+      font: string;
+      tint: Token;
+      opacity: number;
+      current: Token;
+      selected: Token;
+    })
+  | (Placed & {
+      /** A box the window fills (D99): the playlist's status line and its
+       * URL field. The skin places it; what is in it is the window's. */
+      type: "slot";
+    });
+
+/** Words drawn on a button, inside its hover (D99): they light with the
+ * button, which a text element laid beside it could not. `hover` and `on` are
+ * the tints while the button is hovered and while a toggle is on. They do not
+ * change with focus; the art does. */
+export type Label = {
+  font: string;
+  value: string | null;
+  bind: Bind | null;
+  tint: Token;
+  opacity: number;
+  hover: Token | null;
+  on: Token | null;
+};
+
+/** A button that cannot be pressed right now (D99): while `bind` equals
+ * `when` it is dimmed and takes the press without doing anything — no hover
+ * art, no halo, no click. */
+export type Disabled = { bind: Bind | null; when: string };
 
 export type ElementSet = { size: [number, number]; elements: Element[] };
 
@@ -278,8 +367,11 @@ function optSprite(o: Obj, key: string, sheets: Skin["sheets"], path: string): S
   return o[key] === undefined ? undefined : sprite(o[key], sheets, `${path}.${key}`);
 }
 
-function placed(o: Obj, path: string): Placed & { name: string } {
-  const p: Placed = { name: path.slice(path.lastIndexOf(".") + 1), rect: rect(o.rect, `${path}.rect`) };
+// The element's own key, passed in: read back off the path, a key with a dot
+// in it ("bar.add") lost everything before the dot, and two such keys could
+// collide and take the whole window down with them.
+function placed(o: Obj, name: string, path: string): Placed & { name: string } {
+  const p: Placed = { name, rect: rect(o.rect, `${path}.rect`) };
   if (o.anchor !== undefined) p.anchor = oneOf(o.anchor, ["right", "bottom"] as const, `${path}.anchor`);
   if (o.stretch !== undefined) p.stretch = oneOf(o.stretch, ["x", "y", "xy"] as const, `${path}.stretch`);
   return p;
@@ -295,7 +387,7 @@ function element(
   if (!isObj(v)) fail(path, "must be an element object");
   const type = oneOf(
     v.type,
-    ["nineslice", "image", "button", "toggle", "text", "slider", "visualizer", "list"] as const,
+    ["nineslice", "image", "button", "toggle", "text", "slider", "visualizer", "list", "slot"] as const,
     `${path}.type`,
   );
   // An unknown binding is a soft failure by spec: the element renders empty
@@ -311,6 +403,11 @@ function element(
     warnings.push(`${where}.bind: "${b}" is not a binding this app has; it renders empty`);
     return null;
   };
+  const unit = (x: unknown, where: string): number => {
+    const n = num(x, where);
+    if (n < 0 || n > 1) fail(where, "must be between 0 and 1");
+    return n;
+  };
   const opacityOf = (o: Obj, where: string): number => {
     if (o.opacity === undefined) return 1;
     const n = num(o.opacity, `${where}.opacity`);
@@ -323,14 +420,43 @@ function element(
     if (typeof b !== "boolean") fail(`${where}.${key}`, "must be true or false");
     return b;
   };
+  const fontOf = (o: Obj, where: string): string => {
+    const f = str(o, "font", where);
+    if (!(f in skin.fonts)) fail(`${where}.font`, `names no font (have ${Object.keys(skin.fonts).join(", ")})`);
+    return f;
+  };
+  // A button's words (D99), and when it cannot be pressed.
+  const labelOf = (o: Obj): Label | undefined => {
+    if (o.label === undefined) return undefined;
+    if (!isObj(o.label)) fail(`${path}.label`, "must be {font, value?, bind?, tint?, opacity?, hover?, on?}");
+    const l = o.label;
+    const where = `${path}.label`;
+    const out: Label = {
+      font: fontOf(l, where),
+      value: l.value === undefined ? null : str(l, "value", where),
+      bind: bindOf(l, where, false),
+      tint: l.tint === undefined ? "filament" : oneOf(l.tint, TOKENS, `${where}.tint`),
+      opacity: opacityOf(l, where),
+      hover: l.hover === undefined ? null : oneOf(l.hover, TOKENS, `${where}.hover`),
+      on: l.on === undefined ? null : oneOf(l.on, TOKENS, `${where}.on`),
+    };
+    if (l.bind === undefined && out.value === null) fail(where, 'needs a "bind", a literal "value", or both');
+    return out;
+  };
+  const disabledOf = (o: Obj): Disabled | undefined => {
+    if (o.disabled === undefined) return undefined;
+    if (!isObj(o.disabled)) fail(`${path}.disabled`, "must be {bind, when}");
+    return { bind: bindOf(o.disabled, `${path}.disabled`, true), when: str(o.disabled, "when", `${path}.disabled`) };
+  };
   switch (type) {
     case "nineslice": {
       const ins = v.insets;
       if (!Array.isArray(ins) || ins.length !== 4) fail(`${path}.insets`, "must be [top, right, bottom, left]");
       const fill = v.rect === "fill";
       return {
-        name,
-        rect: fill ? [0, 0, 0, 0] : rect(v.rect, `${path}.rect`),
+        // A frame with a rect of its own is placed like any element, so the
+        // playlist's list edge grows with the window (D30).
+        ...(fill ? { name, rect: [0, 0, 0, 0] as Rect } : placed(v, name, path)),
         type,
         fill,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
@@ -345,7 +471,7 @@ function element(
     }
     case "image": {
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         inactive: optSprite(v, "inactive", skin.sheets, path),
@@ -356,19 +482,21 @@ function element(
     }
     case "button":
       return {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         hover: optSprite(v, "hover", skin.sheets, path),
         active: optSprite(v, "active", skin.sheets, path),
         inactive: optSprite(v, "inactive", skin.sheets, path),
         action: oneOf(v.action, ACTIONS, `${path}.action`),
+        label: labelOf(v),
+        disabled: disabledOf(v),
       };
     case "toggle": {
       if (!isObj(v.on)) fail(`${path}.on`, "must be the on-state sprites {sprite, hover?, active?, inactive?}");
       const on = v.on;
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         hover: optSprite(v, "hover", skin.sheets, path),
@@ -383,6 +511,8 @@ function element(
         action: v.action === undefined ? null : oneOf(v.action, ACTIONS, `${path}.action`),
         bind: bindOf(v, path, false),
         when: v.when === undefined ? null : str(v, "when", path),
+        label: labelOf(v),
+        disabled: disabledOf(v),
       };
       if (!e.action && !(e.bind && e.when)) {
         fail(path, 'needs an "action" to be clickable, or "bind" and "when" to be an indicator');
@@ -393,7 +523,7 @@ function element(
       const font = str(v, "font", path);
       if (!(font in skin.fonts)) fail(`${path}.font`, `names no font (have ${Object.keys(skin.fonts).join(", ")})`);
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         font,
         bind: bindOf(v, path, false),
@@ -402,6 +532,7 @@ function element(
         opacity: opacityOf(v, path),
         glow: boolOf(v, "glow", path),
         overflow: v.overflow === undefined ? "clip" : oneOf(v.overflow, ["clip", "scroll"] as const, `${path}.overflow`),
+        align: v.align === undefined ? "left" : oneOf(v.align, ["left", "center", "right"] as const, `${path}.align`),
       };
       // Declared, not resolved: a bind this app does not have is a soft
       // failure that renders empty, so the element still has something to
@@ -428,23 +559,50 @@ function element(
     }
     case "slider": {
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         track: optSprite(v, "track", skin.sheets, path),
         fill: optSprite(v, "fill", skin.sheets, path),
         thumb: optSprite(v, "thumb", skin.sheets, path),
         orientation: oneOf(v.orientation, ["horizontal", "vertical"] as const, `${path}.orientation`),
         bind: bindOf(v, path, true),
+        origin: v.origin === undefined ? null : unit(v.origin, `${path}.origin`),
       };
       if (!e.track && !e.fill && !e.thumb) fail(path, 'needs at least one of "track", "fill" or "thumb"');
+      if (v.lit !== undefined) {
+        if (!isObj(v.lit)) fail(`${path}.lit`, "must be {bind, when, tint?, opacity?}");
+        const l = v.lit;
+        e.lit = {
+          bind: bindOf(l, `${path}.lit`, true),
+          when: str(l, "when", `${path}.lit`),
+          tint: l.tint === undefined ? "filament" : oneOf(l.tint, TOKENS, `${path}.lit.tint`),
+          opacity: opacityOf(l, `${path}.lit`),
+        };
+      }
+      if (v.hot !== undefined) {
+        if (!isObj(v.hot)) fail(`${path}.hot`, "must be {beyond, tint}");
+        if (e.origin === null) fail(`${path}.hot`, 'needs an "origin" to measure "beyond" from');
+        e.hot = { beyond: unit(v.hot.beyond, `${path}.hot.beyond`), tint: oneOf(v.hot.tint, TOKENS, `${path}.hot.tint`) };
+      }
       return e;
     }
     case "visualizer":
-      return { ...placed(v, path), type };
+      return { ...placed(v, name, path), type };
     case "list":
-      // The playlist's rows. Parsed so a spec-valid skin is never refused;
-      // drawn by the playlist's own PR.
-      return { ...placed(v, path), type, rowHeight: int(v.rowHeight, `${path}.rowHeight`, 1) };
+      // The playlist's rows (D99): the skin's box, metrics and colours; the
+      // window's rows inside them.
+      return {
+        ...placed(v, name, path),
+        type,
+        rowHeight: int(v.rowHeight, `${path}.rowHeight`, 1),
+        font: fontOf(v, path),
+        tint: v.tint === undefined ? "filament" : oneOf(v.tint, TOKENS, `${path}.tint`),
+        opacity: opacityOf(v, path),
+        current: v.current === undefined ? "strike" : oneOf(v.current, TOKENS, `${path}.current`),
+        selected: v.selected === undefined ? "arc" : oneOf(v.selected, TOKENS, `${path}.selected`),
+      };
+    case "slot":
+      return { ...placed(v, name, path), type };
   }
 }
 
@@ -466,6 +624,25 @@ function elementSet(
   }
   return { size, elements };
 }
+
+/** Where each window puts what it draws itself, by element name (D99). The
+ * names are part of the format, as `titlebar` is: a window finds its box by
+ * name, so a skin that renamed one would load and then have nowhere to put
+ * the analyser, the curve or the rows — a half-load, which the format
+ * refuses. Checked on the full set; the strip's content is a snippet of its
+ * own (D79). */
+export const FILLS: Record<WindowName, { name: string; types: Element["type"][]; what: string }[]> = {
+  main: [
+    { name: "vis", types: ["visualizer"], what: "the analyser" },
+    { name: "trackTitle", types: ["text"], what: "the title, and a track it cannot open" },
+  ],
+  equalizer: [{ name: "eqCurveWell", types: ["image", "slot"], what: "the response curve and the preset menu" }],
+  playlist: [
+    { name: "list", types: ["list"], what: "the rows" },
+    { name: "listStatus", types: ["slot"], what: "the count and running time" },
+    { name: "urlField", types: ["slot"], what: "the link field" },
+  ],
+};
 
 function font(v: unknown, sheets: Skin["sheets"], path: string): Font {
   if (!isObj(v)) fail(path, "must be a font object");
@@ -529,6 +706,12 @@ function windowOf(
       return elementSet(v.shade.elements, s, skin, `${path}.shade.elements`, warnings);
     })(),
   };
+  for (const f of FILLS[name]) {
+    const e = w.full.elements.find((x) => x.name === f.name);
+    if (!e || !f.types.includes(e.type)) {
+      fail(`${path}.elements`, `needs a ${f.types.join(" or ")} named "${f.name}": the window puts ${f.what} there`);
+    }
+  }
   if (v.resizable) {
     const step = pair(v.resizeStep, `${path}.resizeStep`, 1);
     if (name === "playlist" && (step[0] !== PLAYLIST_STEP[0] || step[1] !== PLAYLIST_STEP[1])) {
@@ -728,6 +911,58 @@ export function placeRect(
   if (e.stretch === "x" || e.stretch === "xy") w += dx;
   if (e.stretch === "y" || e.stretch === "xy") h += dy;
   return { x, y, w, h };
+}
+
+/**
+ * What a button's tooltip says. A skin names the action; the app says it in
+ * words, and a toggle says what a press will do from where it stands now.
+ * An indicator has no action and so no tooltip: it shows, it does not offer.
+ */
+export function actionTitle(action: Action | null, on: boolean): string {
+  switch (action) {
+    case "minimize":
+      return "Minimise";
+    case "shade":
+      return on ? "Expand" : "Shade";
+    case "zoom":
+      return on ? "Normal size" : "Double size";
+    case "close":
+      return "Close";
+    case "play":
+      return "Play";
+    case "pause":
+      return "Pause";
+    case "stop":
+      return "Stop";
+    case "prev":
+      return "Previous";
+    case "next":
+      return "Next";
+    case "eject":
+      return "Open";
+    case "eq":
+      return "Equalizer";
+    case "playlist":
+      return "Playlist";
+    case "shuffle":
+      return on ? "Play in order" : "Play in a random order";
+    case "repeat":
+      return "Repeat: off, this track, or the whole list";
+    case "eqOn":
+      return on ? "Turn the EQ off" : "Turn the EQ on";
+    case "eqPresets":
+      return "Presets";
+    case "add":
+      return "Add a folder of music";
+    case "addUrl":
+      return "Queue a link for download";
+    case "remove":
+      return "Remove from this playlist";
+    case "library":
+      return "Open the library window";
+    case null:
+      return "";
+  }
 }
 
 /** The element set a window shows in its current state. */
