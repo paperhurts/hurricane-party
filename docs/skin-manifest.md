@@ -296,7 +296,7 @@ Document the limitation honestly: *many modern skins load; heavily scripted ones
 Packs are untrusted input from the internet even without code in them. Same rules as `companion.json` (`purricane.md`):
 
 - **Validate against the schema and refuse to load rather than half-load.** A partially-valid skin is a support burden and an unreproducible bug report
-- **Cap sheet dimensions and total decoded size.** A 16k × 16k PNG is a denial of service dressed as a skin
+- **Cap sheet dimensions and total decoded size.** A 16k × 16k PNG is a denial of service dressed as a skin. The `.wsz` importer's caps are 200 entries, 8 MB a file and 32 MB unpacked (D105), and it writes only `.bmp` and `.txt`, by basename — which is also what closes zip slip
 - **Every `sprite.rect` must lie inside its sheet.** Out-of-bounds is a hard failure, not a clamp
 - **Unknown keys are ignored, not errors**, so `hp-skin/2` degrades rather than dying
 - **Missing required elements are a hard failure.** Missing *optional* ones fall back to the default skin's art for that element, so a skin that forgets the balance slider still loads
