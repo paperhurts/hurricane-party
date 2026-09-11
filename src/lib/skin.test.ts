@@ -2,6 +2,7 @@
 // The reference is for this file alone: the app's tsconfig has no node
 // types, and the test reads the shipped PNGs' headers straight off disk.
 import { readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import tokens from "../../design/tokens.json";
 import eyewall from "../../skins/eyewall/manifest.json";
@@ -10,6 +11,7 @@ import {
   elementsOf,
   parseSkin,
   placeRect,
+  type Rect,
   sheetFor,
   SkinError,
   sprites,
@@ -25,6 +27,56 @@ function pngSize(file: string): { w: number; h: number } {
   const b = readFileSync(new URL(file, SKIN_DIR));
   if (b.toString("latin1", 1, 4) !== "PNG") throw new Error(`${file} is not a PNG`);
   return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+}
+
+/**
+ * Every pixel's alpha from one of the shipped sheets. A minimal PNG reader,
+ * test-only: the sheets are what tools/chrome-sheet.ps1 writes, 8-bit RGBA
+ * and not interlaced, and anything else is refused rather than misread. The
+ * art is generated, so its pixels are the thing worth checking; a sheet can
+ * be the right size and still carry the wrong glow (#117).
+ */
+function alphaOf(file: string): (x: number, y: number) => number {
+  const b = readFileSync(new URL(file, SKIN_DIR));
+  const idat: Buffer[] = [];
+  let w = 0;
+  let h = 0;
+  for (let p = 8; p < b.length; ) {
+    const len = b.readUInt32BE(p);
+    const type = b.toString("latin1", p + 4, p + 8);
+    const data = b.subarray(p + 8, p + 8 + len);
+    if (type === "IHDR") {
+      w = data.readUInt32BE(0);
+      h = data.readUInt32BE(4);
+      if (data[8] !== 8 || data[9] !== 6 || data[12] !== 0) throw new Error(`${file}: not 8-bit RGBA, non-interlaced`);
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    p += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * 4;
+  const px = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = y * (stride + 1) + 1;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= 4 ? px[y * stride + x - 4] : 0;
+      const up = y > 0 ? px[(y - 1) * stride + x] : 0;
+      const ul = x >= 4 && y > 0 ? px[(y - 1) * stride + x - 4] : 0;
+      let v = raw[line + x];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += up;
+      else if (filter === 3) v += (a + up) >> 1;
+      else if (filter === 4) {
+        const pa = Math.abs(up - ul);
+        const pb = Math.abs(a - ul);
+        const pc = Math.abs(a + up - 2 * ul);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? up : ul;
+      }
+      px[y * stride + x] = v & 0xff;
+    }
+  }
+  return (x, y) => px[(y * w + x) * 4 + 3];
 }
 
 /** A structurally clone of the shipped manifest to break in one place. */
@@ -65,16 +117,24 @@ describe("the Eyewall manifest", () => {
     expect(skin.windows.main.resizable).toBe(false);
   });
 
-  it("puts the shade toggle on every title bar (#8); minimise and close are Main's (D63, D86)", () => {
+  it("puts shade on every title bar (#8); minimise, 2x and close are Main's (D63, D86, D96)", () => {
     const { skin } = parseSkin(eyewall);
     for (const w of WINDOWS) {
       for (const shaded of [false, true]) {
-        const names = elementsOf(skin, w, shaded).elements.map((e) => e.name);
+        const els = elementsOf(skin, w, shaded).elements;
+        const names = els.map((e) => e.name);
+        // Shade is per window: collapse the EQ and keep the playlist open.
         expect(names).toContain("shade");
-        expect(names).toContain("zoom");
+        // 2x is one app-wide setting, so it has one home (D96).
+        expect(names.includes("zoom")).toBe(w === "main");
         // A satellite refuses to close (D63), so it is offered no way to.
         expect(names.includes("minimize")).toBe(w === "main");
         expect(names.includes("close")).toBe(w === "main");
+        // The rightmost title-bar button sits flush at the same edge on all
+        // three, so the buttons line up down a bonded stack.
+        const right = Math.max(...els.filter((e) => e.type === "button" || e.type === "toggle")
+          .filter((e) => e.rect[1] < 14).map((e) => e.rect[0] + e.rect[2]));
+        expect(right).toBe(271);
       }
     }
   });
@@ -115,6 +175,41 @@ describe("the Eyewall manifest", () => {
     expect(by("tagStop")).toMatchObject({ lit: { when: "stopped", tint: "strike" } });
     // A literal with a hole in it, so "VOL" and the number are one element.
     expect(by("volLabel")).toMatchObject({ value: "VOL {}", bind: "volumePercent" });
+  });
+
+  it("keeps the latched glow on the transport and off the title bar's toggles (#117)", () => {
+    // The pixel just inside the ring, top left: no glyph ever reaches it, so
+    // it is transparent unless something filled the box.
+    const { skin } = parseSkin(eyewall);
+    const inside = (alpha: (x: number, y: number) => number, rect: Rect, k: number) =>
+      alpha((rect[0] + 1) * k, (rect[1] + 1) * k);
+    for (const [file, k] of [
+      ["chrome.png", 1],
+      ["chrome@2x.png", 2],
+    ] as const) {
+      const alpha = alphaOf(file);
+      let titleToggles = 0;
+      for (const w of WINDOWS) {
+        for (const shaded of [false, true]) {
+          for (const e of elementsOf(skin, w, shaded).elements) {
+            if (e.type !== "toggle") continue;
+            if (e.action === "shade" || e.action === "zoom") {
+              // A title-bar toggle's "on" is its other glyph (1x, the up
+              // arrow), drawn as plainly as its "off".
+              titleToggles++;
+              expect(inside(alpha, e.sprite.rect, k), `${w} ${e.name} off at ${k}x`).toBe(0);
+              expect(inside(alpha, e.on.sprite.rect, k), `${w} ${e.name} on at ${k}x`).toBe(0);
+            } else if (e.bind === "playState") {
+              // The control that proves the check can see a glow at all:
+              // a transport button latched on is filled.
+              expect(inside(alpha, e.on.sprite.rect, k), `${e.name} lit at ${k}x`).toBeGreaterThan(0);
+              expect(inside(alpha, e.sprite.rect, k), `${e.name} unlit at ${k}x`).toBe(0);
+            }
+          }
+        }
+      }
+      expect(titleToggles).toBeGreaterThan(0);
+    }
   });
 
   it("reuses one ring and one solid at the strengths each box wants (D93)", () => {
