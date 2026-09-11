@@ -57,6 +57,25 @@ describe("startId: Play with nothing loaded (#116)", () => {
   });
 });
 
+describe("startId: Play after Stop", () => {
+  it("starts on a row picked after the stop", () => {
+    // The hand test that failed: Stop, single-click a row, Play.
+    expect(startId([10, 20, 30], 30, 20)).toBe(30);
+  });
+  it("plays the stopped track again when nothing was picked", () => {
+    expect(startId([10, 20, 30], null, 20)).toBe(20);
+  });
+  it("plays the stopped track even when another list is showing", () => {
+    // Stopped, then a different playlist opened in the library, no row
+    // picked: Play is the classic Stop-and-Play, not the new list's top.
+    expect(startId([40, 50], null, 20)).toBe(20);
+  });
+  it("prefers the pick to the stopped track, and ignores a pick not in the list", () => {
+    expect(startId([10, 20, 30], 10, 30)).toBe(10);
+    expect(startId([10, 20, 30], 99, 30)).toBe(30);
+  });
+});
+
 describe("stepId: Next and Previous", () => {
   const o = [10, 20, 30];
   it("walks the order", () => {

@@ -72,9 +72,14 @@
   // the showing list. Plain, not $state: it changes only when shuffle turns on,
   // the list changes, or a lap of it runs out, never as a side of rendering.
   let shuffleOrder: number[] = [];
-  // The row the playlist window has selected, reported on every change, so
-  // Play from a standing start begins where the person is pointing (#116).
-  let queueSelected: number | null = null;
+  // The row picked in the playlist window, reported on every press, so Play
+  // from a standing start begins where the person is pointing (#116, D97).
+  // Only a row picked since the last track began: a selection left over from
+  // a double-click an album ago must not outrank the song that was stopped.
+  // So a track starting clears it, and a pick of the track already current is
+  // no pick, since a double-click's selection can arrive after the play it
+  // caused.
+  let picked: number | null = null;
   let libraryPath = $state("");
   let concurrency = $state(2);
   let wantVideo = $state(false);
@@ -158,11 +163,12 @@
       // A track finishing on its own is not a press of Next: repeat one
       // plays it again, and only an ending says so (#115).
       listen("player:ended", ended),
-      // Play with nothing loaded, from any transport (#116).
-      listen("player:start", start),
-      // The playlist window's selected row, kept current so a standing start
-      // begins there, and its shuffle and repeat buttons.
-      listen<number | null>("queue:select", (e) => (queueSelected = e.payload)),
+      // Play from a standing start, from any transport (#116): nothing
+      // loaded, or stopped on the track it names.
+      listen<number | null>("player:start", (e) => start(e.payload ?? null)),
+      // The playlist window's selected row, kept so a standing start begins
+      // there, and its shuffle and repeat buttons.
+      listen<number | null>("queue:select", (e) => (picked = e.payload === current?.id ? null : e.payload)),
       listen("play:shuffle", () => setMode(!shuffle, repeat)),
       listen("play:repeat", () => setMode(shuffle, nextRepeat(repeat))),
       listen("play:hello", announceMode),
@@ -337,6 +343,8 @@
     // The cursor moves for either kind, so next and prev walk on from a video
     // as well as from a track.
     current = t;
+    // A track beginning uses up the pick: from here, Stop and Play means this.
+    picked = null;
     // Video gets its own decorated OS window (D13) — it is deliberately not
     // part of the bond group, and the audio element here can't show it.
     if (t.kind === "video") {
@@ -406,21 +414,27 @@
   }
 
   /**
-   * Play with nothing loaded (#116): start the showing list where the
-   * playlist window points, or at its top. Main is the one transport (D81), so
-   * its button, the strip's and the pipe's `play` all land here.
+   * Play from a standing start (#116, D97): nothing loaded, or stopped on
+   * `stoppedOn`. The row picked in the playlist window since the last track
+   * began; else the stopped track, from the top; else the top of the list.
+   * Main is the one transport (D81), so its button, the strip's and the
+   * pipe's `play` all land here.
    */
-  function start() {
-    if (!shown.length) {
+  function start(stoppedOn: number | null) {
+    const pick = picked !== null && shown.some((t) => t.id === picked) ? picked : null;
+    // From cold, a shuffle is a fresh lap led by the pick. Stopped, the lap
+    // already running stands, as it would for a double-click: Previous still
+    // walks back through what played.
+    if (shuffle && stoppedOn === null) reshuffle(pick);
+    const id = startId(order(), pick, stoppedOn);
+    if (id === null) {
       notice = "Nothing to play: the list showing is empty.";
       return;
     }
-    if (shuffle) {
-      reshuffle(queueSelected);
-      playId(shuffleOrder[0] ?? null);
-      return;
-    }
-    playId(startId(order(), queueSelected));
+    // The stopped track can be from a list no longer showing; it is still in
+    // the library.
+    const t = shown.find((x) => x.id === id) ?? tracks.find((x) => x.id === id);
+    if (t) play(t);
   }
 
   function setMode(s: boolean, r: Repeat) {

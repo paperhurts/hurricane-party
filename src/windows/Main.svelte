@@ -145,11 +145,14 @@
   }
 
   async function play() {
-    // Nothing loaded: the library starts the list showing (#116), where the
-    // playlist window points or at the top. Main is the one transport (D81),
-    // so its Play, the strip's and the pipe's all reach this line.
-    if (!track) {
-      emitTo("library", "player:start").catch(() => {});
+    // A standing start, nothing loaded or stopped, is the library's call
+    // (#116, D97): it knows the list showing and the row the playlist window
+    // points at, and answers by loading one, which is the stopped track again
+    // when nothing was picked. Stopped used to replay the loaded track here,
+    // so a row clicked after Stop was never heard from. Main is the one
+    // transport (D81), so its Play, the strip's and the pipe's all reach this.
+    if (!track || stopped) {
+      emitTo("library", "player:start", track?.id ?? null).catch(() => {});
       return;
     }
     stopped = false;
