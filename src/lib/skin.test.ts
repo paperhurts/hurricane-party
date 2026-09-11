@@ -250,6 +250,84 @@ describe("the Eyewall manifest", () => {
     expect(by("eqCurveWell")).toMatchObject({ type: "image", rect: [4, 42, 60, 55] });
   });
 
+  it("draws the playlist's interior: the rows, six buttons, the count and the link field (D99)", () => {
+    const { skin } = parseSkin(eyewall);
+    const els = elementsOf(skin, "playlist", false).elements;
+    const by = (n: string) => els.find((e) => e.name === n);
+    // The rows in their well, under their edge, and all three grow with the
+    // window (D30).
+    for (const name of ["listWell", "list", "listFrame"]) {
+      expect(by(name), name).toMatchObject({ rect: [4, 17, 267, 80], stretch: "xy" });
+    }
+    const names = els.map((e) => e.name);
+    expect(names.indexOf("listWell")).toBeLessThan(names.indexOf("list"));
+    // The edge over the rows, so a selected row never covers it.
+    expect(names.indexOf("list")).toBeLessThan(names.indexOf("listFrame"));
+    expect(by("list")).toMatchObject({
+      type: "list",
+      rowHeight: 10,
+      font: "row",
+      tint: "filament",
+      opacity: 0.72,
+      current: "strike",
+      selected: "arc",
+    });
+    // Six buttons on the bottom edge, one box between them, each with its words.
+    const buttons = ["addButton", "urlButton", "removeButton", "libraryButton", "shuffleButton", "repeatButton"];
+    const box = by("addButton");
+    for (const name of buttons) {
+      const b = by(name);
+      expect(b, name).toMatchObject({ anchor: "bottom", label: { font: "tag", hover: expect.any(String) } });
+      if ((b?.type === "button" || b?.type === "toggle") && (box?.type === "button" || box?.type === "toggle")) {
+        expect(b.sprite.rect, name).toEqual(box.sprite.rect);
+        expect(b.rect[3], name).toBe(13);
+      }
+    }
+    expect(by("addButton")).toMatchObject({ type: "button", action: "add", label: { value: "ADD" } });
+    expect(by("urlButton")).toMatchObject({ action: "addUrl", label: { value: "URL" } });
+    // REM waits for a selection, and warns in strike rather than arc.
+    expect(by("removeButton")).toMatchObject({
+      action: "remove",
+      disabled: { bind: "plCanRemove", when: "no" },
+      label: { hover: "strike" },
+    });
+    expect(by("libraryButton")).toMatchObject({ action: "library" });
+    // The play order's switches light from what the library says (#115).
+    expect(by("shuffleButton")).toMatchObject({ type: "toggle", action: "shuffle", bind: "shuffle", when: "on" });
+    expect(by("repeatButton")).toMatchObject({
+      type: "toggle",
+      action: "repeat",
+      bind: "repeatOn",
+      when: "on",
+      label: { bind: "repeatLabel", value: null, on: "arc" },
+    });
+    // The count takes the rest of the bar and follows the right edge; the
+    // link field lies over the whole bar, last, so it is on top while open.
+    expect(by("listStatus")).toMatchObject({ type: "slot", anchor: "bottom", stretch: "x" });
+    expect(by("urlField")).toMatchObject({ type: "slot", rect: [4, 100, 267, 13], anchor: "bottom", stretch: "x" });
+    expect(names.at(-1)).toBe("urlField");
+    const status = by("listStatus")!;
+    expect(status.rect[0] + status.rect[2]).toBe(271);
+  });
+
+  it("lights a playlist switch with a fill and leaves the unlit box empty", () => {
+    const { skin } = parseSkin(eyewall);
+    const rnd = elementsOf(skin, "playlist", false).elements.find((e) => e.name === "shuffleButton");
+    if (rnd?.type !== "toggle") throw new Error("shuffleButton is not a toggle");
+    for (const [file, k] of [
+      ["chrome.png", 1],
+      ["chrome@2x.png", 2],
+    ] as const) {
+      const alpha = alphaOf(file);
+      const inside = (r: Rect) => alpha((r[0] + 1) * k, (r[1] + 1) * k);
+      const edge = (r: Rect) => alpha(r[0] * k, r[1] * k);
+      expect(inside(rnd.sprite.rect), `off at ${k}x`).toBe(0);
+      expect(inside(rnd.on.sprite.rect), `on at ${k}x`).toBeGreaterThan(0);
+      // A quiet ring at rest, a full one lit, like the EQ's switch.
+      expect(edge(rnd.sprite.rect)).toBeLessThan(edge(rnd.on.sprite.rect));
+    }
+  });
+
   it("reuses one ring and one solid at the strengths each box wants (D93)", () => {
     const { skin } = parseSkin(eyewall);
     const els = elementsOf(skin, "main", false).elements;
@@ -340,6 +418,17 @@ describe("parseSkin refuses rather than half-loads", () => {
     refuse((m) => delete m.windows.equalizer.elements.eqBand3.origin, /hot.*origin/));
   it("a text alignment the renderer does not know", () =>
     refuse((m) => (m.windows.equalizer.elements.eqPreLabel.align = "justify"), /align/));
+  it("a list naming no font", () => refuse((m) => (m.windows.playlist.elements.list.font = "serif"), /names no font/));
+  it("a list with no font at all", () =>
+    refuse((m) => delete m.windows.playlist.elements.list.font, /list\.font/));
+  it("a button label with nothing to say", () =>
+    refuse((m) => delete m.windows.playlist.elements.addButton.label.value, /label.*bind.*value/));
+  it("a button label naming no font", () =>
+    refuse((m) => (m.windows.playlist.elements.addButton.label.font = "serif"), /label\.font.*names no font/));
+  it("a disabled block with no binding", () =>
+    refuse((m) => delete m.windows.playlist.elements.removeButton.disabled.bind, /disabled\.bind/));
+  it("a disabled block with no value to compare", () =>
+    refuse((m) => delete m.windows.playlist.elements.removeButton.disabled.when, /disabled/));
 });
 
 describe("parseSkin warns on the soft cases", () => {
@@ -358,13 +447,22 @@ describe("parseSkin warns on the soft cases", () => {
     expect(skin.visualizer.component).toBe("spectrum-bars");
   });
 
-  it("parses a list element, which the playlist's PR will draw", () => {
+  it("gives a list with only a face and a row height the usual colours (D99)", () => {
     const { skin, warnings } = parseSkin(
-      broken((m) => (m.windows.playlist.elements.rows = { type: "list", rect: [12, 20, 243, 58], rowHeight: 10 })),
+      broken(
+        (m) => (m.windows.playlist.elements.rows = { type: "list", rect: [12, 20, 243, 58], rowHeight: 12, font: "row" }),
+      ),
     );
     expect(warnings).toEqual([]);
     const rows = elementsOf(skin, "playlist", false).elements.find((e) => e.name === "rows");
-    expect(rows?.type === "list" && rows.rowHeight).toBe(10);
+    expect(rows).toMatchObject({
+      type: "list",
+      rowHeight: 12,
+      tint: "filament",
+      opacity: 1,
+      current: "strike",
+      selected: "arc",
+    });
   });
 
   it("ignores unknown keys", () => {

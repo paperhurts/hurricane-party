@@ -129,21 +129,49 @@ body {
   border: 0;
   cursor: pointer;
 }
-.sp-button.mask:hover {
+.sp-button.mask:hover:enabled {
   background-color: var(--tc-h, var(--tc));
   -webkit-mask-image: var(--sp-h, var(--sp));
   mask-image: var(--sp-h, var(--sp));
 }
-.sp-button.mask:active {
+.sp-button.mask:active:enabled {
   background-color: var(--tc-a, var(--tc-h, var(--tc)));
   -webkit-mask-image: var(--sp-a, var(--sp-h, var(--sp)));
   mask-image: var(--sp-a, var(--sp-h, var(--sp)));
 }
-.sp-button.final:hover {
+.sp-button.final:hover:enabled {
   background-image: var(--sp-h, var(--sp));
 }
-.sp-button.final:active {
+.sp-button.final:active:enabled {
   background-image: var(--sp-a, var(--sp-h, var(--sp)));
+}
+/* A button that cannot be pressed right now (D99): dim, and nothing answers
+ * the pointer. The halo is already off (Sprite.svelte drops `glow`). */
+.sp-glow.off {
+  opacity: 0.35;
+}
+.sp-button:disabled {
+  cursor: default;
+}
+/* A button's words (D99), centred in its box, over the art and under the
+ * pointer's notice: the press goes to the button. The theme's chrome face,
+ * like every text in the skin. */
+.sp-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--type-chrome), ui-monospace, monospace;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--lc);
+  pointer-events: none;
+}
+.sp-label.upper {
+  text-transform: uppercase;
+}
+.sp-glow:not(.off):hover .sp-label {
+  color: var(--lc-h, var(--lc));
 }
 /* An indicator shows a state and takes no input: the pointer passes through
  * and no hover or pressed art ever shows. */
@@ -255,6 +283,19 @@ body {
 .sp-slot {
   position: absolute;
   pointer-events: none;
+}
+
+/* The playlist's rows (D99). The skin gives the box, the row height, the
+ * face and the colours as --list-* properties (Sprite.svelte); the window
+ * draws the rows inside and takes the pointer. */
+.sp-list {
+  position: absolute;
+  font-family: var(--type-chrome), ui-monospace, monospace;
+  line-height: 1;
+  color: var(--list-fg);
+}
+.sp-list.upper {
+  text-transform: uppercase;
 }
 
 /* Where the analyser goes. The skin gives it a rectangle and nothing else:
