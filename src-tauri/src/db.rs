@@ -362,6 +362,19 @@ pub fn set_play_mode(conn: &Connection, shuffle: bool, repeat: &str) -> Result<(
     set_setting(conn, REPEAT_SETTING, repeat)
 }
 
+/// The chrome's glow (#108, D100): the halo a `glow: renderer` skin gets
+/// from the renderer. On unless a person turned it off; anything but "0"
+/// reads as on, since the default is what the skin was drawn for.
+pub const GLOW_SETTING: &str = "chrome.glow";
+
+pub fn glow(conn: &Connection) -> bool {
+    get_setting(conn, GLOW_SETTING).is_none_or(|v| v != "0")
+}
+
+pub fn set_glow(conn: &Connection, on: bool) -> Result<(), DbError> {
+    set_setting(conn, GLOW_SETTING, if on { "1" } else { "0" })
+}
+
 /// The schema, exposed for in-memory test fixtures.
 #[cfg(test)]
 pub fn schema_for_tests() -> &'static str {
@@ -412,6 +425,19 @@ mod tests {
         set_setting(&conn, REPEAT_SETTING, "sometimes").unwrap();
         set_setting(&conn, SHUFFLE_SETTING, "yes").unwrap();
         assert_eq!(play_mode(&conn), (false, "off".to_string()));
+    }
+
+    #[test]
+    fn the_glow_is_on_until_turned_off_and_stays_off() {
+        let conn = fresh();
+        assert!(glow(&conn), "a fresh library glows, as the skin was drawn");
+        set_glow(&conn, false).unwrap();
+        assert!(!glow(&conn));
+        set_glow(&conn, true).unwrap();
+        assert!(glow(&conn));
+        // Only an explicit off is off.
+        set_setting(&conn, GLOW_SETTING, "maybe").unwrap();
+        assert!(glow(&conn));
     }
 
     fn root(conn: &Connection, id: i64, path: &str) {

@@ -203,6 +203,14 @@
   .curve.off .halo {
     stroke: transparent;
   }
+  /* The glow toggle off (D100): the curve's core without its halo, and the
+     menu's edge without its bloom. */
+  :global(.chrome[data-glow="off"]) .halo {
+    stroke: transparent;
+  }
+  :global(.chrome[data-glow="off"]) .pmenu {
+    box-shadow: inset 0 0 0 1px var(--arc);
+  }
 
   /* The preset menu, over the curve. The skin's boxes let the pointer
      through; the menu takes it back. */
