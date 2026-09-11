@@ -37,6 +37,12 @@ export const ACTIONS = [
   // The equalizer's own: its on switch, and its preset menu.
   "eqOn",
   "eqPresets",
+  // The playlist's bottom bar (D99): add files, add a link, remove the
+  // selected rows, show the library.
+  "add",
+  "addUrl",
+  "remove",
+  "library",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -74,6 +80,13 @@ export const BINDS = [
   "eqBand8",
   "eqBand9",
   "eqBand10",
+  // The playlist (D99). `shuffle` and `repeatOn` are "on" or "off",
+  // `repeatLabel` is the repeat button's words ("REP", "1x", "ALL"), and
+  // `plCanRemove` is "yes" while a row is selected to remove.
+  "shuffle",
+  "repeatOn",
+  "repeatLabel",
+  "plCanRemove",
 ] as const;
 export type Bind = (typeof BINDS)[number];
 
@@ -131,6 +144,8 @@ export type Element =
       active?: SpriteRef;
       inactive?: SpriteRef;
       action: Action;
+      label?: Label;
+      disabled?: Disabled;
     })
   | (Placed & {
       type: "toggle";
@@ -145,6 +160,8 @@ export type Element =
        * A toggle with a bind and no action is an indicator. */
       bind: Bind | null;
       when: string | null;
+      label?: Label;
+      disabled?: Disabled;
     })
   | (Placed & {
       type: "text";
@@ -191,7 +208,41 @@ export type Element =
       hot?: { beyond: number; tint: Token };
     })
   | (Placed & { type: "visualizer" })
-  | (Placed & { type: "list"; rowHeight: number });
+  | (Placed & {
+      type: "list";
+      /** The playlist's rows (D99). The window draws them, since they scroll,
+       * reorder and take the keyboard; the skin says where, how tall a row is,
+       * in what face, and in what colours: the text, the playing row, and the
+       * selection. Those are what a `.wsz`'s `PLEDIT.TXT` gives, and no more. */
+      rowHeight: number;
+      font: string;
+      tint: Token;
+      opacity: number;
+      current: Token;
+      selected: Token;
+    })
+  | (Placed & {
+      /** A box the window fills (D99): the playlist's status line and its
+       * URL field. The skin places it; what is in it is the window's. */
+      type: "slot";
+    });
+
+/** Words drawn on a button, inside its hover (D99): they light with the
+ * button, which a text element laid beside it could not. `hover` and `on` are
+ * the tints while the button is hovered and while a toggle is on. */
+export type Label = {
+  font: string;
+  value: string | null;
+  bind: Bind | null;
+  tint: Token;
+  opacity: number;
+  hover: Token | null;
+  on: Token | null;
+};
+
+/** A button that cannot be pressed right now (D99): dimmed, and the pointer
+ * passes through, while `bind` equals `when`. */
+export type Disabled = { bind: Bind | null; when: string };
 
 export type ElementSet = { size: [number, number]; elements: Element[] };
 
@@ -331,7 +382,7 @@ function element(
   if (!isObj(v)) fail(path, "must be an element object");
   const type = oneOf(
     v.type,
-    ["nineslice", "image", "button", "toggle", "text", "slider", "visualizer", "list"] as const,
+    ["nineslice", "image", "button", "toggle", "text", "slider", "visualizer", "list", "slot"] as const,
     `${path}.type`,
   );
   // An unknown binding is a soft failure by spec: the element renders empty
@@ -364,14 +415,43 @@ function element(
     if (typeof b !== "boolean") fail(`${where}.${key}`, "must be true or false");
     return b;
   };
+  const fontOf = (o: Obj, where: string): string => {
+    const f = str(o, "font", where);
+    if (!(f in skin.fonts)) fail(`${where}.font`, `names no font (have ${Object.keys(skin.fonts).join(", ")})`);
+    return f;
+  };
+  // A button's words (D99), and when it cannot be pressed.
+  const labelOf = (o: Obj): Label | undefined => {
+    if (o.label === undefined) return undefined;
+    if (!isObj(o.label)) fail(`${path}.label`, "must be {font, value?, bind?, tint?, opacity?, hover?, on?}");
+    const l = o.label;
+    const where = `${path}.label`;
+    const out: Label = {
+      font: fontOf(l, where),
+      value: l.value === undefined ? null : str(l, "value", where),
+      bind: bindOf(l, where, false),
+      tint: l.tint === undefined ? "filament" : oneOf(l.tint, TOKENS, `${where}.tint`),
+      opacity: opacityOf(l, where),
+      hover: l.hover === undefined ? null : oneOf(l.hover, TOKENS, `${where}.hover`),
+      on: l.on === undefined ? null : oneOf(l.on, TOKENS, `${where}.on`),
+    };
+    if (l.bind === undefined && out.value === null) fail(where, 'needs a "bind", a literal "value", or both');
+    return out;
+  };
+  const disabledOf = (o: Obj): Disabled | undefined => {
+    if (o.disabled === undefined) return undefined;
+    if (!isObj(o.disabled)) fail(`${path}.disabled`, "must be {bind, when}");
+    return { bind: bindOf(o.disabled, `${path}.disabled`, true), when: str(o.disabled, "when", `${path}.disabled`) };
+  };
   switch (type) {
     case "nineslice": {
       const ins = v.insets;
       if (!Array.isArray(ins) || ins.length !== 4) fail(`${path}.insets`, "must be [top, right, bottom, left]");
       const fill = v.rect === "fill";
       return {
-        name,
-        rect: fill ? [0, 0, 0, 0] : rect(v.rect, `${path}.rect`),
+        // A frame with a rect of its own is placed like any element, so the
+        // playlist's list edge grows with the window (D30).
+        ...(fill ? { name, rect: [0, 0, 0, 0] as Rect } : placed(v, path)),
         type,
         fill,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
@@ -404,6 +484,8 @@ function element(
         active: optSprite(v, "active", skin.sheets, path),
         inactive: optSprite(v, "inactive", skin.sheets, path),
         action: oneOf(v.action, ACTIONS, `${path}.action`),
+        label: labelOf(v),
+        disabled: disabledOf(v),
       };
     case "toggle": {
       if (!isObj(v.on)) fail(`${path}.on`, "must be the on-state sprites {sprite, hover?, active?, inactive?}");
@@ -424,6 +506,8 @@ function element(
         action: v.action === undefined ? null : oneOf(v.action, ACTIONS, `${path}.action`),
         bind: bindOf(v, path, false),
         when: v.when === undefined ? null : str(v, "when", path),
+        label: labelOf(v),
+        disabled: disabledOf(v),
       };
       if (!e.action && !(e.bind && e.when)) {
         fail(path, 'needs an "action" to be clickable, or "bind" and "when" to be an indicator');
@@ -500,9 +584,20 @@ function element(
     case "visualizer":
       return { ...placed(v, path), type };
     case "list":
-      // The playlist's rows. Parsed so a spec-valid skin is never refused;
-      // drawn by the playlist's own PR.
-      return { ...placed(v, path), type, rowHeight: int(v.rowHeight, `${path}.rowHeight`, 1) };
+      // The playlist's rows (D99): the skin's box, metrics and colours; the
+      // window's rows inside them.
+      return {
+        ...placed(v, path),
+        type,
+        rowHeight: int(v.rowHeight, `${path}.rowHeight`, 1),
+        font: fontOf(v, path),
+        tint: v.tint === undefined ? "filament" : oneOf(v.tint, TOKENS, `${path}.tint`),
+        opacity: opacityOf(v, path),
+        current: v.current === undefined ? "strike" : oneOf(v.current, TOKENS, `${path}.current`),
+        selected: v.selected === undefined ? "arc" : oneOf(v.selected, TOKENS, `${path}.selected`),
+      };
+    case "slot":
+      return { ...placed(v, path), type };
   }
 }
 
@@ -822,11 +917,19 @@ export function actionTitle(action: Action | null, on: boolean): string {
     case "shuffle":
       return on ? "Play in order" : "Play in a random order";
     case "repeat":
-      return "Repeat";
+      return "Repeat: off, this track, or the whole list";
     case "eqOn":
       return on ? "Turn the EQ off" : "Turn the EQ on";
     case "eqPresets":
       return "Presets";
+    case "add":
+      return "Add a folder of music";
+    case "addUrl":
+      return "Queue a link for download";
+    case "remove":
+      return "Remove from this playlist";
+    case "library":
+      return "Open the library window";
     case null:
       return "";
   }

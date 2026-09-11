@@ -93,7 +93,30 @@
     return null;
   });
 
-  let font = $derived(el.type === "text" ? skin.skin.fonts[el.font] : null);
+  let font = $derived(el.type === "text" || el.type === "list" ? skin.skin.fonts[el.font] : null);
+
+  /** A system font's size and tracking, as style. A bitmap font is not drawn
+   * yet (v0.5, with the importers); its text falls back to the theme's face. */
+  function fontStyle(name: string): string {
+    const f = skin.skin.fonts[name];
+    return f?.type === "system" ? `font-size:${f.size}px;letter-spacing:${f.tracking}em` : "";
+  }
+  const isUpper = (name: string) => {
+    const f = skin.skin.fonts[name];
+    return f?.type === "system" && f.case === "upper";
+  };
+
+  /** A token at a strength, as a colour. */
+  const tone = (t: string, opacity: number) =>
+    opacity >= 1 ? `var(--${t})` : `color-mix(in srgb, var(--${t}) ${Math.round(opacity * 100)}%, transparent)`;
+
+  /** A literal with `{}` for the bound value, the bound value alone, or the
+   * literal alone. */
+  function wording(value: string | null, bind: string | null): string {
+    const bound = bind === null ? "" : String(binds[bind] ?? "");
+    if (value === null) return bound;
+    return value.includes("{}") ? value.replace("{}", bound) : value;
+  }
 
   // A text element's look: its own, or the `lit` one while the binding it
   // names holds the value it names (the PLAY tag while the transport plays).
@@ -104,11 +127,41 @@
     return { tint: el.tint, opacity: el.opacity, glow: el.glow };
   });
 
-  let shown = $derived.by(() => {
-    if (el.type !== "text") return "";
-    const bound = el.bind === null ? "" : String(binds[el.bind] ?? "");
-    if (el.value === null) return bound;
-    return el.value.includes("{}") ? el.value.replace("{}", bound) : el.value;
+  let shown = $derived(el.type === "text" ? wording(el.value, el.bind) : "");
+
+  // ---- a button's words and its disabled state (D99) ----
+
+  let label = $derived(el.type === "button" || el.type === "toggle" ? (el.label ?? null) : null);
+  // The words answer the pointer the way the art does: the hover colour while
+  // it is over the button, the `on` colour while the toggle is on.
+  let labelStyle = $derived.by(() => {
+    if (!label) return "";
+    const rest = lit && label.on ? `var(--${label.on})` : tone(label.tint, label.opacity);
+    const hover = label.hover ? `var(--${label.hover})` : rest;
+    return `--lc:${rest};--lc-h:${hover};${fontStyle(label.font)}`;
+  });
+  let off = $derived.by(() => {
+    if (el.type !== "button" && el.type !== "toggle") return false;
+    const d = el.disabled;
+    return d && d.bind ? String(binds[d.bind] ?? "") === d.when : false;
+  });
+
+  // ---- a list's box (D99) ----
+  //
+  // The skin says where the rows go, how tall each is, their face and their
+  // three colours; the window draws the rows, and reads all of it from these
+  // properties, so a skin that wants taller rows or another colour for the
+  // playing one changes the manifest and nothing else.
+  let listStyle = $derived.by(() => {
+    if (el.type !== "list") return "";
+    return [
+      `--list-fg:${tone(el.tint, el.opacity)}`,
+      `--list-hi:var(--${el.tint})`,
+      `--list-now:var(--${el.current})`,
+      `--list-sel:var(--${el.selected})`,
+      `--list-row:${el.rowHeight}px`,
+      fontStyle(el.font),
+    ].join(";");
   });
 
   // A title longer than its box scrolls (the manifest's `overflow: "scroll"`).
@@ -320,7 +373,9 @@
        lamp. It shows its state and takes nothing, so it offers nothing — no
        hand cursor, no hover ring, no halo. -->
   {@const indicator = el.type === "toggle" && el.action === null}
-  <div class="sp-glow" class:glow={glow && !indicator} style={box}>
+  <!-- A button that cannot be pressed right now (REM with nothing selected)
+       is drawn dim and offers nothing: no hover art, no halo, no click. -->
+  <div class="sp-glow" class:glow={glow && !indicator && !off} class:off style={box}>
     <button
       class="sp sp-button"
       class:indicator
@@ -329,6 +384,7 @@
       style={vars(states)}
       title={actionTitle(el.action, lit)}
       data-el={el.name}
+      disabled={off}
       onpointerdown={(e) => {
         // Neither a drag nor a double-tap on the title bar underneath.
         e.stopPropagation();
@@ -336,6 +392,13 @@
       }}
       {onclick}
     ></button>
+    {#if label}
+      <!-- Inside the wrapper, so the halo takes the words with the box and
+           the hover that lights the box lights them. -->
+      <span class="sp-label" class:upper={isUpper(label.font)} style={labelStyle}
+        >{wording(label.value, label.bind)}</span
+      >
+    {/if}
   </div>
 {:else if el.type === "text" && font && look}
   <div
@@ -397,6 +460,16 @@
   </div>
 {:else if el.type === "visualizer"}
   <div class="sp-vis" style={box}>
+    {#if slot}{@render slot()}{/if}
+  </div>
+{:else if el.type === "list"}
+  <div class="sp-list" class:upper={font?.type === "system" && font.case === "upper"} style="{box};{listStyle}">
+    {#if slot}{@render slot()}{/if}
+  </div>
+{:else if el.type === "slot"}
+  <!-- A box and nothing else: where the window puts something the skin has
+       no element for, the playlist's count and its link field. -->
+  <div class="sp-slot" style={box}>
     {#if slot}{@render slot()}{/if}
   </div>
 {/if}
