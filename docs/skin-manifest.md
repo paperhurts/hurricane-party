@@ -145,7 +145,7 @@ Every element that varies with focus declares an `inactive` variant. The rendere
 
 ## Elements
 
-Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom"` to keep its distance from that edge instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x, its shade button anchors right, its rows stretch along both, and its bottom bar anchors to the bottom (D99).
+Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom" | "bottom-right"` to keep its distance from that edge, or from that corner (D103), instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x, its shade button anchors right, its rows stretch along both, and its bottom bar anchors to the bottom (D99).
 
 ```jsonc
 "elements": {
@@ -266,7 +266,7 @@ Both importers are mappings *into* the above. That is the entire justification f
 | `TEXT.BMP` | `fonts.chrome` |
 | `VOLUME.BMP` / `BALANCE.BMP` | The volume and balance `slider` elements |
 | `POSBAR.BMP` | `seekbar` track and thumb |
-| `PLEDIT.BMP` + `PLEDIT.TXT` | `windows.playlist` frame and row color bindings |
+| `PLEDIT.BMP` + `PLEDIT.TXT` | `windows.playlist` frame, its bar's buttons, and the row colours |
 | `EQMAIN.BMP` | `windows.equalizer` |
 | `VISCOLOR.TXT` | `viscolor` (24 entries — the format's own count) |
 | `REGION.TXT` | `regions`, best-effort |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSkin, SkinError, type Element } from "./skin";
+import { parseSkin, placeRect, SkinError, type Element } from "./skin";
 import { colorsFor } from "./theme";
 import { parsePledit, parseViscolor, paletteFrom, wszManifest } from "./wsz";
 
@@ -132,6 +132,39 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     const band2 = els.find((e: Element) => e.name === "eqBand2")!;
     expect(band2.rect[0] - band1.rect[0]).toBe(18);
     expect(els.find((e: Element) => e.name === "eqOnButton")).toMatchObject({ action: "eqOn", bind: "eqOn" });
+  });
+
+  it("gives the playlist its tiled frame, its bar and the corner that holds both edges", () => {
+    const { skin } = parseSkin(make().manifest);
+    const els = skin.windows.playlist.full.elements;
+    const by = (n: string) => els.find((e: Element) => e.name === n);
+    // The frame: corners at their size, the title and the edges tiling, and
+    // the bottom-right block on the corner rather than an edge (D103).
+    expect(by("topRight")).toMatchObject({ rect: [250, 0, 25, 20], anchor: "right" });
+    expect(by("titlebar")).toMatchObject({ rect: [25, 0, 225, 20], stretch: "x", role: "drag" });
+    expect(by("leftTile")).toMatchObject({ rect: [0, 20, 12, 58], stretch: "y" });
+    expect(by("rightTile")).toMatchObject({ anchor: "right", stretch: "y" });
+    expect(by("bottomLeft")).toMatchObject({ rect: [0, 78, 125, 38], anchor: "bottom" });
+    expect(by("bottomRight")).toMatchObject({ rect: [125, 78, 150, 38], anchor: "bottom-right" });
+    // The rows sit between the two tiled edges.
+    expect(by("list")).toMatchObject({ rect: [12, 20, 243, 58], stretch: "xy", rowHeight: 13 });
+
+    // The classic's menu buttons become the one thing each menu was for; at
+    // rest they are the window's own pixels, and a press shows the menu
+    // item's glyph.
+    expect(by("addButton")).toMatchObject({ rect: [14, 86, 22, 18], anchor: "bottom", action: "add" });
+    expect(by("removeButton")).toMatchObject({ rect: [43, 86, 22, 18], anchor: "bottom", action: "remove" });
+    expect(by("libraryButton")).toMatchObject({ anchor: "bottom-right", action: "library" });
+    const add = by("addButton")!;
+    if (add.type !== "button") throw new Error("addButton is not a button");
+    expect(add.sprite).toEqual({ sheet: "pledit", rect: [14, 80, 22, 18], tint: "filament" });
+
+    // Widened and heightened on the D30 grid, the corner pieces stay in their
+    // corners and the rows take the slack.
+    const grown: [number, number] = [325, 174];
+    expect(placeRect(by("bottomRight")!, [275, 116], grown)).toMatchObject({ x: 175, y: 136 });
+    expect(placeRect(by("libraryButton")!, [275, 116], grown)).toMatchObject({ x: 281, y: 144 });
+    expect(placeRect(by("list")!, [275, 116], grown)).toMatchObject({ x: 12, y: 20, w: 293, h: 116 });
   });
 
   it("takes the playlist's colours from PLEDIT.TXT and the ramp from VISCOLOR.TXT", () => {

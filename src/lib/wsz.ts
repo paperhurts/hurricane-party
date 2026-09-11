@@ -148,6 +148,12 @@ const PLEDIT_SP = {
   bottomLeft: [0, 72, 125, 38] as Rect,
   bottomRight: [126, 72, 150, 38] as Rect,
   shadeBar: [72, 57, 25, 14] as Rect,
+  close: [52, 42, 9, 9] as Rect,
+  collapse: [62, 42, 9, 9] as Rect,
+  // The menu glyphs a press shows, from the popups the classic opened.
+  addDir: [0, 130, 22, 18] as Rect,
+  removeSelected: [54, 149, 22, 18] as Rect,
+  loadList: [204, 149, 22, 18] as Rect,
 };
 
 // ---- where each element sits in the window ----
@@ -188,11 +194,25 @@ const L = {
   eqBandY: 38,
   eqBandW: 14,
   eqBandH: 63,
-  // The playlist, at its base size. Its edges tile, so these carry `stretch`.
+  // The playlist, at its base size. Its edges tile, so these carry `stretch`,
+  // and its bottom-right block carries the corner (D103).
   plTopHeight: 20,
   plLeftWidth: 12,
   plRightWidth: 20,
   plBottomHeight: 38,
+  plBottomLeftWidth: 125,
+  plBottomRightWidth: 150,
+  // All at the base size, 275 x 116; the anchors carry them from there.
+  /** The bar's menu buttons, 22 x 18, twelve up from the bottom. */
+  plAdd: [14, 86, 22, 18] as Rect,
+  plRemove: [43, 86, 22, 18] as Rect,
+  plList: [231, 86, 22, 18] as Rect,
+  /** The running time, in the bottom-right block. */
+  plStatus: [132, 88, 60, 10] as Rect,
+  /** The link field, over the bar's left half while it is open. */
+  plUrl: [12, 86, 219, 18] as Rect,
+  /** The title bar's own buttons. */
+  plShade: [254, 3, 9, 9] as Rect,
 };
 
 /** The 5 x 6 font in TEXT.BMP: three rows of 31 glyphs, in this order. The
@@ -600,11 +620,22 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
     els.leftTile = { type: "image", rect: [0, top, 12, 58], stretch: "y", sprite: sp("pledit", p.leftTile) };
     els.rightTile = { type: "image", rect: [255, top, 20, 58], anchor: "right", stretch: "y", sprite: sp("pledit", p.rightTile) };
     els.bottomLeft = { type: "image", rect: [0, 78, 125, 38], anchor: "bottom", sprite: sp("pledit", p.bottomLeft) };
-    // The classic's bottom-right corner carries the resize grip and the mini
-    // transport. It wants the bottom AND the right edge, and an element may
-    // name only one; at the base width it is where it belongs, and widening
-    // the window leaves it behind. The next PR gives the format the corner.
-    els.bottomRight = { type: "image", rect: [125, 78, 150, 38], anchor: "bottom", sprite: sp("pledit", p.bottomRight) };
+    // The classic's bottom-right block carries the running time and the grip,
+    // and wants the corner rather than an edge (D103).
+    els.bottomRight = {
+      type: "image",
+      rect: [125, 78, 150, 38],
+      anchor: "bottom-right",
+      sprite: sp("pledit", p.bottomRight),
+    };
+    els.shade = {
+      type: "toggle",
+      rect: L.plShade,
+      anchor: "right",
+      sprite: sp("pledit", p.collapse),
+      on: { sprite: sp("pledit", p.collapse) },
+      action: "shade",
+    };
   } else {
     els.titlebar = {
       type: "image",
@@ -617,10 +648,11 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
   }
 
   const listTop = hasArt ? top : 14;
-  const listHeight = 116 - listTop - (hasArt ? 38 : 13);
+  const listHeight = 116 - listTop - (hasArt ? L.plBottomHeight : 13);
   els.list = {
     type: "list",
-    rect: [hasArt ? 12 : 4, listTop, hasArt ? 251 : 267, listHeight],
+    // Between the two tiled edges, 12 and 20 wide, as the classic's rows sit.
+    rect: [hasArt ? L.plLeftWidth : 4, listTop, hasArt ? 275 - L.plLeftWidth - L.plRightWidth : 267, listHeight],
     stretch: "xy",
     rowHeight: 13,
     font: fonts.chrome ? "chrome" : "system",
@@ -629,8 +661,33 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
     selected: "arc",
   };
   if (!fonts.chrome && !fonts.system) fonts.system = { type: "system", size: 6, case: "none", tracking: 0 };
-  els.listStatus = { type: "slot", rect: [150, 116 - (hasArt ? 30 : 13), 110, 12], anchor: "bottom", stretch: "x" };
-  els.urlField = { type: "slot", rect: [12, 116 - (hasArt ? 30 : 13), 251, 12], anchor: "bottom", stretch: "x" };
+
+  if (hasArt) {
+    // The classic's bottom bar is five buttons that opened menus. This app
+    // has no menus, so each maps to the one thing its menu was mostly for,
+    // and a press shows that menu item's own glyph (D103). The select and
+    // misc menus have nothing here to be, and stay as the art they are drawn
+    // into.
+    const barButton = (rect: Rect, patch: Rect, glyph: Rect, action: string, anchor?: string) => ({
+      type: "button",
+      rect,
+      ...(anchor ? { anchor } : {}),
+      sprite: sp("pledit", patch),
+      active: sp("pledit", glyph),
+      action,
+    });
+    els.addButton = barButton(L.plAdd, [14, 80, 22, 18], p.addDir, "add", "bottom");
+    els.removeButton = barButton(L.plRemove, [43, 80, 22, 18], p.removeSelected, "remove", "bottom");
+    els.libraryButton = barButton(L.plList, [232, 80, 22, 18], p.loadList, "library", "bottom-right");
+    // No URL button: the classic's Add was a menu, and a link is added from
+    // the library window. Nothing of the skin is lost, so this is a line in
+    // the docs rather than a warning on every import.
+    els.listStatus = { type: "slot", rect: L.plStatus, anchor: "bottom-right" };
+    els.urlField = { type: "slot", rect: L.plUrl, anchor: "bottom", stretch: "x" };
+  } else {
+    els.listStatus = { type: "slot", rect: [150, 103, 110, 12], anchor: "bottom", stretch: "x" };
+    els.urlField = { type: "slot", rect: [4, 103, 267, 12], anchor: "bottom", stretch: "x" };
+  }
 
   return {
     size: [275, 116],
