@@ -489,19 +489,32 @@
           "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
           "insets": [1, 1, 1, 1], "opacity": 0.14 },
 
+        "addWell":     { "type": "image", "rect": [4, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "urlWell":     { "type": "image", "rect": [27, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "removeWell":  { "type": "image", "rect": [50, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "libraryWell": { "type": "image", "rect": [73, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "shuffleWell": { "type": "image", "rect": [96, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "repeatWell":  { "type": "image", "rect": [119, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+
         "addButton": { "type": "button", "rect": [4, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
           "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
           "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
           "action": "add",
-          "label": { "font": "tag", "value": "ADD", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
+          "label": { "font": "label", "value": "ADD", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
 
         "urlButton": { "type": "button", "rect": [27, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
           "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
           "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
           "action": "addUrl",
-          "label": { "font": "tag", "value": "URL", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
+          "label": { "font": "label", "value": "URL", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
 
         "removeButton": { "type": "button", "rect": [50, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
@@ -509,14 +522,14 @@
           "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "strike" },
           "action": "remove",
           "disabled": { "bind": "plCanRemove", "when": "no" },
-          "label": { "font": "tag", "value": "REM", "tint": "filament", "opacity": 0.7, "hover": "strike" } },
+          "label": { "font": "label", "value": "REM", "tint": "filament", "opacity": 0.7, "hover": "strike" } },
 
         "libraryButton": { "type": "button", "rect": [73, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
           "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
           "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
           "action": "library",
-          "label": { "font": "tag", "value": "LIB", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
+          "label": { "font": "label", "value": "LIB", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
 
         "shuffleButton": { "type": "toggle", "rect": [96, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
@@ -528,7 +541,7 @@
             "active": { "sheet": "chrome", "rect": [208, 190, 21, 13], "tint": "arc" }
           },
           "action": "shuffle", "bind": "shuffle", "when": "on",
-          "label": { "font": "tag", "value": "RND", "tint": "filament", "opacity": 0.7, "hover": "arc", "on": "arc" } },
+          "label": { "font": "label", "value": "RND", "tint": "filament", "opacity": 0.7, "hover": "arc", "on": "arc" } },
 
         "repeatButton": { "type": "toggle", "rect": [119, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
@@ -540,7 +553,7 @@
             "active": { "sheet": "chrome", "rect": [208, 190, 21, 13], "tint": "arc" }
           },
           "action": "repeat", "bind": "repeatOn", "when": "on",
-          "label": { "font": "tag", "bind": "repeatLabel", "tint": "filament", "opacity": 0.7, "hover": "arc", "on": "arc" } },
+          "label": { "font": "label", "bind": "repeatLabel", "tint": "filament", "opacity": 0.7, "hover": "arc", "on": "arc" } },
 
         "listStatus": { "type": "slot", "rect": [146, 100, 125, 13], "anchor": "bottom", "stretch": "x" },
 

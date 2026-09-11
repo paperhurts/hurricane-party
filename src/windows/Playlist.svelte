@@ -38,7 +38,8 @@
     selected = id;
     emitTo("library", "queue:select", id).catch(() => {});
   }
-  let rowsEl: HTMLDivElement;
+  // $state, so the effects below hear a new list when the rows are rebuilt.
+  let rowsEl = $state<HTMLDivElement | undefined>();
 
   // The bottom bar doubles as a one-line URL field, and as a one-line notice
   // for a few seconds after something happened.
@@ -100,7 +101,18 @@
     };
   });
 
-  // Keep the playing row in view as the queue advances.
+  // Where the rows were scrolled to. The rows live in the skin's list, and
+  // the shade strip has none, so shading unmounts them and expanding builds
+  // them afresh at the top; this puts them back where they were. Plain, not
+  // $state: nothing renders from it.
+  let rowsTop = 0;
+  $effect(() => {
+    if (rowsEl) rowsEl.scrollTop = rowsTop;
+  });
+
+  // Keep the playing row in view as the queue advances, and when the rows
+  // come back after a shade. After the restore above, so "nearest" moves
+  // them only if the playing row is out of sight.
   $effect(() => {
     void nowId;
     void queue;
@@ -222,7 +234,7 @@
         dragging = true;
         dragId = t.id;
       }
-      const rows = Array.from(rowsEl.querySelectorAll<HTMLElement>(".row[data-idx]"));
+      const rows = Array.from(rowsEl?.querySelectorAll<HTMLElement>(".row[data-idx]") ?? []);
       let at = rows.length;
       for (const r of rows) {
         const b = r.getBoundingClientRect();
@@ -313,6 +325,7 @@
     aria-label="Play queue"
     tabindex="0"
     onkeydown={onKey}
+    onscroll={(e) => (rowsTop = e.currentTarget.scrollTop)}
   >
     {#each queue.items as t, i (t.id + ":" + (t.position ?? "l"))}
       <div
