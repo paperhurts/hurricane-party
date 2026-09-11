@@ -34,11 +34,20 @@ export function shuffled(ids: readonly number[], first: number | null, rng: () =
 }
 
 /**
- * What the transport starts on when nothing is loaded: the row the playlist
- * window has selected, if it is in the order, otherwise the order's first.
+ * What Play starts on from a standing start, nothing loaded or stopped (#116,
+ * D97): the row the person picked in the playlist window, if it is in the
+ * order; otherwise the track the transport stopped on, from the top, wherever
+ * it came from; otherwise the order's first. A pick is only a pick if it was
+ * made since the last track began (the library keeps that rule), so a row
+ * double-clicked an album ago never outranks the song that was stopped.
  */
-export function startId(order: readonly number[], selected: number | null): number | null {
-  if (selected !== null && order.includes(selected)) return selected;
+export function startId(
+  order: readonly number[],
+  picked: number | null,
+  stoppedOn: number | null = null,
+): number | null {
+  if (picked !== null && order.includes(picked)) return picked;
+  if (stoppedOn !== null) return stoppedOn;
   return order[0] ?? null;
 }
 

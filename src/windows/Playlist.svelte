@@ -30,11 +30,14 @@
   let shuffle = $state(false);
   let repeat = $state<Repeat>("off");
 
-  // A standing Play starts on the row selected here (#116), so the library
-  // hears of every change of selection, including the first.
-  $effect(() => {
-    emitTo("library", "queue:select", selected).catch(() => {});
-  });
+  // A standing Play starts on the row picked here (#116, D97), so the library
+  // hears of every pick: every press and every arrow key, not only a change
+  // of selection. A click on the row already selected, after Stop, is still
+  // the person pointing at it, and a change-only report never said so.
+  function pick(id: number | null) {
+    selected = id;
+    emitTo("library", "queue:select", id).catch(() => {});
+  }
   let rowsEl: HTMLDivElement;
 
   // The bottom bar doubles as a one-line URL field, and as a one-line notice
@@ -89,6 +92,9 @@
     // gets. Both the list and the switches.
     emit("queue:hello").catch(() => {});
     emit("play:hello").catch(() => {});
+    // A reloaded window has nothing selected; a pick the library still held
+    // from before would start a row nobody can see is chosen.
+    emitTo("library", "queue:select", null).catch(() => {});
     return () => {
       for (const s of subs) s.then((off) => off());
     };
@@ -191,7 +197,7 @@
     const dbl = t.id === lastTapId && now - lastTapAt < 400;
     lastTapAt = dbl ? 0 : now;
     lastTapId = dbl ? -1 : t.id;
-    selected = t.id;
+    pick(t.id);
     rowsEl?.focus();
     if (dbl) {
       play(t);
@@ -251,7 +257,7 @@
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const j = i < 0 ? 0 : Math.min(items.length - 1, Math.max(0, i + (e.key === "ArrowDown" ? 1 : -1)));
-      selected = items[j].id;
+      pick(items[j].id);
       rowsEl?.querySelector<HTMLElement>(".row.sel")?.scrollIntoView({ block: "nearest" });
     } else if (e.key === "Enter" && selectedItem) {
       e.preventDefault();
