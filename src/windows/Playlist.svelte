@@ -4,6 +4,7 @@
   // broadcasts it as `queue:set`; this window mirrors it, and every action
   // here goes back to the library so the audio/video branch stays in one
   // place. Main says what is playing over `player:now`.
+  import { untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -110,13 +111,16 @@
     if (rowsEl) rowsEl.scrollTop = rowsTop;
   });
 
-  // Keep the playing row in view as the queue advances, and when the rows
-  // come back after a shade. After the restore above, so "nearest" moves
-  // them only if the playing row is out of sight.
+  // Keep the playing row in view as the queue advances: when the track or
+  // the list changes, and only then. Not when the rows come back after a
+  // shade, which is why the rows are read untracked: tracking them made an
+  // expand jump to the paused or last-played row, over the restore above,
+  // when the person had scrolled somewhere else to look (the hand test of
+  // #123).
   $effect(() => {
     void nowId;
     void queue;
-    rowsEl?.querySelector<HTMLElement>(".row.now")?.scrollIntoView({ block: "nearest" });
+    untrack(() => rowsEl)?.querySelector<HTMLElement>(".row.now")?.scrollIntoView({ block: "nearest" });
   });
 
   function play(t: Item) {
