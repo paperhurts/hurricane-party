@@ -228,7 +228,9 @@
       }}
       onended={() => {
         report();
-        emitTo("library", "player:step", 1).catch(() => {});
+        // An ending, not a press of Next: repeat one plays the video again
+        // (#115), and the library decides what follows.
+        emitTo("library", "player:ended").catch(() => {});
       }}
     ></video>
     <footer>

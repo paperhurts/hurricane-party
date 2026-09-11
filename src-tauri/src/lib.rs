@@ -504,6 +504,30 @@ fn set_concurrency(app: AppHandle, n: usize) -> Result<(), db::DbError> {
     db::set_setting(&conn, "download.concurrency", &n.clamp(1, 4).to_string())
 }
 
+/// Shuffle and repeat (#115, D97). The library holds them while it runs and
+/// saves them here, so they outlive a relaunch and the control pipe's
+/// `status` can answer with them.
+#[derive(serde::Serialize)]
+struct PlayMode {
+    shuffle: bool,
+    repeat: String,
+}
+
+#[tauri::command]
+fn get_play_mode(app: AppHandle) -> PlayMode {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    let (shuffle, repeat) = db::play_mode(&conn);
+    PlayMode { shuffle, repeat }
+}
+
+#[tauri::command]
+fn set_play_mode(app: AppHandle, shuffle: bool, repeat: String) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::set_play_mode(&conn, shuffle, &repeat)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Focus is a group property (v0.4-brief): when any bonded window has focus, all
 /// of them render active.
@@ -689,6 +713,8 @@ pub fn run() {
             reorder_playlist,
             get_concurrency,
             set_concurrency,
+            get_play_mode,
+            set_play_mode,
             add_local_folder,
             list_roots,
             remove_from_library,
