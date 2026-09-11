@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { Element } from "../lib/skin";
-  import { placeRect } from "../lib/skin";
+  import { actionTitle, placeRect } from "../lib/skin";
   import { type LoadedSkin, nineSliceRefs, ninePieceStyle, type Slice } from "../lib/skinsheet";
 
   // One element of an hp-skin/1 window, drawn from its sprites (#3, D73, D93).
@@ -158,6 +158,77 @@
     return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
   });
 
+  let vertical = $derived(el.type === "slider" && el.orientation === "vertical");
+  // Where the fill starts: the origin for a centred control (the EQ's 0 dB),
+  // else the start of the track. The fill spans origin..value, whichever is
+  // lower first, so a cut hangs below the line and a boost rises above it.
+  let origin = $derived(el.type === "slider" ? (el.origin ?? 0) : 0);
+
+  /** A length in CSS px, moved to the nearest whole device pixel. */
+  const snap = (v: number) => Math.round(v * skin.dpr) / skin.dpr;
+
+  // The fill's and thumb's boxes, in px, snapped to the device grid. Placing
+  // them by percentage and a -50% transform put an odd-sized thumb on half
+  // pixels, soft at 1x, and let a 3-pixel core sit half a pixel off the 0 dB
+  // tick it should cover. Worked out here instead, so both land whole.
+  let geom = $derived.by(() => {
+    if (el.type !== "slider") return null;
+    const r = placeRect(el, base, current);
+    const t = el.thumb ? skin.slice(el.thumb) : null;
+    const tw = t?.w ?? 0;
+    const th = t?.h ?? 0;
+    if (vertical) {
+      // Top is 1: the value is measured up from the bottom.
+      const y0 = (1 - origin) * r.h;
+      const y1 = (1 - frac) * r.h;
+      const top = snap(Math.min(y0, y1));
+      return {
+        fill: `left:0;width:${r.w}px;top:${top}px;height:${snap(Math.max(y0, y1)) - top}px`,
+        thumb: `left:${snap((r.w - tw) / 2)}px;top:${snap(y1 - th / 2)}px`,
+      };
+    }
+    const x0 = origin * r.w;
+    const x1 = frac * r.w;
+    const left = snap(Math.min(x0, x1));
+    return {
+      fill: `top:0;height:${r.h}px;left:${left}px;width:${snap(Math.max(x0, x1)) - left}px`,
+      thumb: `top:${snap((r.h - th) / 2)}px;left:${snap(x1 - tw / 2)}px`,
+    };
+  });
+  // A second look while its binding holds (the EQ dims while off), and the
+  // thumb's hot tint past `beyond`. The dim wins: an off EQ is off however
+  // far a band is pushed.
+  let sliderLit = $derived(
+    el.type === "slider" && el.lit && el.lit.bind ? String(binds[el.lit.bind] ?? "") === el.lit.when : false,
+  );
+  let hot = $derived(el.type === "slider" && el.hot ? Math.abs(frac - origin) > el.hot.beyond : false);
+
+  /** The tint and strength a slider's fill or thumb is drawn at right now,
+   * as custom properties that override the sprite's own. */
+  function sliderLook(thumb: boolean): string {
+    if (el.type !== "slider") return "";
+    if (sliderLit && el.lit) return `;--tc:var(--${el.lit.tint});opacity:${el.lit.opacity}`;
+    if (thumb && hot && el.hot) return `;--tc:var(--${el.hot.tint})`;
+    return "";
+  }
+
+  // A centred control takes the wheel: one notch is 1/48 of the range, half a
+  // dB on the EQ's 24. A seek bar and a level do not; they have no centre.
+  function slideWheel(e: WheelEvent) {
+    if (el.type !== "slider" || el.origin === null || !onslide) return;
+    // A sideways swipe, or Shift and the wheel, has no vertical part: it is
+    // not a nudge, and falling through read it as one notch down.
+    if (e.deltaY === 0) return;
+    e.preventDefault();
+    onslide(Math.min(1, Math.max(0, frac + (e.deltaY < 0 ? 1 : -1) / 48)));
+  }
+
+  // The last press, for the double press: when, where, and whether it became
+  // a drag. Plain, not $state; nothing renders from it.
+  let lastDown = { at: 0, x: 0, y: 0, moved: false };
+  /** Windows' own rule for a double click: the second within a few pixels. */
+  const NEAR = 4;
+
   // Press or drag anywhere along it, the way the CSS sliders behaved. The
   // pointer is captured on <html>, not on this element: a state push
   // re-renders the sprite mid-drag and capture dies with the element it was
@@ -165,6 +236,21 @@
   function slideDown(e: PointerEvent, node: HTMLElement) {
     if (e.button !== 0 || !onslide) return;
     e.stopPropagation();
+    // A double press on a centred control returns it to the origin. Timed
+    // from pointerdown rather than the DOM's dblclick: the drag below captures
+    // the pointer on <html>, and a captured pointer's dblclick lands there,
+    // not here — why Classic times its title-bar double-click the same way.
+    // Only a real double click counts: the first press stayed put rather than
+    // becoming a drag, and the second lands where the first did. Without both,
+    // a quick drag and regrab, or a tap at +6 then one at -6, reset the band.
+    const now = Date.now();
+    const near = Math.abs(e.clientX - lastDown.x) <= NEAR && Math.abs(e.clientY - lastDown.y) <= NEAR;
+    if (el.type === "slider" && el.origin !== null && now - lastDown.at < 400 && near && !lastDown.moved) {
+      lastDown.at = 0;
+      onslide(el.origin);
+      return;
+    }
+    lastDown = { at: now, x: e.clientX, y: e.clientY, moved: false };
     const at = (ev: PointerEvent) => {
       const r = node.getBoundingClientRect();
       const t =
@@ -174,7 +260,12 @@
       onslide!(Math.min(1, Math.max(0, t)));
     };
     const root = document.documentElement;
-    const move = (ev: PointerEvent) => at(ev);
+    const move = (ev: PointerEvent) => {
+      // Past a few pixels this press is a drag, and cannot be the first half
+      // of a double click.
+      if (Math.abs(ev.clientX - lastDown.x) > NEAR || Math.abs(ev.clientY - lastDown.y) > NEAR) lastDown.moved = true;
+      at(ev);
+    };
     const up = () => {
       root.removeEventListener("pointermove", move);
       root.removeEventListener("pointerup", up);
@@ -212,21 +303,32 @@
     class:drag={el.role === "drag"}
     style="{box};opacity:{el.opacity};{vars(states)}"
     {onpointerdown}
-  >
-    {#if slot}{@render slot()}{/if}
-  </div>
+  ></div>
+  {#if slot}
+    <!-- Beside the art, not inside it. The art is a mask, and a mask clips its
+         children to the sprite's box: the EQ's preset menu lost its glow on
+         three sides there, and anything taller than the curve would have
+         been cut off. Same box, drawn over the art, no mask. -->
+    <div class="sp-slot" style={box}>{@render slot()}</div>
+  {/if}
 {:else if (el.type === "button" || el.type === "toggle") && states}
   <!-- The glow, when the skin leaves it to the renderer (D73), sits on a
        wrapper: a filter is applied before a mask, so on the masked element
        itself the halo would be cut away with everything else outside the
        shape. Never on the visualizer's ancestors; this is a sibling. -->
-  <div class="sp-glow" class:glow style={box}>
+  <!-- A toggle with a binding and no action is an indicator (D93): the clip
+       lamp. It shows its state and takes nothing, so it offers nothing — no
+       hand cursor, no hover ring, no halo. -->
+  {@const indicator = el.type === "toggle" && el.action === null}
+  <div class="sp-glow" class:glow={glow && !indicator} style={box}>
     <button
       class="sp sp-button"
+      class:indicator
       class:mask
       class:final={!mask}
       style={vars(states)}
-      title={el.name}
+      title={actionTitle(el.action, lit)}
+      data-el={el.name}
       onpointerdown={(e) => {
         // Neither a drag nor a double-tap on the title bar underneath.
         e.stopPropagation();
@@ -242,7 +344,7 @@
     class:upper={font.type === "system" && font.case === "upper"}
     class:scroll={el.overflow === "scroll"}
     class:lit={look.glow}
-    style="{box};--tc:var(--{look.tint});--tc-i:var(--{el.inactive?.tint ?? look.tint});opacity:{look.opacity};{font.type ===
+    style="{box};text-align:{el.align};--tc:var(--{look.tint});--tc-i:var(--{el.inactive?.tint ?? look.tint});opacity:{look.opacity};{font.type ===
     'system'
       ? `font-size:${font.size}px;letter-spacing:${font.tracking}em`
       : ''}"
@@ -263,8 +365,10 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="sp-slider"
+    class:v={vertical}
     style={box}
     onpointerdown={(e) => slideDown(e, e.currentTarget as HTMLElement)}
+    onwheel={slideWheel}
   >
     {#if el.track}
       {@const s = skin.slice(el.track)}
@@ -272,13 +376,13 @@
     {/if}
     {#if el.fill}
       {@const s = skin.slice(el.fill)}
+      <!-- From the origin to the value along the slider's axis, the full
+           breadth across it, on whole device pixels (`geom`). -->
       <div
         class="sp sp-fill"
         class:mask
         class:final={!mask}
-        style="{vars({ n: s })};{el.orientation === 'vertical'
-          ? `height:${frac * 100}%`
-          : `width:${frac * 100}%`}"
+        style="{vars({ n: s })}{sliderLook(false)};{geom?.fill}"
       ></div>
     {/if}
     {#if el.thumb}
@@ -287,9 +391,7 @@
         class="sp sp-thumb"
         class:mask
         class:final={!mask}
-        style="{vars({ n: s })};width:{s.w}px;height:{s.h}px;{el.orientation === 'vertical'
-          ? `bottom:${frac * 100}%`
-          : `left:${frac * 100}%`}"
+        style="{vars({ n: s })}{sliderLook(true)};width:{s.w}px;height:{s.h}px;{geom?.thumb}"
       ></div>
     {/if}
   </div>

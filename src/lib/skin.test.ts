@@ -212,6 +212,44 @@ describe("the Eyewall manifest", () => {
     }
   });
 
+  it("draws the EQ's interior: eleven centred vertical sliders, their scale, the switch, the lamp (D98)", () => {
+    const { skin } = parseSkin(eyewall);
+    const els = elementsOf(skin, "equalizer", false).elements;
+    const by = (n: string) => els.find((e) => e.name === n);
+    const sliders = els.filter((e) => e.type === "slider");
+    expect(sliders.map((s) => s.type === "slider" && s.bind)).toEqual([
+      "eqPre",
+      ...Array.from({ length: 10 }, (_, i) => `eqBand${i + 1}`),
+    ]);
+    for (const s of sliders) {
+      if (s.type !== "slider") continue;
+      // Centred on 0 dB, so the fill runs from the line, the wheel nudges
+      // and a double press returns there.
+      expect(s).toMatchObject({ orientation: "vertical", origin: 0.5 });
+      // Past 8 dB either way the thumb turns strike; while the EQ is off
+      // the whole slider dims, and the dim wins.
+      expect(s.hot).toEqual({ beyond: 0.34, tint: "strike" });
+      // Past 8 dB, not at it: a band at exactly 8 (two presets have one)
+      // stays arc, as the CSS thumb did with `Math.abs(db) > 8`.
+      expect(8 / 24).toBeLessThan(s.hot!.beyond);
+      expect(8.5 / 24).toBeGreaterThan(s.hot!.beyond);
+      // An odd height too, so 0 dB lands on a pixel's middle, where the tick is.
+      expect(s.rect[3] % 2).toBe(1);
+      expect(s.lit).toMatchObject({ bind: "eqOn", when: "off", tint: "filament" });
+      // An odd width, so a 9-pixel thumb sits on whole pixels at 1x.
+      expect(s.rect[2] % 2).toBe(1);
+    }
+    // The scale under them, centred, "1k" left in lower case.
+    expect(by("eqBand5Label")).toMatchObject({ type: "text", value: "1k", align: "center" });
+    expect(by("eqPreLabel")).toMatchObject({ value: "PRE", opacity: 0.65 });
+    // The switch clicks and lights; the lamp only lights.
+    expect(by("eqOnButton")).toMatchObject({ type: "toggle", action: "eqOn", bind: "eqOn", when: "on" });
+    expect(by("eqClipLamp")).toMatchObject({ type: "toggle", action: null, bind: "eqClip", when: "on" });
+    expect(by("eqPresetButton")).toMatchObject({ action: "eqPresets", bind: "eqMenu", when: "open" });
+    // The curve is the window's to draw, in the box the skin gives it.
+    expect(by("eqCurveWell")).toMatchObject({ type: "image", rect: [4, 42, 60, 55] });
+  });
+
   it("reuses one ring and one solid at the strengths each box wants (D93)", () => {
     const { skin } = parseSkin(eyewall);
     const els = elementsOf(skin, "main", false).elements;
@@ -296,6 +334,12 @@ describe("parseSkin refuses rather than half-loads", () => {
     refuse((m) => (m.windows.main.elements.frame.opacity = 1.5), /between 0 and 1/));
   it("a lit block with no binding", () =>
     refuse((m) => delete m.windows.main.elements.tagPlay.lit.bind, /lit\.bind/));
+  it("a slider origin outside 0..1", () =>
+    refuse((m) => (m.windows.equalizer.elements.eqBand3.origin = 1.5), /origin.*between 0 and 1/));
+  it("a hot zone on a slider with no centre to measure it from", () =>
+    refuse((m) => delete m.windows.equalizer.elements.eqBand3.origin, /hot.*origin/));
+  it("a text alignment the renderer does not know", () =>
+    refuse((m) => (m.windows.equalizer.elements.eqPreLabel.align = "justify"), /align/));
 });
 
 describe("parseSkin warns on the soft cases", () => {

@@ -11,7 +11,6 @@
     clampDb,
     DB_MAX,
     DB_MIN,
-    LABELS,
     loadEq,
     PRESETS,
     presetName,
@@ -82,65 +81,48 @@
     eq.bands.map((v, i) => `${(i / (BANDS.length - 1)) * 100},${pct(eq.on ? v : 0)}`).join(" "),
   );
 
-  // A vertical slider: press or drag sets the value from the pointer's
-  // height, the wheel nudges by half a dB, a double-click returns to 0.
-  function vslider(node: HTMLElement, set: (db: number) => void) {
-    let fn = set;
-    const at = (e: PointerEvent) => {
-      const r = node.getBoundingClientRect();
-      const frac = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-      fn(DB_MAX - frac * (DB_MAX - DB_MIN));
-    };
-    const move = (e: PointerEvent) => at(e);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    const down = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      at(e);
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    };
-    const dbl = () => fn(0);
-    const wheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const cur = Number(node.dataset.db ?? 0);
-      fn(cur + (e.deltaY < 0 ? 0.5 : -0.5));
-    };
-    node.addEventListener("pointerdown", down);
-    node.addEventListener("dblclick", dbl);
-    node.addEventListener("wheel", wheel, { passive: false });
-    return {
-      update(next: (db: number) => void) {
-        fn = next;
-      },
-      destroy() {
-        node.removeEventListener("pointerdown", down);
-        node.removeEventListener("dblclick", dbl);
-        node.removeEventListener("wheel", wheel);
-        up();
-      },
-    };
+  // ---- what the skin draws (#3) ----
+  //
+  // The manifest says where the switch, the preset button, the curve, the
+  // eleven sliders and the lamp are, and how each is drawn; this window says
+  // what they read. A gain crosses as a 0..1 fraction, 0.5 being 0 dB.
+  const frac = (db: number) => (db - DB_MIN) / (DB_MAX - DB_MIN);
+  const dbOf = (f: number) => DB_MIN + f * (DB_MAX - DB_MIN);
+
+  let binds = $derived({
+    eqOn: eq.on ? "on" : "off",
+    eqPreset: preset,
+    eqMenu: menuOpen ? "open" : "closed",
+    eqTrim: `${trim > 0 ? "+" : ""}${trim.toFixed(1)} dB`,
+    eqClip: clip ? "on" : "off",
+    eqPre: frac(eq.preamp),
+    ...Object.fromEntries(eq.bands.map((db, i) => [`eqBand${i + 1}`, frac(db)])),
+  });
+
+  function action(name: string) {
+    if (name === "eqOn") toggleOn();
+    else if (name === "eqPresets") menuOpen = !menuOpen;
+  }
+
+  // A drag, a wheel notch, or a double press back to 0 dB all arrive as a
+  // fraction; the half-dB snap happens where it always did.
+  function slide(bind: string, f: number) {
+    if (bind === "eqPre") setPre(dbOf(f));
+    else if (bind.startsWith("eqBand")) setBand(Number(bind.slice(6)) - 1, dbOf(f));
   }
 </script>
 
-{#snippet slider(db: number, label: string, set: (db: number) => void, strong: boolean)}
-  <div class="col" class:strong>
-    <div class="track" use:vslider={set} data-db={db} title="{db > 0 ? '+' : ''}{db} dB">
-      <div
-        class="fill"
-        style:top="{Math.min(pct(db), 50)}%"
-        style:height="{Math.abs(pct(db) - 50)}%"
-      ></div>
-      <div class="thumb" class:hot={Math.abs(db) > 8} class:off={!eq.on} style:top="{pct(db)}%"></div>
-    </div>
-    <div class="lbl">{label}</div>
-  </div>
-{/snippet}
-
+<!-- Any press outside the menu closes it. In the capture phase, because the
+     skin's sliders and buttons stop their pointerdown from bubbling (so a
+     press is neither a drag nor a double-tap on the title bar), and a
+     bubbling listener here never heard a press on a slider, the switch or
+     shade. The preset button is spared: its own click toggles the menu. -->
 <svelte:window
-  onpointerdown={() => (menuOpen = false)}
+  onpointerdowncapture={(e) => {
+    const t = e.target as Element | null;
+    if (t?.closest?.(".pmenu") || t?.closest?.('[data-el="eqPresetButton"]')) return;
+    menuOpen = false;
+  }}
   onkeydown={(e) => {
     if (e.key === "Escape") menuOpen = false;
   }}
@@ -160,141 +142,80 @@
   </div>
 {/snippet}
 
-<Classic label="eq" title="EQUALIZER" {shade}>
-  <div class="eqw" class:off={!eq.on}>
-    <div class="top">
-      <div class="side">
-        <button class="tg" class:lit={eq.on} onclick={toggleOn}>{eq.on ? "EQ ON" : "EQ OFF"}</button>
-        <!-- Pointerdowns inside stay inside, so the window-level close does
-             not fire under a click on one of the menu's own items. -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="presetwrap" onpointerdown={(e) => e.stopPropagation()}>
-          <button
-            class="tg preset"
-            class:open={menuOpen}
-            onclick={() => (menuOpen = !menuOpen)}
-            title="Choose a preset"
-          >
-            <span class="name">{preset}</span><span class="arrow">▼</span>
-          </button>
-          {#if menuOpen}
-            <div class="pmenu" role="menu">
-              {#each presetNames as name (name)}
-                <button role="menuitem" class:on={name === preset} onclick={() => pick(name)}>{name}</button>
-              {/each}
-            </div>
-          {/if}
-        </div>
-        <div class="curve">
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            <line x1="0" y1="50" x2="100" y2="50" class="zero" />
-            <polyline points={curve} class="halo" />
-            <polyline points={curve} class="line" />
-          </svg>
-        </div>
-      </div>
-      <div class="sliders">
-        {@render slider(eq.preamp, "PRE", setPre, true)}
-        {#each LABELS as label, i (label)}
-          {@render slider(eq.bands[i], label, (db) => setBand(i, db), false)}
-        {/each}
-      </div>
+<!-- The response curve, in whatever box the skin gave it, and the preset
+     menu over it: the menu drops from the button straight onto the curve,
+     which is where it always opened. Both are this window's to draw. -->
+{#snippet curveBox()}
+  <svg class="curve" class:off={!eq.on} viewBox="0 0 100 100" preserveAspectRatio="none">
+    <line x1="0" y1="50" x2="100" y2="50" class="zero" />
+    <polyline points={curve} class="halo" />
+    <polyline points={curve} class="line" />
+  </svg>
+  {#if menuOpen}
+    <div class="pmenu" role="menu">
+      {#each presetNames as name (name)}
+        <button role="menuitem" class:on={name === preset} onclick={() => pick(name)}>{name}</button>
+      {/each}
     </div>
-    <div class="bottom">
-      <div class="trim" title="Automatic: pulled down by the largest band boost">
-        TRIM {trim > 0 ? "+" : ""}{trim.toFixed(1)} dB
-      </div>
-      <div class="clip" class:lit={clip}>CLIP</div>
-    </div>
-  </div>
-</Classic>
+  {/if}
+{/snippet}
+
+<Classic
+  label="eq"
+  title="EQUALIZER"
+  {shade}
+  {binds}
+  slots={{ eqCurveWell: curveBox }}
+  onaction={action}
+  onslide={slide}
+/>
 
 <style>
-  .eqw {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 3px 4px;
-    font-size: 7px;
-    letter-spacing: 0.06em;
+  /* The curve: the app's, drawn on the skin's well. A sharp core over a soft
+     halo (theme.md), and grey while the EQ is off. */
+  .curve {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .zero {
+    stroke: color-mix(in srgb, var(--filament) 15%, transparent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .halo {
+    fill: none;
+    stroke: color-mix(in srgb, var(--arc) 35%, transparent);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .line {
+    fill: none;
+    stroke: var(--arc);
+    stroke-width: 1;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .curve.off .line {
+    stroke: color-mix(in srgb, var(--filament) 35%, transparent);
+  }
+  .curve.off .halo {
+    stroke: transparent;
   }
 
-  .top {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    gap: 5px;
-  }
-
-  /* ---- left column: switch, preset, response curve ---- */
-  .side {
-    flex: 0 0 60px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .tg {
-    height: 11px;
-    padding: 0 3px;
-    border: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    font-size: 6px;
-    letter-spacing: 0.1em;
-    line-height: 1;
-    color: color-mix(in srgb, var(--filament) 55%, transparent);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 22%, transparent);
-    cursor: pointer;
-  }
-  .tg:hover {
-    color: var(--arc);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px var(--arc);
-  }
-  .tg.lit {
-    color: var(--arc);
-    background: color-mix(in srgb, var(--arc) 14%, var(--void));
-    box-shadow:
-      inset 0 0 0 1px var(--arc),
-      0 0 8px color-mix(in srgb, var(--arc) 45%, transparent);
-  }
-  .tg.preset {
-    justify-content: space-between;
-    color: var(--filament);
-    background: var(--well);
-  }
-  .tg.preset .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .tg.preset .arrow {
-    color: var(--arc);
-    font-size: 5px;
-  }
-  .presetwrap {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-  }
-  .tg.preset.open {
-    box-shadow: inset 0 0 0 1px var(--arc);
-  }
-  /* The menu overlays the curve box below the button; the window is small. */
+  /* The preset menu, over the curve. The skin's boxes let the pointer
+     through; the menu takes it back. */
   .pmenu {
     position: absolute;
     left: 0;
     right: 0;
-    top: 12px;
+    top: 0;
     z-index: 5;
     display: flex;
     flex-direction: column;
     padding: 2px 0;
+    pointer-events: auto;
     background: var(--void);
     box-shadow:
       inset 0 0 0 1px var(--arc),
@@ -320,153 +241,5 @@
   .pmenu button.on {
     color: var(--arc);
     background: color-mix(in srgb, var(--arc) 14%, transparent);
-  }
-  .curve {
-    flex: 1 1 auto;
-    min-height: 0;
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
-  }
-  .curve svg {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-  .zero {
-    stroke: color-mix(in srgb, var(--filament) 15%, transparent);
-    stroke-width: 1;
-    vector-effect: non-scaling-stroke;
-  }
-  /* A sharp core over a soft halo (theme.md): glow that reads as glow. */
-  .halo {
-    fill: none;
-    stroke: color-mix(in srgb, var(--arc) 35%, transparent);
-    stroke-width: 3;
-    stroke-linejoin: round;
-    vector-effect: non-scaling-stroke;
-  }
-  .line {
-    fill: none;
-    stroke: var(--arc);
-    stroke-width: 1;
-    stroke-linejoin: round;
-    vector-effect: non-scaling-stroke;
-  }
-  .off .line {
-    stroke: color-mix(in srgb, var(--filament) 35%, transparent);
-  }
-  .off .halo {
-    stroke: transparent;
-  }
-
-  /* ---- sliders ---- */
-  .sliders {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    gap: 2px;
-  }
-  .col {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-  }
-  .track {
-    position: relative;
-    flex: 1 1 auto;
-    width: 100%;
-    cursor: ns-resize;
-  }
-  /* The rail: one centred hairline, with the centre tick for 0 dB. */
-  .track::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 1px;
-    margin-left: -0.5px;
-    background: color-mix(in srgb, var(--arc) 22%, transparent);
-  }
-  .track::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 5px;
-    height: 1px;
-    margin: -0.5px 0 0 -2.5px;
-    background: color-mix(in srgb, var(--filament) 22%, transparent);
-  }
-  /* The lit part of the rail from 0 dB to the thumb. */
-  .fill {
-    position: absolute;
-    left: 50%;
-    width: 1px;
-    margin-left: -0.5px;
-    background: var(--arc);
-  }
-  .off .fill {
-    background: color-mix(in srgb, var(--filament) 30%, transparent);
-  }
-  .thumb {
-    position: absolute;
-    left: 50%;
-    width: 9px;
-    height: 3px;
-    margin: -1.5px 0 0 -4.5px;
-    background: var(--arc);
-    box-shadow: 0 0 4px color-mix(in srgb, var(--arc) 70%, transparent);
-  }
-  .thumb.hot {
-    background: var(--strike);
-    box-shadow: 0 0 4px color-mix(in srgb, var(--strike) 80%, transparent);
-  }
-  .thumb.off {
-    background: color-mix(in srgb, var(--filament) 45%, transparent);
-    box-shadow: none;
-  }
-  .lbl {
-    font-size: 6px;
-    letter-spacing: 0.05em;
-    color: color-mix(in srgb, var(--filament) 40%, transparent);
-    white-space: nowrap;
-  }
-  .col.strong .lbl {
-    color: color-mix(in srgb, var(--filament) 65%, transparent);
-  }
-
-  /* ---- bottom: the automatic trim, and the clip lamp ---- */
-  .bottom {
-    flex: 0 0 13px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .trim {
-    font-size: 6px;
-    letter-spacing: 0.1em;
-    color: color-mix(in srgb, var(--filament) 40%, transparent);
-  }
-  .clip {
-    height: 13px;
-    padding: 0 5px;
-    display: flex;
-    align-items: center;
-    font-size: 6px;
-    letter-spacing: 0.12em;
-    color: color-mix(in srgb, var(--filament) 30%, transparent);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 18%, transparent);
-  }
-  .clip.lit {
-    color: var(--strike);
-    background: color-mix(in srgb, var(--strike) 14%, var(--void));
-    box-shadow:
-      inset 0 0 0 1px var(--strike),
-      0 0 8px color-mix(in srgb, var(--strike) 45%, transparent);
   }
 </style>
