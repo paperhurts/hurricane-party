@@ -65,15 +65,71 @@ describe("the Eyewall manifest", () => {
     expect(skin.windows.main.resizable).toBe(false);
   });
 
-  it("puts the shade toggle on every title bar (#8) and minimise on Main's only (D86)", () => {
+  it("puts the shade toggle on every title bar (#8); minimise and close are Main's (D63, D86)", () => {
     const { skin } = parseSkin(eyewall);
     for (const w of WINDOWS) {
       for (const shaded of [false, true]) {
         const names = elementsOf(skin, w, shaded).elements.map((e) => e.name);
         expect(names).toContain("shade");
         expect(names).toContain("zoom");
+        // A satellite refuses to close (D63), so it is offered no way to.
         expect(names.includes("minimize")).toBe(w === "main");
+        expect(names.includes("close")).toBe(w === "main");
       }
+    }
+  });
+
+  it("draws Main's interior: clock, tags, visualizer, strip, seek, transport, volume", () => {
+    const { skin } = parseSkin(eyewall);
+    const els = elementsOf(skin, "main", false).elements;
+    const by = (n: string) => els.find((e) => e.name === n);
+
+    // Every rectangle here was measured off the CSS chrome that shipped
+    // (D90), so the window looks the same drawn from sprites.
+    expect(by("clock")).toMatchObject({ type: "text", rect: [4, 31, 56, 17], bind: "elapsed", glow: true });
+    expect(by("vis")).toMatchObject({ type: "visualizer", rect: [65, 18, 206, 41] });
+    expect(by("trackTitle")).toMatchObject({ type: "text", bind: "trackTitle", overflow: "scroll" });
+    expect(by("seek")).toMatchObject({ type: "slider", bind: "position", orientation: "horizontal" });
+    expect(by("volume")).toMatchObject({ type: "slider", bind: "volume" });
+
+    // The five transport controls, in the order a hand reaches for them.
+    for (const [name, action] of [
+      ["prev", "prev"],
+      ["play", "play"],
+      ["pause", "pause"],
+      ["stop", "stop"],
+      ["next", "next"],
+    ] as const) {
+      expect(by(name)).toMatchObject({ action });
+    }
+    // The three that latch read the transport rather than their own click.
+    for (const [name, when] of [
+      ["play", "playing"],
+      ["pause", "paused"],
+      ["stop", "stopped"],
+    ] as const) {
+      expect(by(name)).toMatchObject({ type: "toggle", bind: "playState", when });
+    }
+    // The tags light on the same state, and STOP lights a different colour.
+    expect(by("tagPlay")).toMatchObject({ value: "PLAY", lit: { bind: "playState", when: "playing", tint: "arc" } });
+    expect(by("tagStop")).toMatchObject({ lit: { when: "stopped", tint: "strike" } });
+    // A literal with a hole in it, so "VOL" and the number are one element.
+    expect(by("volLabel")).toMatchObject({ value: "VOL {}", bind: "volumePercent" });
+  });
+
+  it("reuses one ring and one solid at the strengths each box wants (D93)", () => {
+    const { skin } = parseSkin(eyewall);
+    const els = elementsOf(skin, "main", false).elements;
+    const frame = els.find((e) => e.name === "frame");
+    const strip = els.find((e) => e.name === "stripFrame");
+    expect(frame).toMatchObject({ type: "nineslice", fill: true, opacity: 0.3 });
+    expect(strip).toMatchObject({ type: "nineslice", fill: false, rect: [4, 63, 267, 17], opacity: 0.14 });
+    // The same eight-by-eight sprite, drawn at two strengths.
+    expect(frame?.type === "nineslice" && frame.sprite.rect).toEqual(
+      strip?.type === "nineslice" && strip.sprite.rect,
+    );
+    for (const name of ["stripWell", "seekWell", "volWell"]) {
+      expect(els.find((e) => e.name === name)).toMatchObject({ type: "image", sprite: { tint: "well" } });
     }
   });
 
@@ -124,6 +180,27 @@ describe("parseSkin refuses rather than half-loads", () => {
     refuse((m) => delete m.windows.main.elements.titlebar.role, /titlebar.*drag/));
   it("a tint outside the six", () =>
     refuse((m) => (m.windows.main.elements.titlebar.sprite.tint = "cyan"), /tint/));
+  it("a toggle that neither clicks nor watches a binding", () =>
+    refuse((m) => {
+      delete m.windows.main.elements.play.action;
+      delete m.windows.main.elements.play.bind;
+    }, /action.*indicator|indicator/));
+  it("a text with nothing to say", () =>
+    refuse((m) => {
+      delete m.windows.main.elements.tagPlay.value;
+      delete m.windows.main.elements.tagPlay.bind;
+    }, /bind.*value|value/));
+  it("a slider with no track, fill or thumb", () =>
+    refuse((m) => {
+      delete m.windows.main.elements.seek.fill;
+      delete m.windows.main.elements.seek.thumb;
+    }, /track.*fill.*thumb/));
+  it("a slider with no binding", () =>
+    refuse((m) => delete m.windows.main.elements.seek.bind, /bind.*required/));
+  it("an opacity outside 0..1", () =>
+    refuse((m) => (m.windows.main.elements.frame.opacity = 1.5), /between 0 and 1/));
+  it("a lit block with no binding", () =>
+    refuse((m) => delete m.windows.main.elements.tagPlay.lit.bind, /lit\.bind/));
 });
 
 describe("parseSkin warns on the soft cases", () => {

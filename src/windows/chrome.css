@@ -86,10 +86,11 @@ body {
   background-image: var(--sp-i, var(--sp));
 }
 
-/* The nine-slice frame: nine boxes filling the window, under everything. */
+/* The nine-slice frame: nine boxes filling its own box, which is the whole
+ * window for `rect: "fill"` and a control's rectangle otherwise. Its inset or
+ * its rect comes in on the style attribute, from the manifest. */
 .sp-frame {
   position: absolute;
-  inset: 0;
   pointer-events: none;
 }
 .sp-frame .sp {
@@ -161,6 +162,43 @@ body {
 .sp-text.upper {
   text-transform: uppercase;
 }
+/* The theme's static glow, on text a `.wsz` would bake into its glyph art:
+ * the clock. A sharp core inside the diffusion, per theme.md, and it never
+ * animates -- this is not the 60 Hz path. */
+.sp-text.lit {
+  text-shadow:
+    0 0 7px color-mix(in srgb, var(--tc) 65%, transparent),
+    0 0 18px color-mix(in srgb, var(--tc) 25%, transparent);
+}
+/* A title too long for its box. Measured, not guessed (Sprite.svelte), and
+ * `transform` on a composited layer rather than anything that reflows.
+ *
+ * The box clips and the span does not: the span is as wide as its doubled
+ * text, so -50% is exactly one copy and the loop is seamless. Clipping only
+ * the scrolling kind, because `overflow: hidden` on every text box would cut
+ * the clock's glow off at its edges. */
+.sp-text.scroll {
+  overflow: hidden;
+}
+.sp-text .rolling {
+  display: inline-block;
+  flex: none;
+  white-space: nowrap;
+  animation: sp-marquee linear infinite;
+}
+@keyframes sp-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-text .rolling {
+    animation: none;
+  }
+}
 .sp-text .t {
   flex: 1 1 auto;
   min-width: 0;
@@ -174,6 +212,41 @@ body {
 .sp-text .shade button,
 .sp-text .shade .sb {
   pointer-events: auto;
+}
+
+/* ---- slider ----
+ *
+ * Three optional pieces over one box: a track under the whole length, a fill
+ * from the start to the value, and a thumb at it. The seek bar is all three;
+ * the volume bar is a fill. The box takes the press anywhere along it, which
+ * is how both behaved before they were sprites. */
+.sp-slider {
+  position: absolute;
+  cursor: pointer;
+}
+.sp-track,
+.sp-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+}
+.sp-track {
+  width: 100%;
+}
+.sp-thumb {
+  position: absolute;
+  top: 50%;
+  /* The value positions its centre, not its left edge. */
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Where the analyser goes. The skin gives it a rectangle and nothing else:
+ * no background, no border, and never a filter on it or on any ancestor,
+ * which is the one rule no manifest can change (D73). */
+.sp-vis {
+  position: absolute;
 }
 
 /* The interior, under the title bar. Where it starts is the skin's to say

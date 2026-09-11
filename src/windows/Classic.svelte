@@ -19,6 +19,10 @@
     resizable = false,
     children,
     shade,
+    binds = {},
+    slots = {},
+    onaction,
+    onslide,
   }: {
     label: string;
     title: string;
@@ -32,6 +36,22 @@
      * double-click that expands it; a window without one shows its name.
      */
     shade?: Snippet;
+    /**
+     * What this window is showing, by binding name (`skin.ts` BINDS): the
+     * skin says where the clock goes and how it is drawn, the window says
+     * what time it is.
+     */
+    binds?: Record<string, unknown>;
+    /**
+     * Content to place inside a named element's box. The skin positions it;
+     * the window fills it. `vis` is how the analyser lands in whatever
+     * rectangle the skin gave the visualizer.
+     */
+    slots?: Record<string, Snippet>;
+    /** A button the shell does not own itself: transport, mostly. */
+    onaction?: (action: string) => void;
+    /** A slider moved, by binding name, 0..1 along its length. */
+    onslide?: (bind: string, frac: number) => void;
   } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
@@ -107,23 +127,32 @@
     return bar && bar.type === "image" ? bar.rect[1] + bar.rect[3] : 14;
   });
 
-  // A button's `action` is a name from the app's list (skin.ts ACTIONS).
-  // The shell owns these three; the rest belong to the interiors.
-  function act(action: string) {
+  // A button's `action` is a name from the app's list (skin.ts ACTIONS). The
+  // shell owns the four that are about the window itself; everything else is
+  // the window's, and reaches it through `onaction`.
+  function act(action: string | null) {
     switch (action) {
+      case null:
+        return;
       case "minimize":
         // #86, D86: minimise is Main's gesture and takes the whole group; a
         // satellite has no taskbar button to come back from (D59).
         invoke("wm_minimize");
-        break;
+        return;
       case "shade":
         toggleShade();
-        break;
+        return;
       case "zoom":
         toggleDouble();
-        break;
+        return;
+      case "close":
+        // D63: closing Main saves the layout and exits, and it is the app's
+        // only way out. Rust closes the window rather than exiting here, so
+        // this takes the one exit path the title bar's × always took.
+        invoke("wm_close", { label });
+        return;
       default:
-        break;
+        onaction?.(action);
     }
   }
 
@@ -136,6 +165,10 @@
     if (el.action === "shade") return shaded;
     return false;
   }
+
+  // The window's own bindings, plus the one the shell always knows. A window
+  // never has to pass its own name in.
+  let allBinds = $derived({ windowTitle: title, ...binds });
 
   // The discharge (#9, theme.md): a bond that just broke blooms for ~120 ms
   // and is gone. Detected here, from the edge going from bonded to null in a
@@ -391,28 +424,29 @@
          snippet (D79) renders where the title would, so the strip stays the
          move handle around it. -->
     {#each set.elements as el (el.name)}
+      {@const common = { el, skin, base: set.size, current, binds: allBinds }}
       {#if el.type === "image" && el.role === "drag"}
-        <Sprite {el} {skin} base={set.size} {current} onpointerdown={titleDown} />
+        <Sprite {...common} onpointerdown={titleDown} />
       {:else if el.type === "button" || el.type === "toggle"}
-        <Sprite {el} {skin} base={set.size} {current} on={toggleOn(el)} onclick={() => act(el.action)} />
-      {:else if el.type === "text" && el.bind === "windowTitle"}
-        {#if shaded && shade}
-          <Sprite {el} {skin} base={set.size} {current}>{@render shade()}</Sprite>
-        {:else}
-          <Sprite {el} {skin} base={set.size} {current} text={title} />
-        {/if}
+        <Sprite {...common} on={toggleOn(el)} onclick={() => act(el.action)} />
+      {:else if el.type === "text" && el.bind === "windowTitle" && shaded && shade}
+        <Sprite {...common} slot={shade} />
+      {:else if el.type === "slider"}
+        <Sprite {...common} onslide={(f) => el.bind && onslide?.(el.bind, f)} />
       {:else}
-        <Sprite {el} {skin} base={set.size} {current} />
+        <Sprite {...common} slot={slots[el.name]} />
       {/if}
     {/each}
   {/if}
-  <div class="body" style:top="{bodyTop}px">
-    {#if children}
-      {@render children()}
-    {:else}
-      <span class="placeholder">{body}</span>
-    {/if}
-  </div>
+  {#if children || body}
+    <div class="body" style:top="{bodyTop}px">
+      {#if children}
+        {@render children()}
+      {:else}
+        <span class="placeholder">{body}</span>
+      {/if}
+    </div>
+  {/if}
 
   {#each SIDES as side (side)}
     {#if edges[side] !== null}

@@ -37,7 +37,9 @@ export const ACTIONS = [
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
-/** What a `text` or `slider` may `bind` to. Unknown renders empty and warns. */
+/** What a `text`, `slider` or `toggle` may `bind` to. Unknown renders empty
+ * and warns. `playState` is one of "playing", "paused", "stopped" — the
+ * values a `when` compares against. */
 export const BINDS = [
   "windowTitle",
   "trackTitle",
@@ -47,7 +49,9 @@ export const BINDS = [
   "khz",
   "position",
   "volume",
+  "volumePercent",
   "balance",
+  "playState",
 ] as const;
 export type Bind = (typeof BINDS)[number];
 
@@ -78,8 +82,26 @@ type Placed = {
 };
 
 export type Element =
-  | { type: "nineslice"; name: string; sprite: SpriteRef; insets: [number, number, number, number] }
-  | (Placed & { type: "image"; sprite: SpriteRef; inactive?: SpriteRef; role?: "drag" })
+  | (Placed & {
+      type: "nineslice";
+      /** `rect: "fill"` in the manifest: the frame tracks the whole window and
+       * `rect` is ignored. Otherwise the nine slices fill `rect`, which is how
+       * a box inside the window (the title strip, the seek bar) gets an edge. */
+      fill: boolean;
+      sprite: SpriteRef;
+      insets: [number, number, number, number];
+      opacity: number;
+    })
+  | (Placed & {
+      type: "image";
+      sprite: SpriteRef;
+      inactive?: SpriteRef;
+      role?: "drag";
+      /** Over the tint, so one full-alpha sprite serves every strength a skin
+       * wants: the same 8x8 ring is the window's frame at 0.3 and a control's
+       * edge at 0.14. */
+      opacity: number;
+    })
   | (Placed & {
       type: "button";
       sprite: SpriteRef;
@@ -95,20 +117,40 @@ export type Element =
       active?: SpriteRef;
       inactive?: SpriteRef;
       on: { sprite: SpriteRef; hover?: SpriteRef; active?: SpriteRef; inactive?: SpriteRef };
-      action: Action;
+      /** Clickable when present; the app decides the on state from it. */
+      action: Action | null;
+      /** State-driven instead: `on` art shows while `bind` equals `when`.
+       * A toggle with a bind and no action is an indicator. */
+      bind: Bind | null;
+      when: string | null;
     })
   | (Placed & {
       type: "text";
       font: string;
       bind: Bind | null;
+      /** A literal. `{}` in it is replaced by the bound value, so one element
+       * can read "VOL 80". Without a bind it is a static label. */
+      value: string | null;
       tint: Token;
+      /** 0..1 over the tint, for chrome that reads as dimmed rather than as
+       * another colour. Sprite art carries this in its alpha; text cannot. */
+      opacity: number;
+      /** The theme's static glow, for text a `.wsz` would bake into its
+       * glyph art (the clock). Ignored when the skin is `glow: "baked"`. */
+      glow: boolean;
       inactive?: { tint: Token };
+      /** A second appearance, shown while `bind` equals `when`: the PLAY tag
+       * lighting while the transport is playing. */
+      lit?: { bind: Bind | null; when: string; tint: Token; opacity: number; glow: boolean };
       overflow: "clip" | "scroll";
     })
   | (Placed & {
       type: "slider";
-      track: SpriteRef;
-      thumb: SpriteRef;
+      /** All three are optional and at least one is required: track plus fill
+       * plus thumb is a seek bar, fill alone is a level meter. */
+      track?: SpriteRef;
+      fill?: SpriteRef;
+      thumb?: SpriteRef;
       orientation: "horizontal" | "vertical";
       bind: Bind | null;
     })
@@ -256,20 +298,41 @@ function element(
     ["nineslice", "image", "button", "toggle", "text", "slider", "visualizer", "list"] as const,
     `${path}.type`,
   );
-  const bind = (): Bind | null => {
-    const b = str(v, "bind", path);
+  // An unknown binding is a soft failure by spec: the element renders empty
+  // and the skin still loads, so a manifest written for a later version
+  // degrades rather than dying.
+  const bindOf = (o: Obj, where: string, required: boolean): Bind | null => {
+    if (o.bind === undefined) {
+      if (required) fail(`${where}.bind`, "is required");
+      return null;
+    }
+    const b = str(o, "bind", where);
     if ((BINDS as readonly string[]).includes(b)) return b as Bind;
-    warnings.push(`${path}.bind: "${b}" is not a binding this app has; it renders empty`);
+    warnings.push(`${where}.bind: "${b}" is not a binding this app has; it renders empty`);
     return null;
+  };
+  const opacityOf = (o: Obj, where: string): number => {
+    if (o.opacity === undefined) return 1;
+    const n = num(o.opacity, `${where}.opacity`);
+    if (n < 0 || n > 1) fail(`${where}.opacity`, "must be between 0 and 1");
+    return n;
+  };
+  const boolOf = (o: Obj, key: string, where: string): boolean => {
+    const b = o[key];
+    if (b === undefined) return false;
+    if (typeof b !== "boolean") fail(`${where}.${key}`, "must be true or false");
+    return b;
   };
   switch (type) {
     case "nineslice": {
-      if (v.rect !== "fill") fail(`${path}.rect`, 'must be "fill" for a nineslice');
       const ins = v.insets;
       if (!Array.isArray(ins) || ins.length !== 4) fail(`${path}.insets`, "must be [top, right, bottom, left]");
+      const fill = v.rect === "fill";
       return {
-        type,
         name,
+        rect: fill ? [0, 0, 0, 0] : rect(v.rect, `${path}.rect`),
+        type,
+        fill,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         insets: [
           int(ins[0], `${path}.insets[0]`),
@@ -277,6 +340,7 @@ function element(
           int(ins[2], `${path}.insets[2]`),
           int(ins[3], `${path}.insets[3]`),
         ],
+        opacity: opacityOf(v, path),
       };
     }
     case "image": {
@@ -285,6 +349,7 @@ function element(
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         inactive: optSprite(v, "inactive", skin.sheets, path),
+        opacity: opacityOf(v, path),
       };
       if (v.role !== undefined) e.role = oneOf(v.role, ["drag"] as const, `${path}.role`);
       return e;
@@ -302,7 +367,7 @@ function element(
     case "toggle": {
       if (!isObj(v.on)) fail(`${path}.on`, "must be the on-state sprites {sprite, hover?, active?, inactive?}");
       const on = v.on;
-      return {
+      const e: Element = {
         ...placed(v, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
@@ -315,8 +380,14 @@ function element(
           active: optSprite(on, "active", skin.sheets, `${path}.on`),
           inactive: optSprite(on, "inactive", skin.sheets, `${path}.on`),
         },
-        action: oneOf(v.action, ACTIONS, `${path}.action`),
+        action: v.action === undefined ? null : oneOf(v.action, ACTIONS, `${path}.action`),
+        bind: bindOf(v, path, false),
+        when: v.when === undefined ? null : str(v, "when", path),
       };
+      if (!e.action && !(e.bind && e.when)) {
+        fail(path, 'needs an "action" to be clickable, or "bind" and "when" to be an indicator');
+      }
+      return e;
     }
     case "text": {
       const font = str(v, "font", path);
@@ -325,25 +396,49 @@ function element(
         ...placed(v, path),
         type,
         font,
-        bind: bind(),
+        bind: bindOf(v, path, false),
+        value: v.value === undefined ? null : str(v, "value", path),
         tint: v.tint === undefined ? "filament" : oneOf(v.tint, TOKENS, `${path}.tint`),
+        opacity: opacityOf(v, path),
+        glow: boolOf(v, "glow", path),
         overflow: v.overflow === undefined ? "clip" : oneOf(v.overflow, ["clip", "scroll"] as const, `${path}.overflow`),
       };
+      // Declared, not resolved: a bind this app does not have is a soft
+      // failure that renders empty, so the element still has something to
+      // say and the skin still loads.
+      if (v.bind === undefined && e.value === null) {
+        fail(path, 'needs a "bind", a literal "value", or both');
+      }
       if (v.inactive !== undefined) {
         if (!isObj(v.inactive)) fail(`${path}.inactive`, "must be {tint}");
         e.inactive = { tint: oneOf(v.inactive.tint, TOKENS, `${path}.inactive.tint`) };
       }
+      if (v.lit !== undefined) {
+        if (!isObj(v.lit)) fail(`${path}.lit`, "must be {bind, when, tint?, opacity?, glow?}");
+        const l = v.lit;
+        e.lit = {
+          bind: bindOf(l, `${path}.lit`, true),
+          when: str(l, "when", `${path}.lit`),
+          tint: l.tint === undefined ? e.tint : oneOf(l.tint, TOKENS, `${path}.lit.tint`),
+          opacity: opacityOf(l, `${path}.lit`),
+          glow: boolOf(l, "glow", `${path}.lit`),
+        };
+      }
       return e;
     }
-    case "slider":
-      return {
+    case "slider": {
+      const e: Element = {
         ...placed(v, path),
         type,
-        track: sprite(v.track, skin.sheets, `${path}.track`),
-        thumb: sprite(v.thumb, skin.sheets, `${path}.thumb`),
+        track: optSprite(v, "track", skin.sheets, path),
+        fill: optSprite(v, "fill", skin.sheets, path),
+        thumb: optSprite(v, "thumb", skin.sheets, path),
         orientation: oneOf(v.orientation, ["horizontal", "vertical"] as const, `${path}.orientation`),
-        bind: bind(),
+        bind: bindOf(v, path, true),
       };
+      if (!e.track && !e.fill && !e.thumb) fail(path, 'needs at least one of "track", "fill" or "thumb"');
+      return e;
+    }
     case "visualizer":
       return { ...placed(v, path), type };
     case "list":
@@ -570,6 +665,7 @@ export function sprites(skin: Skin): { path: string; ref: SpriteRef }[] {
             break;
           case "slider":
             add(`${p}.track`, e.track);
+            add(`${p}.fill`, e.fill);
             add(`${p}.thumb`, e.thumb);
             break;
           default:
