@@ -5,7 +5,7 @@
   import { applyTheme } from "../lib/theme";
   import { elementsOf, type Element } from "../lib/skin";
   import { loadSkin, type LoadedSkin } from "../lib/skinsheet";
-  import { EYEWALL, eyewallFile, windowNameOf } from "../lib/skins";
+  import { currentSkin, windowNameOf } from "../lib/skins";
   import Sprite from "./Sprite.svelte";
 
   // Shared shell for the three classic 275px windows. They differ only in what
@@ -85,10 +85,12 @@
   let skin = $state<LoadedSkin | null>(null);
   let win = $derived(windowNameOf(label));
   function reloadSkin() {
-    loadSkin(EYEWALL, eyewallFile, window.devicePixelRatio).then(
-      (s) => (skin = s),
-      (e) => console.error(e),
-    );
+    currentSkin()
+      .then((w) => loadSkin(w.skin, w.resolve, window.devicePixelRatio))
+      .then(
+        (s) => (skin = s),
+        (e) => console.error(e),
+      );
   }
   reloadSkin();
   // The sheet is chosen for the screen's pixel ratio, and that changes under
@@ -128,11 +130,16 @@
       (on) => (glowOn = on),
       () => {},
     );
-    const sub = listen<boolean>("chrome:glow", (e) => (glowOn = e.payload), {
-      target: { kind: "WebviewWindow", label },
-    });
+    const subs = [
+      listen<boolean>("chrome:glow", (e) => (glowOn = e.payload), {
+        target: { kind: "WebviewWindow", label },
+      }),
+      // A skin the person picked or imported (#107): worn now, not at the
+      // next launch.
+      listen("skin:changed", () => reloadSkin(), { target: { kind: "WebviewWindow", label } }),
+    ];
     return () => {
-      sub.then((off) => off());
+      for (const s of subs) s.then((off) => off());
     };
   });
 

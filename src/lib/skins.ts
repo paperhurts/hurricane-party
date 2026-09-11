@@ -8,6 +8,7 @@
 // skin is a build that does not start rather than three windows with no
 // chrome. The test suite parses the same file, so CI sees it first.
 
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import manifest from "../../skins/eyewall/manifest.json";
 import chrome1 from "../../skins/eyewall/chrome.png";
 import chrome2 from "../../skins/eyewall/chrome@2x.png";
@@ -28,6 +29,36 @@ export function eyewallFile(file: string): string {
   const url = FILES[file];
   if (!url) throw new Error(`eyewall: manifest names ${file}, which is not bundled`);
   return url;
+}
+
+/** A skin ready to load: its art, and where each sheet's file lives. */
+export type Wearable = { id: string; skin: Skin; resolve: (file: string) => string };
+
+/**
+ * The skin the person is wearing (#107). Eyewall is bundled and always the
+ * fallback: a skin that will not parse, or a folder that has gone from disk,
+ * leaves the windows dressed rather than bare, and says why in the console.
+ * An imported skin's sheets come over the asset protocol, which is scoped to
+ * the app's own data directories (`tauri.conf.json`).
+ */
+export async function currentSkin(): Promise<Wearable> {
+  let id = "eyewall";
+  try {
+    id = await invoke<string>("get_skin");
+  } catch {
+    // No backend (a browser, a test): the shipped skin is the only one there.
+    return { id, skin: EYEWALL, resolve: eyewallFile };
+  }
+  if (id === "eyewall") return { id, skin: EYEWALL, resolve: eyewallFile };
+  try {
+    const on = await invoke<{ manifest: string; dir: string }>("read_skin", { id });
+    const parsed = parseSkin(JSON.parse(on.manifest));
+    for (const w of parsed.warnings) console.warn(`${id}: ${w}`);
+    return { id, skin: parsed.skin, resolve: (file) => convertFileSrc(`${on.dir}/${file}`) };
+  } catch (e) {
+    console.error(`skin "${id}" could not be worn; wearing Eyewall instead:`, e);
+    return { id: "eyewall", skin: EYEWALL, resolve: eyewallFile };
+  }
 }
 
 /** The three classic windows' labels are not the manifest's names. */
