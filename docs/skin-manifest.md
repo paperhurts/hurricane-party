@@ -175,14 +175,16 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 | `nineslice` | Stretchable frame. `rect: "fill"` tracks the window; a rect of its own edges a control | `sprite`, `insets`; `opacity` optional |
 | `button` | Clickable. `action` names an app command | `rect`, `sprite`, `action`; `hover`, `active` (pressed), `inactive` optional |
 | `toggle` | Two-state button, or an indicator | `rect`, `sprite`, `on` (`{ sprite, hover?, active?, inactive? }`), and either `action` (clickable) or `bind` + `when` (state-driven) |
-| `slider` | Continuous control | `rect`, `bind`, and at least one of `track`, `fill`, `thumb` |
-| `text` | Bitmap or system text | `rect`, `font`, and either `bind` or a literal `value`; `opacity`, `glow`, `lit`, `overflow` optional |
+| `slider` | Continuous control | `rect`, `bind`, and at least one of `track`, `fill`, `thumb`; `origin`, `lit`, `hot` optional (D98) |
+| `text` | Bitmap or system text | `rect`, `font`, and either `bind` or a literal `value`; `opacity`, `glow`, `lit`, `overflow`, `align` optional |
 | `list` | Playlist rows | `rect`, `rowHeight`, row color bindings |
 | `visualizer` | Where the component from `visualizer` draws | `rect` |
 
 A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter.
 
-`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`).
+**A centred slider (D98).** `origin`, 0..1, makes a slider a centred control: the fill runs from the origin to the value rather than from the start, the wheel nudges it by 1/48 of its range, and a double press returns it to the origin. The EQ's gains sit at `0.5`, which is 0 dB. `lit` is the same shape as on a text, `{ bind, when, tint?, opacity? }`, and gives the fill and thumb a second look while the binding holds; every EQ slider dims while the EQ is off. `hot`, `{ beyond, tint }`, tints the thumb once the value is more than `beyond` from the origin, and needs an origin to measure from. The dim wins over hot. A text's `align` is `left` (the default), `center` or `right`.
+
+`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`), and the equalizer's `eqOn` (`"on"`, `"off"`), `eqPreset`, `eqMenu` (`"open"`, `"closed"`), `eqTrim`, `eqClip`, `eqPre` and `eqBand1`–`eqBand10` (0..1, 0.5 being 0 dB). The EQ adds two actions, `eqOn` and `eqPresets`.
 
 ### `opacity`, so one sprite serves every strength (D93)
 

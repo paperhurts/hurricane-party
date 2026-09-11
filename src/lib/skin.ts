@@ -34,6 +34,9 @@ export const ACTIONS = [
   "playlist",
   "shuffle",
   "repeat",
+  // The equalizer's own: its on switch, and its preset menu.
+  "eqOn",
+  "eqPresets",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -52,6 +55,25 @@ export const BINDS = [
   "volumePercent",
   "balance",
   "playState",
+  // The equalizer (D21). `eqOn` is "on" or "off", `eqMenu` "open" or
+  // "closed", `eqClip` "on" while the lamp is lit; `eqTrim` is the readout's
+  // words; the eleven gains are 0..1 fractions, 0.5 being 0 dB.
+  "eqOn",
+  "eqPreset",
+  "eqMenu",
+  "eqTrim",
+  "eqClip",
+  "eqPre",
+  "eqBand1",
+  "eqBand2",
+  "eqBand3",
+  "eqBand4",
+  "eqBand5",
+  "eqBand6",
+  "eqBand7",
+  "eqBand8",
+  "eqBand9",
+  "eqBand10",
 ] as const;
 export type Bind = (typeof BINDS)[number];
 
@@ -143,6 +165,9 @@ export type Element =
        * lighting while the transport is playing. */
       lit?: { bind: Bind | null; when: string; tint: Token; opacity: number; glow: boolean };
       overflow: "clip" | "scroll";
+      /** Where the line sits in its box. Labels under the EQ's sliders are
+       * centred; everything before them read left. */
+      align: "left" | "center" | "right";
     })
   | (Placed & {
       type: "slider";
@@ -153,6 +178,17 @@ export type Element =
       thumb?: SpriteRef;
       orientation: "horizontal" | "vertical";
       bind: Bind | null;
+      /** A centred control, 0..1: the fill runs from here to the value rather
+       * than from the start, the wheel nudges it, and a double-click returns
+       * it here. The EQ's gains sit at 0.5, which is 0 dB. Null for a seek
+       * bar or a level, which run from nothing. */
+      origin: number | null;
+      /** A second look for the fill and thumb while `bind` equals `when`: the
+       * EQ's sliders dim while the EQ is off. */
+      lit?: { bind: Bind | null; when: string; tint: Token; opacity: number };
+      /** The thumb takes `tint` once the value is more than `beyond` from the
+       * origin: a band pushed past 8 dB either way turns `strike`. */
+      hot?: { beyond: number; tint: Token };
     })
   | (Placed & { type: "visualizer" })
   | (Placed & { type: "list"; rowHeight: number });
@@ -311,6 +347,11 @@ function element(
     warnings.push(`${where}.bind: "${b}" is not a binding this app has; it renders empty`);
     return null;
   };
+  const unit = (x: unknown, where: string): number => {
+    const n = num(x, where);
+    if (n < 0 || n > 1) fail(where, "must be between 0 and 1");
+    return n;
+  };
   const opacityOf = (o: Obj, where: string): number => {
     if (o.opacity === undefined) return 1;
     const n = num(o.opacity, `${where}.opacity`);
@@ -402,6 +443,7 @@ function element(
         opacity: opacityOf(v, path),
         glow: boolOf(v, "glow", path),
         overflow: v.overflow === undefined ? "clip" : oneOf(v.overflow, ["clip", "scroll"] as const, `${path}.overflow`),
+        align: v.align === undefined ? "left" : oneOf(v.align, ["left", "center", "right"] as const, `${path}.align`),
       };
       // Declared, not resolved: a bind this app does not have is a soft
       // failure that renders empty, so the element still has something to
@@ -435,8 +477,24 @@ function element(
         thumb: optSprite(v, "thumb", skin.sheets, path),
         orientation: oneOf(v.orientation, ["horizontal", "vertical"] as const, `${path}.orientation`),
         bind: bindOf(v, path, true),
+        origin: v.origin === undefined ? null : unit(v.origin, `${path}.origin`),
       };
       if (!e.track && !e.fill && !e.thumb) fail(path, 'needs at least one of "track", "fill" or "thumb"');
+      if (v.lit !== undefined) {
+        if (!isObj(v.lit)) fail(`${path}.lit`, "must be {bind, when, tint?, opacity?}");
+        const l = v.lit;
+        e.lit = {
+          bind: bindOf(l, `${path}.lit`, true),
+          when: str(l, "when", `${path}.lit`),
+          tint: l.tint === undefined ? "filament" : oneOf(l.tint, TOKENS, `${path}.lit.tint`),
+          opacity: opacityOf(l, `${path}.lit`),
+        };
+      }
+      if (v.hot !== undefined) {
+        if (!isObj(v.hot)) fail(`${path}.hot`, "must be {beyond, tint}");
+        if (e.origin === null) fail(`${path}.hot`, 'needs an "origin" to measure "beyond" from');
+        e.hot = { beyond: unit(v.hot.beyond, `${path}.hot.beyond`), tint: oneOf(v.hot.tint, TOKENS, `${path}.hot.tint`) };
+      }
       return e;
     }
     case "visualizer":
@@ -728,6 +786,50 @@ export function placeRect(
   if (e.stretch === "x" || e.stretch === "xy") w += dx;
   if (e.stretch === "y" || e.stretch === "xy") h += dy;
   return { x, y, w, h };
+}
+
+/**
+ * What a button's tooltip says. A skin names the action; the app says it in
+ * words, and a toggle says what a press will do from where it stands now.
+ * An indicator has no action and so no tooltip: it shows, it does not offer.
+ */
+export function actionTitle(action: Action | null, on: boolean): string {
+  switch (action) {
+    case "minimize":
+      return "Minimise";
+    case "shade":
+      return on ? "Expand" : "Shade";
+    case "zoom":
+      return on ? "Normal size" : "Double size";
+    case "close":
+      return "Close";
+    case "play":
+      return "Play";
+    case "pause":
+      return "Pause";
+    case "stop":
+      return "Stop";
+    case "prev":
+      return "Previous";
+    case "next":
+      return "Next";
+    case "eject":
+      return "Open";
+    case "eq":
+      return "Equalizer";
+    case "playlist":
+      return "Playlist";
+    case "shuffle":
+      return on ? "Play in order" : "Play in a random order";
+    case "repeat":
+      return "Repeat";
+    case "eqOn":
+      return on ? "Turn the EQ off" : "Turn the EQ on";
+    case "eqPresets":
+      return "Presets";
+    case null:
+      return "";
+  }
 }
 
 /** The element set a window shows in its current state. */

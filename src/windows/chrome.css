@@ -145,6 +145,12 @@ body {
 .sp-button.final:active {
   background-image: var(--sp-a, var(--sp-h, var(--sp)));
 }
+/* An indicator shows a state and takes no input: the pointer passes through
+ * and no hover or pressed art ever shows. */
+.sp-button.indicator {
+  cursor: default;
+  pointer-events: none;
+}
 
 /* Text in the chrome: the skin's font, the token in --tc, and the windowshade
  * snippet in the same box when there is one (D79). The box lets the drag
@@ -224,21 +230,30 @@ body {
   position: absolute;
   cursor: pointer;
 }
-.sp-track,
-.sp-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
+/* A vertical slider is dragged up and down, and says so. */
+.sp-slider.v {
+  cursor: ns-resize;
 }
 .sp-track {
-  width: 100%;
+  position: absolute;
+  inset: 0;
+}
+/* The fill and the thumb are placed in whole device pixels on their style
+ * (Sprite.svelte's `geom`), origin to value and centred on the value. No
+ * percentage and no transform: those left an odd-sized thumb on half pixels. */
+.sp-fill {
+  position: absolute;
 }
 .sp-thumb {
   position: absolute;
-  top: 50%;
-  /* The value positions its centre, not its left edge. */
-  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* A slot: content a window places in an element's box, drawn over the art
+ * beside it rather than inside it, since the art is a mask and a mask clips
+ * its children. It lets the pointer through; what is in it takes it back. */
+.sp-slot {
+  position: absolute;
   pointer-events: none;
 }
 
