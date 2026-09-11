@@ -82,6 +82,10 @@
   let picked: number | null = null;
   let libraryPath = $state("");
   let concurrency = $state(2);
+  // The classic windows' glow (#108, D100). Here beside the one other app
+  // setting until there is a settings window; Rust saves it and tells the
+  // three classic windows.
+  let glow = $state(true);
   let wantVideo = $state(false);
   let roots = $state<Root[]>([]);
   let scanning = $state(false);
@@ -144,6 +148,7 @@
     refreshLibrary();
     invoke<string>("library_path").then((p) => (libraryPath = p));
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
+    invoke<boolean>("get_glow").then((on) => (glow = on));
     // The switches as they were left (#115). Tell the playlist window once
     // they are known, since it may already have asked.
     invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
@@ -630,6 +635,11 @@
     concurrency = n;
     await invoke("set_concurrency", { n });
   }
+
+  async function setGlow(on: boolean) {
+    glow = on;
+    await invoke("set_glow", { on });
+  }
 </script>
 
 <svelte:window
@@ -651,6 +661,10 @@
       <select value={concurrency} onchange={(e) => setConc(+e.currentTarget.value)}>
         {#each [1, 2, 3, 4] as n}<option value={n}>{n}</option>{/each}
       </select>
+    </label>
+    <label class="glow" title="The halo on the player's buttons, clock and lit rows">
+      <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
+      glow
     </label>
   </header>
 
@@ -874,6 +888,8 @@
      would wash an unplugged drive's strike-through out to nearly nothing. */
   .root.gone:disabled { opacity: 1; }
   .conc { margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
+  .glow { font-size: 11px; display: flex; align-items: center; gap: 4px;
+          color: color-mix(in srgb, var(--filament) 45%, transparent); }
   select { font: inherit; font-size: 11px; background: var(--well); color: var(--filament);
            border: 1px solid color-mix(in srgb, var(--arc) 30%, transparent); padding: 2px 4px; }
 

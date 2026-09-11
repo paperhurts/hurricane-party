@@ -119,6 +119,23 @@
     return () => window.removeEventListener("resize", onResize);
   });
 
+  // The glow toggle (#108, D100): a person's say over the halo a `glow:
+  // renderer` skin gets. Saved in settings; every classic window asks at
+  // mount and hears the change, so all three turn over together.
+  let glowOn = $state(true);
+  $effect(() => {
+    invoke<boolean>("get_glow").then(
+      (on) => (glowOn = on),
+      () => {},
+    );
+    const sub = listen<boolean>("chrome:glow", (e) => (glowOn = e.payload), {
+      target: { kind: "WebviewWindow", label },
+    });
+    return () => {
+      sub.then((off) => off());
+    };
+  });
+
   let set = $derived(skin ? elementsOf(skin.skin, win, shaded) : null);
   // The interior starts under the title bar, and the title bar's height is
   // the skin's to say.
@@ -415,7 +432,13 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="chrome" data-active={active} data-shaded={shaded} onpointerdown={raise}>
+<div
+  class="chrome"
+  data-active={active}
+  data-shaded={shaded}
+  data-glow={glowOn ? "on" : "off"}
+  onpointerdown={raise}
+>
   {#if skin && set}
     <!-- The chrome, element by element in the manifest's order, which is the
          z-order: the frame first. The title bar is the one move handle (D35)
@@ -424,7 +447,7 @@
          snippet (D79) renders where the title would, so the strip stays the
          move handle around it. -->
     {#each set.elements as el (el.name)}
-      {@const common = { el, skin, base: set.size, current, binds: allBinds }}
+      {@const common = { el, skin, base: set.size, current, binds: allBinds, glowing: glowOn }}
       {#if el.type === "image" && el.role === "drag"}
         <Sprite {...common} onpointerdown={titleDown} />
       {:else if el.type === "button" || el.type === "toggle"}
