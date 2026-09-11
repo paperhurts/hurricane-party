@@ -65,16 +65,24 @@ describe("the Eyewall manifest", () => {
     expect(skin.windows.main.resizable).toBe(false);
   });
 
-  it("puts the shade toggle on every title bar (#8); minimise and close are Main's (D63, D86)", () => {
+  it("puts shade on every title bar (#8); minimise, 2x and close are Main's (D63, D86, D96)", () => {
     const { skin } = parseSkin(eyewall);
     for (const w of WINDOWS) {
       for (const shaded of [false, true]) {
-        const names = elementsOf(skin, w, shaded).elements.map((e) => e.name);
+        const els = elementsOf(skin, w, shaded).elements;
+        const names = els.map((e) => e.name);
+        // Shade is per window: collapse the EQ and keep the playlist open.
         expect(names).toContain("shade");
-        expect(names).toContain("zoom");
+        // 2x is one app-wide setting, so it has one home (D96).
+        expect(names.includes("zoom")).toBe(w === "main");
         // A satellite refuses to close (D63), so it is offered no way to.
         expect(names.includes("minimize")).toBe(w === "main");
         expect(names.includes("close")).toBe(w === "main");
+        // The rightmost title-bar button sits flush at the same edge on all
+        // three, so the buttons line up down a bonded stack.
+        const right = Math.max(...els.filter((e) => e.type === "button" || e.type === "toggle")
+          .filter((e) => e.rect[1] < 14).map((e) => e.rect[0] + e.rect[2]));
+        expect(right).toBe(271);
       }
     }
   });
