@@ -120,7 +120,18 @@ Only the three classic windows are skinnable (**O13**). Library, Video, Download
 | `resizeStep` | Quantization for the splitter. Playlist is `[25,29]`; omit when not resizable |
 | `shade` | The windowshade layout — a separate element set at `[275,14]`, not a clipped version of the full one |
 
-**A window supplies values, never geometry.** The skin says where the clock is, what font it is in and how it is lit; the window hands the shell a `binds` record (what the clock reads) and a `slots` record of content to place inside a named element's box — the analyser goes in whatever rectangle the manifest gave the `visualizer`. Nothing outside the manifest knows a pixel.
+**A window supplies values, never geometry.** The skin says where the clock is, what font it is in and how it is lit; the window hands the shell a `binds` record (what the clock reads) and a `slots` record of content to place inside a named element's box — the analyser goes in whatever rectangle the manifest gave the visualizer named `vis`. Nothing outside the manifest knows a pixel.
+
+**The boxes a window fills are found by name, so those names are part of the format** (D99), like `titlebar`, and a full element set without one is refused rather than drawn with nothing in it:
+
+| Window | Name | Type | What the window puts there |
+|---|---|---|---|
+| `main` | `vis` | `visualizer` | The analyser |
+| `main` | `trackTitle` | `text` | The title, and a track it cannot open |
+| `equalizer` | `eqCurveWell` | `image` or `slot` | The response curve and the preset menu |
+| `playlist` | `list` | `list` | The rows |
+| `playlist` | `listStatus` | `slot` | The count and running time |
+| `playlist` | `urlField` | `slot` | The link field |
 
 **Every element set, full and shade, has a `titlebar` image with `"role": "drag"`.** It is the one move handle (D35) and carries the double-click that toggles shade (D60); a set without one is refused.
 
@@ -201,7 +212,7 @@ Mask art carries strength in its own alpha, which would mean a near-identical sp
 
 ### A button's words, and when it cannot be pressed (D99)
 
-`label` puts words in a `button` or `toggle`'s box: `{ "font", "value"?, "bind"?, "tint"?, "opacity"?, "hover"?, "on"? }`, with `value` and `bind` working as they do on a `text` (one is required). The words are centred and drawn with the box, so the halo takes them too; `hover` is their colour while the pointer is over the button, `on` their colour while a toggle is on, and both are a token at full strength. Eyewall's playlist bar is six buttons on one 21 × 13 sprite, each with its own label. A separate `text` over a button still works, and stays right for words that should not answer the pointer (the EQ's preset name).
+`label` puts words in a `button` or `toggle`'s box: `{ "font", "value"?, "bind"?, "tint"?, "opacity"?, "hover"?, "on"? }`, with `value` and `bind` working as they do on a `text` (one is required). The words are centred and drawn with the box, so the halo takes them too; `hover` is their colour while the pointer is over the button, `on` their colour while a toggle is on, and both are a token at full strength. Words do not change with focus; the art does. Eyewall's playlist bar is six buttons on one 21 × 13 sprite, each with its own label. A separate `text` over a button still works, and stays right for words that should not answer the pointer (the EQ's preset name).
 
 `disabled`, `{ "bind", "when" }`, makes a button or toggle unpressable while the binding holds that value: drawn at 0.35, with no hover art, no halo and no click. The playlist's REM waits on `plCanRemove`.
 

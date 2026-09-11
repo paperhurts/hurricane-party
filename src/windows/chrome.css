@@ -150,8 +150,18 @@ body {
 .sp-glow.off {
   opacity: 0.35;
 }
+/* The page's own button rules (app.css) are the library's, and a sprite
+ * button is not one: dimmed once, by its wrapper, not twice; and a `final`
+ * sprite under the pointer keeps its size, its tiling and no wash. */
 .sp-button:disabled {
   cursor: default;
+  opacity: 1;
+}
+.sp-button.final:hover:enabled,
+.sp-button.final:active:enabled {
+  background-color: transparent;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
 }
 /* A button's words (D99), centred in its box, over the art and under the
  * pointer's notice: the press goes to the button. The theme's chrome face,
@@ -174,7 +184,9 @@ body {
   color: var(--lc-h, var(--lc));
 }
 /* An indicator shows a state and takes no input: the pointer passes through
- * and no hover or pressed art ever shows. */
+ * its whole box, wrapper included, so no hover or pressed art, no halo and
+ * no lit label ever shows. */
+.sp-glow.indicator,
 .sp-button.indicator {
   cursor: default;
   pointer-events: none;

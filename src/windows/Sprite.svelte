@@ -95,11 +95,14 @@
 
   let font = $derived(el.type === "text" || el.type === "list" ? skin.skin.fonts[el.font] : null);
 
-  /** A system font's size and tracking, as style. A bitmap font is not drawn
-   * yet (v0.5, with the importers); its text falls back to the theme's face. */
+  /** A font's size and tracking, as style. A bitmap font is not drawn yet
+   * (v0.5, with the importers); until it is, its text is the theme's face at
+   * the glyphs' height, not the page's 14 px in a 10 px row. */
   function fontStyle(name: string): string {
     const f = skin.skin.fonts[name];
-    return f?.type === "system" ? `font-size:${f.size}px;letter-spacing:${f.tracking}em` : "";
+    if (f?.type === "system") return `font-size:${f.size}px;letter-spacing:${f.tracking}em`;
+    if (f?.type === "bitmap") return `font-size:${f.glyphSize[1]}px`;
+    return "";
   }
   const isUpper = (name: string) => {
     const f = skin.skin.fonts[name];
@@ -375,7 +378,7 @@
   {@const indicator = el.type === "toggle" && el.action === null}
   <!-- A button that cannot be pressed right now (REM with nothing selected)
        is drawn dim and offers nothing: no hover art, no halo, no click. -->
-  <div class="sp-glow" class:glow={glow && !indicator && !off} class:off style={box}>
+  <div class="sp-glow" class:glow={glow && !indicator && !off} class:off class:indicator style={box}>
     <button
       class="sp sp-button"
       class:indicator
@@ -407,10 +410,8 @@
     class:upper={font.type === "system" && font.case === "upper"}
     class:scroll={el.overflow === "scroll"}
     class:lit={look.glow}
-    style="{box};text-align:{el.align};--tc:var(--{look.tint});--tc-i:var(--{el.inactive?.tint ?? look.tint});opacity:{look.opacity};{font.type ===
-    'system'
-      ? `font-size:${font.size}px;letter-spacing:${font.tracking}em`
-      : ''}"
+    style="{box};text-align:{el.align};--tc:var(--{look.tint});--tc-i:var(--{el.inactive?.tint ??
+      look.tint});opacity:{look.opacity};{fontStyle(el.font)}"
   >
     {#if slot}
       {@render slot()}

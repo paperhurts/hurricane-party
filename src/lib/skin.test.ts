@@ -277,12 +277,18 @@ describe("the Eyewall manifest", () => {
     const box = by("addButton");
     for (const name of buttons) {
       const b = by(name);
-      expect(b, name).toMatchObject({ anchor: "bottom", label: { font: "tag", hover: expect.any(String) } });
+      // A case-none face, so REP's "1x" reads 1x, as Main's 2x toggle does.
+      expect(b, name).toMatchObject({ anchor: "bottom", label: { font: "label", hover: expect.any(String) } });
       if ((b?.type === "button" || b?.type === "toggle") && (box?.type === "button" || box?.type === "toggle")) {
         expect(b.sprite.rect, name).toEqual(box.sprite.rect);
         expect(b.rect[3], name).toBe(13);
+        // The faint well the CSS bar had behind each button, under it (D90).
+        const well = by(name.replace("Button", "Well"));
+        expect(well, name).toMatchObject({ type: "image", rect: b.rect, anchor: "bottom", opacity: 0.3 });
+        expect(names.indexOf(name.replace("Button", "Well"))).toBeLessThan(names.indexOf(name));
       }
     }
+    expect(skin.fonts.label).toMatchObject({ type: "system", case: "none" });
     expect(by("addButton")).toMatchObject({ type: "button", action: "add", label: { value: "ADD" } });
     expect(by("urlButton")).toMatchObject({ action: "addUrl", label: { value: "URL" } });
     // REM waits for a selection, and warns in strike rather than arc.
@@ -429,6 +435,52 @@ describe("parseSkin refuses rather than half-loads", () => {
     refuse((m) => delete m.windows.playlist.elements.removeButton.disabled.bind, /disabled\.bind/));
   it("a disabled block with no value to compare", () =>
     refuse((m) => delete m.windows.playlist.elements.removeButton.disabled.when, /disabled/));
+  // The names the windows fill are part of the format (D99): renamed, the
+  // skin would load with nowhere to put the rows, the curve or the analyser.
+  it("a playlist whose rows were renamed", () =>
+    refuse((m) => {
+      m.windows.playlist.elements.rows = m.windows.playlist.elements.list;
+      delete m.windows.playlist.elements.list;
+    }, /list.*named "list".*rows/));
+  it("a playlist with no link field", () =>
+    refuse((m) => delete m.windows.playlist.elements.urlField, /"urlField".*link field/));
+  it("a playlist whose count is a text instead of a slot", () =>
+    refuse(
+      (m) =>
+        (m.windows.playlist.elements.listStatus = { type: "text", rect: [146, 100, 125, 13], font: "tag", value: "0" }),
+      /slot named "listStatus"/,
+    ));
+  it("an EQ with no box for its curve", () =>
+    refuse((m) => delete m.windows.equalizer.elements.eqCurveWell, /"eqCurveWell".*curve/));
+  it("a Main with no visualizer where the analyser goes", () =>
+    refuse((m) => delete m.windows.main.elements.vis, /visualizer named "vis".*analyser/));
+});
+
+describe("element names", () => {
+  it("are the whole key, dots and all", () => {
+    // Read back off the path, "bar.add" was "add", and two such keys collided.
+    const { skin } = parseSkin(
+      broken((m) => {
+        const well = m.windows.playlist.elements.addWell;
+        m.windows.playlist.elements["bar.add"] = well;
+        m.windows.playlist.elements["menu.add"] = well;
+      }),
+    );
+    const names = elementsOf(skin, "playlist", false).elements.map((e) => e.name);
+    expect(names).toContain("bar.add");
+    expect(names).toContain("menu.add");
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("a key ending in .titlebar is not the title bar", () =>
+    expect(() =>
+      parseSkin(
+        broken((m) => {
+          m.windows.main.elements["x.titlebar"] = m.windows.main.elements.titlebar;
+          delete m.windows.main.elements.titlebar;
+        }),
+      ),
+    ).toThrow(/titlebar/));
 });
 
 describe("parseSkin warns on the soft cases", () => {

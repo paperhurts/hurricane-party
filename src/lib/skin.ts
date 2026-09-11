@@ -229,7 +229,8 @@ export type Element =
 
 /** Words drawn on a button, inside its hover (D99): they light with the
  * button, which a text element laid beside it could not. `hover` and `on` are
- * the tints while the button is hovered and while a toggle is on. */
+ * the tints while the button is hovered and while a toggle is on. They do not
+ * change with focus; the art does. */
 export type Label = {
   font: string;
   value: string | null;
@@ -240,8 +241,9 @@ export type Label = {
   on: Token | null;
 };
 
-/** A button that cannot be pressed right now (D99): dimmed, and the pointer
- * passes through, while `bind` equals `when`. */
+/** A button that cannot be pressed right now (D99): while `bind` equals
+ * `when` it is dimmed and takes the press without doing anything — no hover
+ * art, no halo, no click. */
 export type Disabled = { bind: Bind | null; when: string };
 
 export type ElementSet = { size: [number, number]; elements: Element[] };
@@ -365,8 +367,11 @@ function optSprite(o: Obj, key: string, sheets: Skin["sheets"], path: string): S
   return o[key] === undefined ? undefined : sprite(o[key], sheets, `${path}.${key}`);
 }
 
-function placed(o: Obj, path: string): Placed & { name: string } {
-  const p: Placed = { name: path.slice(path.lastIndexOf(".") + 1), rect: rect(o.rect, `${path}.rect`) };
+// The element's own key, passed in: read back off the path, a key with a dot
+// in it ("bar.add") lost everything before the dot, and two such keys could
+// collide and take the whole window down with them.
+function placed(o: Obj, name: string, path: string): Placed & { name: string } {
+  const p: Placed = { name, rect: rect(o.rect, `${path}.rect`) };
   if (o.anchor !== undefined) p.anchor = oneOf(o.anchor, ["right", "bottom"] as const, `${path}.anchor`);
   if (o.stretch !== undefined) p.stretch = oneOf(o.stretch, ["x", "y", "xy"] as const, `${path}.stretch`);
   return p;
@@ -451,7 +456,7 @@ function element(
       return {
         // A frame with a rect of its own is placed like any element, so the
         // playlist's list edge grows with the window (D30).
-        ...(fill ? { name, rect: [0, 0, 0, 0] as Rect } : placed(v, path)),
+        ...(fill ? { name, rect: [0, 0, 0, 0] as Rect } : placed(v, name, path)),
         type,
         fill,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
@@ -466,7 +471,7 @@ function element(
     }
     case "image": {
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         inactive: optSprite(v, "inactive", skin.sheets, path),
@@ -477,7 +482,7 @@ function element(
     }
     case "button":
       return {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         hover: optSprite(v, "hover", skin.sheets, path),
@@ -491,7 +496,7 @@ function element(
       if (!isObj(v.on)) fail(`${path}.on`, "must be the on-state sprites {sprite, hover?, active?, inactive?}");
       const on = v.on;
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         hover: optSprite(v, "hover", skin.sheets, path),
@@ -518,7 +523,7 @@ function element(
       const font = str(v, "font", path);
       if (!(font in skin.fonts)) fail(`${path}.font`, `names no font (have ${Object.keys(skin.fonts).join(", ")})`);
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         font,
         bind: bindOf(v, path, false),
@@ -554,7 +559,7 @@ function element(
     }
     case "slider": {
       const e: Element = {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         track: optSprite(v, "track", skin.sheets, path),
         fill: optSprite(v, "fill", skin.sheets, path),
@@ -582,12 +587,12 @@ function element(
       return e;
     }
     case "visualizer":
-      return { ...placed(v, path), type };
+      return { ...placed(v, name, path), type };
     case "list":
       // The playlist's rows (D99): the skin's box, metrics and colours; the
       // window's rows inside them.
       return {
-        ...placed(v, path),
+        ...placed(v, name, path),
         type,
         rowHeight: int(v.rowHeight, `${path}.rowHeight`, 1),
         font: fontOf(v, path),
@@ -597,7 +602,7 @@ function element(
         selected: v.selected === undefined ? "arc" : oneOf(v.selected, TOKENS, `${path}.selected`),
       };
     case "slot":
-      return { ...placed(v, path), type };
+      return { ...placed(v, name, path), type };
   }
 }
 
@@ -619,6 +624,25 @@ function elementSet(
   }
   return { size, elements };
 }
+
+/** Where each window puts what it draws itself, by element name (D99). The
+ * names are part of the format, as `titlebar` is: a window finds its box by
+ * name, so a skin that renamed one would load and then have nowhere to put
+ * the analyser, the curve or the rows — a half-load, which the format
+ * refuses. Checked on the full set; the strip's content is a snippet of its
+ * own (D79). */
+export const FILLS: Record<WindowName, { name: string; types: Element["type"][]; what: string }[]> = {
+  main: [
+    { name: "vis", types: ["visualizer"], what: "the analyser" },
+    { name: "trackTitle", types: ["text"], what: "the title, and a track it cannot open" },
+  ],
+  equalizer: [{ name: "eqCurveWell", types: ["image", "slot"], what: "the response curve and the preset menu" }],
+  playlist: [
+    { name: "list", types: ["list"], what: "the rows" },
+    { name: "listStatus", types: ["slot"], what: "the count and running time" },
+    { name: "urlField", types: ["slot"], what: "the link field" },
+  ],
+};
 
 function font(v: unknown, sheets: Skin["sheets"], path: string): Font {
   if (!isObj(v)) fail(path, "must be a font object");
@@ -682,6 +706,12 @@ function windowOf(
       return elementSet(v.shade.elements, s, skin, `${path}.shade.elements`, warnings);
     })(),
   };
+  for (const f of FILLS[name]) {
+    const e = w.full.elements.find((x) => x.name === f.name);
+    if (!e || !f.types.includes(e.type)) {
+      fail(`${path}.elements`, `needs a ${f.types.join(" or ")} named "${f.name}": the window puts ${f.what} there`);
+    }
+  }
   if (v.resizable) {
     const step = pair(v.resizeStep, `${path}.resizeStep`, 1);
     if (name === "playlist" && (step[0] !== PLAYLIST_STEP[0] || step[1] !== PLAYLIST_STEP[1])) {
