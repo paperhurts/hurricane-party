@@ -34,7 +34,9 @@
     "clock":  { "type": "system", "size": 17, "case": "none", "tracking": -0.03 },
     "tag":    { "type": "system", "size": 6, "case": "upper", "tracking": 0.1 },
     "strip":  { "type": "system", "size": 11, "case": "none", "tracking": 0 },
-    "label":  { "type": "system", "size": 6, "case": "none", "tracking": 0.08 }
+    "label":  { "type": "system", "size": 6, "case": "none", "tracking": 0.08 },
+    "scale":  { "type": "system", "size": 6, "case": "none", "tracking": 0.05 },
+    "row":    { "type": "system", "size": 9, "case": "none", "tracking": 0 }
   },
 
   "windows": {
@@ -250,7 +252,175 @@
                      "active":   { "sheet": "chrome", "rect": [28, 88, 13, 9], "tint": "arc" },
                      "inactive": { "sheet": "chrome", "rect": [42, 88, 13, 9], "tint": "filament" }
                    },
-                   "action": "shade" }
+                   "action": "shade" },
+
+        "eqOnButton": { "type": "toggle", "rect": [4, 17, 60, 10],
+          "sprite": { "sheet": "chrome", "rect": [100, 126, 60, 10], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [100, 137, 60, 10], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [100, 148, 60, 10], "tint": "arc" },
+          "on": {
+            "sprite": { "sheet": "chrome", "rect": [100, 159, 60, 10], "tint": "arc" },
+            "hover":  { "sheet": "chrome", "rect": [100, 170, 60, 10], "tint": "arc" },
+            "active": { "sheet": "chrome", "rect": [100, 181, 60, 10], "tint": "arc" }
+          },
+          "action": "eqOn", "bind": "eqOn", "when": "on" },
+
+        "eqOnLabel": { "type": "text", "rect": [4, 17, 60, 10], "font": "tag", "value": "EQ {}", "bind": "eqOn",
+          "align": "center", "tint": "filament", "opacity": 0.55,
+          "lit": { "bind": "eqOn", "when": "on", "tint": "arc", "opacity": 1 } },
+
+        "eqPresetWell": { "type": "image", "rect": [4, 29, 60, 11],
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+
+        "eqPresetButton": { "type": "toggle", "rect": [4, 29, 60, 11],
+          "sprite": { "sheet": "chrome", "rect": [164, 126, 60, 11], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [164, 138, 60, 11], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [164, 150, 60, 11], "tint": "arc" },
+          "on": { "sprite": { "sheet": "chrome", "rect": [164, 162, 60, 11], "tint": "arc" } },
+          "action": "eqPresets", "bind": "eqMenu", "when": "open" },
+
+        "eqPresetName": { "type": "text", "rect": [7, 29, 47, 11], "font": "tag", "bind": "eqPreset",
+          "tint": "filament" },
+
+        "eqCurveWell": { "type": "image", "rect": [4, 42, 60, 55],
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+
+        "eqCurveFrame": { "type": "nineslice", "rect": [4, 42, 60, 55],
+          "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
+          "insets": [1, 1, 1, 1], "opacity": 0.14 },
+
+        "eqPre": { "type": "slider", "rect": [69, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqPre", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqPreLabel": { "type": "text", "rect": [69, 88, 17, 8], "font": "scale", "value": "PRE",
+          "align": "center", "tint": "filament", "opacity": 0.65 },
+
+        "eqBand1": { "type": "slider", "rect": [87, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand1", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand1Label": { "type": "text", "rect": [87, 88, 17, 8], "font": "scale", "value": "60",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand2": { "type": "slider", "rect": [106, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand2", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand2Label": { "type": "text", "rect": [106, 88, 17, 8], "font": "scale", "value": "170",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand3": { "type": "slider", "rect": [124, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand3", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand3Label": { "type": "text", "rect": [124, 88, 17, 8], "font": "scale", "value": "310",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand4": { "type": "slider", "rect": [143, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand4", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand4Label": { "type": "text", "rect": [143, 88, 17, 8], "font": "scale", "value": "600",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand5": { "type": "slider", "rect": [161, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand5", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand5Label": { "type": "text", "rect": [161, 88, 17, 8], "font": "scale", "value": "1k",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand6": { "type": "slider", "rect": [180, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand6", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand6Label": { "type": "text", "rect": [180, 88, 17, 8], "font": "scale", "value": "3k",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand7": { "type": "slider", "rect": [198, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand7", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand7Label": { "type": "text", "rect": [198, 88, 17, 8], "font": "scale", "value": "6k",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand8": { "type": "slider", "rect": [217, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand8", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand8Label": { "type": "text", "rect": [217, 88, 17, 8], "font": "scale", "value": "12k",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand9": { "type": "slider", "rect": [235, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand9", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand9Label": { "type": "text", "rect": [235, 88, 17, 8], "font": "scale", "value": "14k",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqBand10": { "type": "slider", "rect": [254, 17, 17, 69], "orientation": "vertical",
+          "bind": "eqBand10", "origin": 0.5,
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "arc" },
+          "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "arc" },
+          "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "arc" },
+          "lit": { "bind": "eqOn", "when": "off", "tint": "filament", "opacity": 0.4 },
+          "hot": { "beyond": 0.34, "tint": "strike" } },
+
+        "eqBand10Label": { "type": "text", "rect": [254, 88, 17, 8], "font": "scale", "value": "16k",
+          "align": "center", "tint": "filament", "opacity": 0.4 },
+
+        "eqTrim": { "type": "text", "rect": [4, 100, 160, 13], "font": "label", "value": "TRIM {}", "bind": "eqTrim",
+          "tint": "filament", "opacity": 0.4 },
+
+        "eqClipLamp": { "type": "toggle", "rect": [246, 100, 25, 13],
+          "sprite": { "sheet": "chrome", "rect": [228, 126, 25, 13], "tint": "arc" },
+          "on": { "sprite": { "sheet": "chrome", "rect": [228, 140, 25, 13], "tint": "strike" } },
+          "bind": "eqClip", "when": "on" },
+
+        "eqClipLabel": { "type": "text", "rect": [246, 100, 25, 13], "font": "tag", "value": "CLIP",
+          "align": "center", "tint": "filament", "opacity": 0.3,
+          "lit": { "bind": "eqClip", "when": "on", "tint": "strike", "opacity": 1 } }
       },
       "shade": {
         "size": [275, 14],
@@ -306,7 +476,88 @@
                      "active":   { "sheet": "chrome", "rect": [28, 88, 13, 9], "tint": "arc" },
                      "inactive": { "sheet": "chrome", "rect": [42, 88, 13, 9], "tint": "filament" }
                    },
-                   "action": "shade" }
+                   "action": "shade" },
+
+        "listWell": { "type": "image", "rect": [4, 17, 267, 80], "stretch": "xy",
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+
+        "list": { "type": "list", "rect": [4, 17, 267, 80], "stretch": "xy",
+          "rowHeight": 10, "font": "row", "tint": "filament", "opacity": 0.72,
+          "current": "strike", "selected": "arc" },
+
+        "listFrame": { "type": "nineslice", "rect": [4, 17, 267, 80], "stretch": "xy",
+          "sprite": { "sheet": "chrome", "rect": [0, 0, 8, 8], "tint": "arc" },
+          "insets": [1, 1, 1, 1], "opacity": 0.14 },
+
+        "addWell":     { "type": "image", "rect": [4, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "urlWell":     { "type": "image", "rect": [27, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "removeWell":  { "type": "image", "rect": [50, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "libraryWell": { "type": "image", "rect": [73, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "shuffleWell": { "type": "image", "rect": [96, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+        "repeatWell":  { "type": "image", "rect": [119, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "well" } },
+
+        "addButton": { "type": "button", "rect": [4, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
+          "action": "add",
+          "label": { "font": "label", "value": "ADD", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
+
+        "urlButton": { "type": "button", "rect": [27, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
+          "action": "addUrl",
+          "label": { "font": "label", "value": "URL", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
+
+        "removeButton": { "type": "button", "rect": [50, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "strike" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "strike" },
+          "action": "remove",
+          "disabled": { "bind": "plCanRemove", "when": "no" },
+          "label": { "font": "label", "value": "REM", "tint": "filament", "opacity": 0.7, "hover": "strike" } },
+
+        "libraryButton": { "type": "button", "rect": [73, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
+          "action": "library",
+          "label": { "font": "label", "value": "LIB", "tint": "filament", "opacity": 0.7, "hover": "arc" } },
+
+        "shuffleButton": { "type": "toggle", "rect": [96, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
+          "on": {
+            "sprite": { "sheet": "chrome", "rect": [164, 190, 21, 13], "tint": "arc" },
+            "hover":  { "sheet": "chrome", "rect": [186, 190, 21, 13], "tint": "arc" },
+            "active": { "sheet": "chrome", "rect": [208, 190, 21, 13], "tint": "arc" }
+          },
+          "action": "shuffle", "bind": "shuffle", "when": "on",
+          "label": { "font": "label", "value": "RND", "tint": "filament", "opacity": 0.7, "hover": "arc", "on": "arc" } },
+
+        "repeatButton": { "type": "toggle", "rect": [119, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "arc" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "arc" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "arc" },
+          "on": {
+            "sprite": { "sheet": "chrome", "rect": [164, 190, 21, 13], "tint": "arc" },
+            "hover":  { "sheet": "chrome", "rect": [186, 190, 21, 13], "tint": "arc" },
+            "active": { "sheet": "chrome", "rect": [208, 190, 21, 13], "tint": "arc" }
+          },
+          "action": "repeat", "bind": "repeatOn", "when": "on",
+          "label": { "font": "label", "bind": "repeatLabel", "tint": "filament", "opacity": 0.7, "hover": "arc", "on": "arc" } },
+
+        "listStatus": { "type": "slot", "rect": [146, 100, 125, 13], "anchor": "bottom", "stretch": "x" },
+
+        "urlField": { "type": "slot", "rect": [4, 100, 267, 13], "anchor": "bottom", "stretch": "x" }
       },
       "shade": {
         "size": [275, 14],

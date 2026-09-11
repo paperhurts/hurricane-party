@@ -332,6 +332,36 @@ pub fn concurrency(conn: &Connection) -> usize {
         .clamp(1, 4)
 }
 
+/// The play order's two switches (#115, D97), saved like every other setting.
+pub const SHUFFLE_SETTING: &str = "play.shuffle";
+pub const REPEAT_SETTING: &str = "play.repeat";
+
+/// The repeat modes, in the order the button cycles them.
+pub const REPEATS: [&str; 3] = ["off", "one", "all"];
+
+/// Shuffle on or off, and repeat as `"off"`, `"one"` or `"all"`. A missing or
+/// unreadable value reads as the default rather than an error: a setting is a
+/// preference, and the transport should still play with a stray row in it.
+pub fn play_mode(conn: &Connection) -> (bool, String) {
+    let shuffle = get_setting(conn, SHUFFLE_SETTING).is_some_and(|v| v == "1");
+    let repeat = get_setting(conn, REPEAT_SETTING)
+        .filter(|v| REPEATS.contains(&v.as_str()))
+        .unwrap_or_else(|| "off".into());
+    (shuffle, repeat)
+}
+
+/// Save both switches. An unknown repeat mode is refused rather than stored,
+/// so `play_mode` never has to guess what a bad row meant.
+pub fn set_play_mode(conn: &Connection, shuffle: bool, repeat: &str) -> Result<(), DbError> {
+    if !REPEATS.contains(&repeat) {
+        return Err(DbError::Io(format!(
+            "repeat is off, one or all, not {repeat:?}"
+        )));
+    }
+    set_setting(conn, SHUFFLE_SETTING, if shuffle { "1" } else { "0" })?;
+    set_setting(conn, REPEAT_SETTING, repeat)
+}
+
 /// The schema, exposed for in-memory test fixtures.
 #[cfg(test)]
 pub fn schema_for_tests() -> &'static str {
@@ -354,6 +384,34 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
         conn
+    }
+
+    #[test]
+    fn the_play_mode_defaults_to_in_order_with_no_repeat() {
+        let conn = fresh();
+        assert_eq!(play_mode(&conn), (false, "off".to_string()));
+    }
+
+    #[test]
+    fn the_play_mode_round_trips_every_repeat() {
+        let conn = fresh();
+        for r in REPEATS {
+            set_play_mode(&conn, true, r).unwrap();
+            assert_eq!(play_mode(&conn), (true, r.to_string()));
+        }
+        set_play_mode(&conn, false, "all").unwrap();
+        assert_eq!(play_mode(&conn), (false, "all".to_string()));
+    }
+
+    #[test]
+    fn an_unknown_repeat_is_refused_and_a_stray_row_reads_as_off() {
+        let conn = fresh();
+        assert!(set_play_mode(&conn, false, "twice").is_err());
+        assert_eq!(play_mode(&conn).1, "off");
+        // A row written some other way still cannot make the transport guess.
+        set_setting(&conn, REPEAT_SETTING, "sometimes").unwrap();
+        set_setting(&conn, SHUFFLE_SETTING, "yes").unwrap();
+        assert_eq!(play_mode(&conn), (false, "off".to_string()));
     }
 
     fn root(conn: &Connection, id: i64, path: &str) {

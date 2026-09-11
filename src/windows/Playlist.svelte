@@ -4,6 +4,7 @@
   // broadcasts it as `queue:set`; this window mirrors it, and every action
   // here goes back to the library so the audio/video branch stays in one
   // place. Main says what is playing over `player:now`.
+  import { untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -22,7 +23,24 @@
   let queue = $state<Queue>({ name: "", listId: null, items: [] });
   let nowId = $state<number | null>(null);
   let selected = $state<number | null>(null);
-  let rowsEl: HTMLDivElement;
+
+  // The play order's switches as the library holds them (#115). The library
+  // owns the order (D74); these buttons only ask it to change, and show what
+  // it says back.
+  type Repeat = "off" | "one" | "all";
+  let shuffle = $state(false);
+  let repeat = $state<Repeat>("off");
+
+  // A standing Play starts on the row picked here (#116, D97), so the library
+  // hears of every pick: every press and every arrow key, not only a change
+  // of selection. A click on the row already selected, after Stop, is still
+  // the person pointing at it, and a change-only report never said so.
+  function pick(id: number | null) {
+    selected = id;
+    emitTo("library", "queue:select", id).catch(() => {});
+  }
+  // $state, so the effects below hear a new list when the rows are rebuilt.
+  let rowsEl = $state<HTMLDivElement | undefined>();
 
   // The bottom bar doubles as a one-line URL field, and as a one-line notice
   // for a few seconds after something happened.
@@ -66,21 +84,43 @@
       listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
         nowId = e.payload.id;
       }),
+      listen<{ shuffle: boolean; repeat: Repeat }>("play:mode", (e) => {
+        shuffle = e.payload.shuffle;
+        repeat = e.payload.repeat;
+      }),
     ];
     // Pull once: the library's first broadcast may have gone out before this
     // window had a listener (D67), and a push it missed is a push it never
-    // gets.
+    // gets. Both the list and the switches.
     emit("queue:hello").catch(() => {});
+    emit("play:hello").catch(() => {});
+    // A reloaded window has nothing selected; a pick the library still held
+    // from before would start a row nobody can see is chosen.
+    emitTo("library", "queue:select", null).catch(() => {});
     return () => {
       for (const s of subs) s.then((off) => off());
     };
   });
 
-  // Keep the playing row in view as the queue advances.
+  // Where the rows were scrolled to. The rows live in the skin's list, and
+  // the shade strip has none, so shading unmounts them and expanding builds
+  // them afresh at the top; this puts them back where they were. Plain, not
+  // $state: nothing renders from it.
+  let rowsTop = 0;
+  $effect(() => {
+    if (rowsEl) rowsEl.scrollTop = rowsTop;
+  });
+
+  // Keep the playing row in view as the queue advances: when the track or
+  // the list changes, and only then. Not when the rows come back after a
+  // shade, which is why the rows are read untracked: tracking them made an
+  // expand jump to the paused or last-played row, over the restore above,
+  // when the person had scrolled somewhere else to look (the hand test of
+  // #123).
   $effect(() => {
     void nowId;
     void queue;
-    rowsEl?.querySelector<HTMLElement>(".row.now")?.scrollIntoView({ block: "nearest" });
+    untrack(() => rowsEl)?.querySelector<HTMLElement>(".row.now")?.scrollIntoView({ block: "nearest" });
   });
 
   function play(t: Item) {
@@ -173,7 +213,7 @@
     const dbl = t.id === lastTapId && now - lastTapAt < 400;
     lastTapAt = dbl ? 0 : now;
     lastTapId = dbl ? -1 : t.id;
-    selected = t.id;
+    pick(t.id);
     rowsEl?.focus();
     if (dbl) {
       play(t);
@@ -198,7 +238,7 @@
         dragging = true;
         dragId = t.id;
       }
-      const rows = Array.from(rowsEl.querySelectorAll<HTMLElement>(".row[data-idx]"));
+      const rows = Array.from(rowsEl?.querySelectorAll<HTMLElement>(".row[data-idx]") ?? []);
       let at = rows.length;
       for (const r of rows) {
         const b = r.getBoundingClientRect();
@@ -226,6 +266,30 @@
     row.addEventListener("pointercancel", onUp);
   }
 
+  // ---- what the skin draws (#3, D99) ----
+  //
+  // The manifest says where the rows, the six buttons, the count and the
+  // link field go, and how the buttons look; this window says what they
+  // read, and draws the rows and the count itself.
+  let binds = $derived({
+    shuffle: shuffle ? "on" : "off",
+    repeatOn: repeat === "off" ? "off" : "on",
+    // The same three words the bar always said, in its three-letter voice.
+    repeatLabel: repeat === "one" ? "1x" : repeat === "all" ? "ALL" : "REP",
+    plCanRemove: canRemove ? "yes" : "no",
+  });
+
+  function action(name: string) {
+    if (name === "add") addFolder();
+    else if (name === "addUrl") openUrl();
+    else if (name === "remove") remove();
+    else if (name === "library") invoke("show_library");
+    // The library owns the order (D74); these only ask it to change, and the
+    // buttons light from what it says back over `play:mode`.
+    else if (name === "shuffle") emitTo("library", "play:shuffle").catch(() => {});
+    else if (name === "repeat") emitTo("library", "play:repeat").catch(() => {});
+  }
+
   function onKey(e: KeyboardEvent) {
     const items = queue.items;
     if (items.length === 0) return;
@@ -233,7 +297,7 @@
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const j = i < 0 ? 0 : Math.min(items.length - 1, Math.max(0, i + (e.key === "ArrowDown" ? 1 : -1)));
-      selected = items[j].id;
+      pick(items[j].id);
       rowsEl?.querySelector<HTMLElement>(".row.sel")?.scrollIntoView({ block: "nearest" });
     } else if (e.key === "Enter" && selectedItem) {
       e.preventDefault();
@@ -254,89 +318,94 @@
   </div>
 {/snippet}
 
-<Classic label="playlist" {title} resizable {shade}>
-  <div class="pl">
-    <div
-      class="rows"
-      bind:this={rowsEl}
-      role="listbox"
-      aria-label="Play queue"
-      tabindex="0"
-      onkeydown={onKey}
-    >
-      {#each queue.items as t, i (t.id + ":" + (t.position ?? "l"))}
-        <div
-          class="row"
-          class:now={t.id === nowId}
-          class:sel={t.id === selected}
-          class:lifted={dragId === t.id}
-          class:drop-before={dragId != null && dropAt === i}
-          class:drop-after={dragId != null && dropAt === queue.items.length && i === queue.items.length - 1}
-          data-idx={i}
-          role="option"
-          aria-selected={t.id === selected}
-          tabindex="-1"
-          onpointerdown={(e) => rowDown(e, t)}
-          title={t.title}
-        >
-          <span class="n">{String(i + 1).padStart(2, "0")}</span>
-          <span class="t">{t.kind === "video" ? "▣ " : ""}{t.uploader ? `${t.uploader} — ` : ""}{t.title}</span>
-          <span class="d">{clock(t.duration_s)}</span>
-        </div>
-      {:else}
-        <div class="empty">
-          Nothing here yet. ADD a folder, paste a URL, or pick tracks in the library.
-        </div>
-      {/each}
-    </div>
-    <div class="bar">
-      {#if urlMode}
-        <input
-          class="url"
-          bind:this={urlEl}
-          bind:value={url}
-          placeholder="Paste a link, Enter to queue, Esc to cancel"
-          onkeydown={urlKey}
-          onblur={() => (urlMode = false)}
-        />
-      {:else}
-        <div class="btns">
-          <button class="pb" onclick={addFolder} title="Add a folder of music">ADD</button>
-          <button class="pb" onclick={openUrl} title="Queue a link for download">URL</button>
-          <button class="pb rem" onclick={remove} disabled={!canRemove} title="Remove from this playlist">REM</button>
-          <button class="pb" onclick={() => invoke("show_library")} title="Open the library window">LIB</button>
-        </div>
-        {#if flash}
-          <div class="flash" title={flash}>{flash}</div>
-        {:else}
-          <div class="stat">
-            <span>{queue.items.length} {queue.items.length === 1 ? "ITEM" : "ITEMS"}</span>
-            <span class="tot">{clock(total)}</span>
-          </div>
-        {/if}
-      {/if}
-    </div>
+<!-- The rows, in the box the skin gave the list, in its face and colours
+     (the --list-* properties). The drag, the keys and the double-click are
+     this window's, as they always were. -->
+{#snippet rows()}
+  <div
+    class="rows"
+    bind:this={rowsEl}
+    role="listbox"
+    aria-label="Play queue"
+    tabindex="0"
+    onkeydown={onKey}
+    onscroll={(e) => (rowsTop = e.currentTarget.scrollTop)}
+  >
+    {#each queue.items as t, i (t.id + ":" + (t.position ?? "l"))}
+      <div
+        class="row"
+        class:now={t.id === nowId}
+        class:sel={t.id === selected}
+        class:lifted={dragId === t.id}
+        class:drop-before={dragId != null && dropAt === i}
+        class:drop-after={dragId != null && dropAt === queue.items.length && i === queue.items.length - 1}
+        data-idx={i}
+        role="option"
+        aria-selected={t.id === selected}
+        tabindex="-1"
+        onpointerdown={(e) => rowDown(e, t)}
+        title={t.title}
+      >
+        <span class="n">{String(i + 1).padStart(2, "0")}</span>
+        <span class="t">{t.kind === "video" ? "▣ " : ""}{t.uploader ? `${t.uploader} — ` : ""}{t.title}</span>
+        <span class="d">{clock(t.duration_s)}</span>
+      </div>
+    {:else}
+      <div class="empty">Nothing here yet. ADD a folder, paste a URL, or pick tracks in the library.</div>
+    {/each}
   </div>
-</Classic>
+{/snippet}
+
+<!-- The count and the running time, or a notice for a few seconds after
+     something happened. Right-aligned in the skin's box. -->
+{#snippet status()}
+  {#if flash}
+    <div class="flash" title={flash}>{flash}</div>
+  {:else}
+    <div class="stat">
+      <span>{queue.items.length} {queue.items.length === 1 ? "ITEM" : "ITEMS"}</span>
+      <span class="tot">{clock(total)}</span>
+    </div>
+  {/if}
+{/snippet}
+
+<!-- The link field, over the whole bar while it is open. -->
+{#snippet urlField()}
+  {#if urlMode}
+    <input
+      class="url"
+      bind:this={urlEl}
+      bind:value={url}
+      placeholder="Paste a link, Enter to queue, Esc to cancel"
+      onkeydown={urlKey}
+      onblur={() => (urlMode = false)}
+    />
+  {/if}
+{/snippet}
+
+<Classic
+  label="playlist"
+  {title}
+  resizable
+  {shade}
+  {binds}
+  slots={{ list: rows, listStatus: status, urlField }}
+  onaction={action}
+/>
 
 <style>
-  .pl {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 3px 4px;
-  }
-
-  /* ---- rows ---- */
+  /* ---- rows ----
+   *
+   * The well and its edge are the skin's (`listWell`, `listFrame`); so are
+   * the row height, the face and the three colours, which arrive as
+   * --list-fg (a row), --list-hi (the same token at full strength), --list-sel
+   * and --list-now. Everything below is how a row is laid out, not how it
+   * looks. */
   .rows {
-    flex: 1 1 auto;
-    min-height: 0;
+    position: absolute;
+    inset: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
     outline: none;
   }
   .rows::-webkit-scrollbar {
@@ -346,46 +415,41 @@
     background: transparent;
   }
   .rows::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--arc) 35%, transparent);
+    background: color-mix(in srgb, var(--list-sel) 35%, transparent);
   }
   .rows::-webkit-scrollbar-thumb:hover {
-    background: var(--arc);
+    background: var(--list-sel);
   }
   .row {
-    height: 10px;
+    height: var(--list-row);
     display: flex;
     align-items: center;
     gap: 4px;
     padding: 0 3px;
-    font-size: 9px;
-    line-height: 1;
     white-space: nowrap;
-    color: color-mix(in srgb, var(--filament) 72%, transparent);
+    touch-action: none;
   }
   .row.sel {
-    background: color-mix(in srgb, var(--arc) 13%, transparent);
-    color: var(--filament);
-  }
-  .row {
-    touch-action: none;
+    background: color-mix(in srgb, var(--list-sel) 13%, transparent);
+    color: var(--list-hi);
   }
   .row.lifted {
     opacity: 0.4;
   }
   .row.drop-before {
-    box-shadow: inset 0 1px 0 var(--arc);
+    box-shadow: inset 0 1px 0 var(--list-sel);
   }
   .row.drop-after {
-    box-shadow: inset 0 -1px 0 var(--arc);
+    box-shadow: inset 0 -1px 0 var(--list-sel);
   }
-  /* Now-playing is `strike` (theme.md), with a static halo: not the viz. */
+  /* The playing row, with a static halo: not the viz (theme.md). */
   .row.now {
-    color: var(--strike);
-    text-shadow: 0 0 6px color-mix(in srgb, var(--strike) 55%, transparent);
+    color: var(--list-now);
+    text-shadow: 0 0 6px color-mix(in srgb, var(--list-now) 55%, transparent);
   }
   .n {
     flex: 0 0 auto;
-    color: color-mix(in srgb, var(--filament) 35%, transparent);
+    color: color-mix(in srgb, var(--list-hi) 35%, transparent);
   }
   .row.now .n {
     color: inherit;
@@ -398,7 +462,7 @@
   }
   .d {
     flex: 0 0 auto;
-    color: color-mix(in srgb, var(--filament) 45%, transparent);
+    color: color-mix(in srgb, var(--list-hi) 45%, transparent);
   }
   .row.now .d {
     color: inherit;
@@ -410,76 +474,45 @@
     justify-content: center;
     padding: 0 8px;
     text-align: center;
-    font-size: 9px;
-    color: color-mix(in srgb, var(--filament) 45%, transparent);
+    white-space: normal;
+    color: color-mix(in srgb, var(--list-hi) 45%, transparent);
   }
 
-  /* ---- bottom bar ---- */
-  .bar {
-    flex: 0 0 13px;
+  /* ---- the count, the notice, the link field ---- */
+  .stat {
+    height: 100%;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    font-size: 6px;
-    letter-spacing: 0.1em;
-  }
-  .btns {
-    display: flex;
-    gap: 2px;
-  }
-  .pb {
-    height: 13px;
-    padding: 0 5px;
-    border: 0;
-    display: grid;
-    place-items: center;
-    font: inherit;
-    font-size: 6px;
-    letter-spacing: 0.1em;
-    line-height: 1;
-    color: color-mix(in srgb, var(--filament) 70%, transparent);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 22%, transparent);
-    cursor: pointer;
-  }
-  .pb:hover:not(:disabled) {
-    color: var(--arc);
-    background: color-mix(in srgb, var(--void) 70%, var(--well));
-    box-shadow: inset 0 0 0 1px var(--arc);
-  }
-  .pb.rem:hover:not(:disabled) {
-    color: var(--strike);
-    box-shadow: inset 0 0 0 1px var(--strike);
-  }
-  .pb:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-  .stat {
-    display: flex;
+    justify-content: flex-end;
     gap: 6px;
     white-space: nowrap;
+    font-size: 6px;
+    letter-spacing: 0.1em;
     color: color-mix(in srgb, var(--filament) 40%, transparent);
   }
   .tot {
     color: var(--arc);
   }
   .flash {
-    flex: 1 1 auto;
-    min-width: 0;
-    margin-left: 6px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
-    text-align: right;
-    letter-spacing: 0.02em;
     font-size: 7px;
+    letter-spacing: 0.02em;
     color: var(--arc);
+    /* The whole notice is in its tooltip; the slot lets the pointer through
+       and this takes it back. */
+    pointer-events: auto;
   }
   .url {
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 13px;
+    /* Block, or it sits on a text baseline a pixel and a half low. */
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
     padding: 0 4px;
     font: inherit;
     font-size: 8px;
@@ -489,6 +522,7 @@
     border: 0;
     box-shadow: inset 0 0 0 1px var(--arc);
     outline: none;
+    pointer-events: auto;
   }
   .url::placeholder {
     color: color-mix(in srgb, var(--filament) 40%, transparent);

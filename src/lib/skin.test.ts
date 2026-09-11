@@ -212,6 +212,128 @@ describe("the Eyewall manifest", () => {
     }
   });
 
+  it("draws the EQ's interior: eleven centred vertical sliders, their scale, the switch, the lamp (D98)", () => {
+    const { skin } = parseSkin(eyewall);
+    const els = elementsOf(skin, "equalizer", false).elements;
+    const by = (n: string) => els.find((e) => e.name === n);
+    const sliders = els.filter((e) => e.type === "slider");
+    expect(sliders.map((s) => s.type === "slider" && s.bind)).toEqual([
+      "eqPre",
+      ...Array.from({ length: 10 }, (_, i) => `eqBand${i + 1}`),
+    ]);
+    for (const s of sliders) {
+      if (s.type !== "slider") continue;
+      // Centred on 0 dB, so the fill runs from the line, the wheel nudges
+      // and a double press returns there.
+      expect(s).toMatchObject({ orientation: "vertical", origin: 0.5 });
+      // Past 8 dB either way the thumb turns strike; while the EQ is off
+      // the whole slider dims, and the dim wins.
+      expect(s.hot).toEqual({ beyond: 0.34, tint: "strike" });
+      // Past 8 dB, not at it: a band at exactly 8 (two presets have one)
+      // stays arc, as the CSS thumb did with `Math.abs(db) > 8`.
+      expect(8 / 24).toBeLessThan(s.hot!.beyond);
+      expect(8.5 / 24).toBeGreaterThan(s.hot!.beyond);
+      // An odd height too, so 0 dB lands on a pixel's middle, where the tick is.
+      expect(s.rect[3] % 2).toBe(1);
+      expect(s.lit).toMatchObject({ bind: "eqOn", when: "off", tint: "filament" });
+      // An odd width, so a 9-pixel thumb sits on whole pixels at 1x.
+      expect(s.rect[2] % 2).toBe(1);
+    }
+    // The scale under them, centred, "1k" left in lower case.
+    expect(by("eqBand5Label")).toMatchObject({ type: "text", value: "1k", align: "center" });
+    expect(by("eqPreLabel")).toMatchObject({ value: "PRE", opacity: 0.65 });
+    // The switch clicks and lights; the lamp only lights.
+    expect(by("eqOnButton")).toMatchObject({ type: "toggle", action: "eqOn", bind: "eqOn", when: "on" });
+    expect(by("eqClipLamp")).toMatchObject({ type: "toggle", action: null, bind: "eqClip", when: "on" });
+    expect(by("eqPresetButton")).toMatchObject({ action: "eqPresets", bind: "eqMenu", when: "open" });
+    // The curve is the window's to draw, in the box the skin gives it.
+    expect(by("eqCurveWell")).toMatchObject({ type: "image", rect: [4, 42, 60, 55] });
+  });
+
+  it("draws the playlist's interior: the rows, six buttons, the count and the link field (D99)", () => {
+    const { skin } = parseSkin(eyewall);
+    const els = elementsOf(skin, "playlist", false).elements;
+    const by = (n: string) => els.find((e) => e.name === n);
+    // The rows in their well, under their edge, and all three grow with the
+    // window (D30).
+    for (const name of ["listWell", "list", "listFrame"]) {
+      expect(by(name), name).toMatchObject({ rect: [4, 17, 267, 80], stretch: "xy" });
+    }
+    const names = els.map((e) => e.name);
+    expect(names.indexOf("listWell")).toBeLessThan(names.indexOf("list"));
+    // The edge over the rows, so a selected row never covers it.
+    expect(names.indexOf("list")).toBeLessThan(names.indexOf("listFrame"));
+    expect(by("list")).toMatchObject({
+      type: "list",
+      rowHeight: 10,
+      font: "row",
+      tint: "filament",
+      opacity: 0.72,
+      current: "strike",
+      selected: "arc",
+    });
+    // Six buttons on the bottom edge, one box between them, each with its words.
+    const buttons = ["addButton", "urlButton", "removeButton", "libraryButton", "shuffleButton", "repeatButton"];
+    const box = by("addButton");
+    for (const name of buttons) {
+      const b = by(name);
+      // A case-none face, so REP's "1x" reads 1x, as Main's 2x toggle does.
+      expect(b, name).toMatchObject({ anchor: "bottom", label: { font: "label", hover: expect.any(String) } });
+      if ((b?.type === "button" || b?.type === "toggle") && (box?.type === "button" || box?.type === "toggle")) {
+        expect(b.sprite.rect, name).toEqual(box.sprite.rect);
+        expect(b.rect[3], name).toBe(13);
+        // The faint well the CSS bar had behind each button, under it (D90).
+        const well = by(name.replace("Button", "Well"));
+        expect(well, name).toMatchObject({ type: "image", rect: b.rect, anchor: "bottom", opacity: 0.3 });
+        expect(names.indexOf(name.replace("Button", "Well"))).toBeLessThan(names.indexOf(name));
+      }
+    }
+    expect(skin.fonts.label).toMatchObject({ type: "system", case: "none" });
+    expect(by("addButton")).toMatchObject({ type: "button", action: "add", label: { value: "ADD" } });
+    expect(by("urlButton")).toMatchObject({ action: "addUrl", label: { value: "URL" } });
+    // REM waits for a selection, and warns in strike rather than arc.
+    expect(by("removeButton")).toMatchObject({
+      action: "remove",
+      disabled: { bind: "plCanRemove", when: "no" },
+      label: { hover: "strike" },
+    });
+    expect(by("libraryButton")).toMatchObject({ action: "library" });
+    // The play order's switches light from what the library says (#115).
+    expect(by("shuffleButton")).toMatchObject({ type: "toggle", action: "shuffle", bind: "shuffle", when: "on" });
+    expect(by("repeatButton")).toMatchObject({
+      type: "toggle",
+      action: "repeat",
+      bind: "repeatOn",
+      when: "on",
+      label: { bind: "repeatLabel", value: null, on: "arc" },
+    });
+    // The count takes the rest of the bar and follows the right edge; the
+    // link field lies over the whole bar, last, so it is on top while open.
+    expect(by("listStatus")).toMatchObject({ type: "slot", anchor: "bottom", stretch: "x" });
+    expect(by("urlField")).toMatchObject({ type: "slot", rect: [4, 100, 267, 13], anchor: "bottom", stretch: "x" });
+    expect(names.at(-1)).toBe("urlField");
+    const status = by("listStatus")!;
+    expect(status.rect[0] + status.rect[2]).toBe(271);
+  });
+
+  it("lights a playlist switch with a fill and leaves the unlit box empty", () => {
+    const { skin } = parseSkin(eyewall);
+    const rnd = elementsOf(skin, "playlist", false).elements.find((e) => e.name === "shuffleButton");
+    if (rnd?.type !== "toggle") throw new Error("shuffleButton is not a toggle");
+    for (const [file, k] of [
+      ["chrome.png", 1],
+      ["chrome@2x.png", 2],
+    ] as const) {
+      const alpha = alphaOf(file);
+      const inside = (r: Rect) => alpha((r[0] + 1) * k, (r[1] + 1) * k);
+      const edge = (r: Rect) => alpha(r[0] * k, r[1] * k);
+      expect(inside(rnd.sprite.rect), `off at ${k}x`).toBe(0);
+      expect(inside(rnd.on.sprite.rect), `on at ${k}x`).toBeGreaterThan(0);
+      // A quiet ring at rest, a full one lit, like the EQ's switch.
+      expect(edge(rnd.sprite.rect)).toBeLessThan(edge(rnd.on.sprite.rect));
+    }
+  });
+
   it("reuses one ring and one solid at the strengths each box wants (D93)", () => {
     const { skin } = parseSkin(eyewall);
     const els = elementsOf(skin, "main", false).elements;
@@ -296,6 +418,69 @@ describe("parseSkin refuses rather than half-loads", () => {
     refuse((m) => (m.windows.main.elements.frame.opacity = 1.5), /between 0 and 1/));
   it("a lit block with no binding", () =>
     refuse((m) => delete m.windows.main.elements.tagPlay.lit.bind, /lit\.bind/));
+  it("a slider origin outside 0..1", () =>
+    refuse((m) => (m.windows.equalizer.elements.eqBand3.origin = 1.5), /origin.*between 0 and 1/));
+  it("a hot zone on a slider with no centre to measure it from", () =>
+    refuse((m) => delete m.windows.equalizer.elements.eqBand3.origin, /hot.*origin/));
+  it("a text alignment the renderer does not know", () =>
+    refuse((m) => (m.windows.equalizer.elements.eqPreLabel.align = "justify"), /align/));
+  it("a list naming no font", () => refuse((m) => (m.windows.playlist.elements.list.font = "serif"), /names no font/));
+  it("a list with no font at all", () =>
+    refuse((m) => delete m.windows.playlist.elements.list.font, /list\.font/));
+  it("a button label with nothing to say", () =>
+    refuse((m) => delete m.windows.playlist.elements.addButton.label.value, /label.*bind.*value/));
+  it("a button label naming no font", () =>
+    refuse((m) => (m.windows.playlist.elements.addButton.label.font = "serif"), /label\.font.*names no font/));
+  it("a disabled block with no binding", () =>
+    refuse((m) => delete m.windows.playlist.elements.removeButton.disabled.bind, /disabled\.bind/));
+  it("a disabled block with no value to compare", () =>
+    refuse((m) => delete m.windows.playlist.elements.removeButton.disabled.when, /disabled/));
+  // The names the windows fill are part of the format (D99): renamed, the
+  // skin would load with nowhere to put the rows, the curve or the analyser.
+  it("a playlist whose rows were renamed", () =>
+    refuse((m) => {
+      m.windows.playlist.elements.rows = m.windows.playlist.elements.list;
+      delete m.windows.playlist.elements.list;
+    }, /list.*named "list".*rows/));
+  it("a playlist with no link field", () =>
+    refuse((m) => delete m.windows.playlist.elements.urlField, /"urlField".*link field/));
+  it("a playlist whose count is a text instead of a slot", () =>
+    refuse(
+      (m) =>
+        (m.windows.playlist.elements.listStatus = { type: "text", rect: [146, 100, 125, 13], font: "tag", value: "0" }),
+      /slot named "listStatus"/,
+    ));
+  it("an EQ with no box for its curve", () =>
+    refuse((m) => delete m.windows.equalizer.elements.eqCurveWell, /"eqCurveWell".*curve/));
+  it("a Main with no visualizer where the analyser goes", () =>
+    refuse((m) => delete m.windows.main.elements.vis, /visualizer named "vis".*analyser/));
+});
+
+describe("element names", () => {
+  it("are the whole key, dots and all", () => {
+    // Read back off the path, "bar.add" was "add", and two such keys collided.
+    const { skin } = parseSkin(
+      broken((m) => {
+        const well = m.windows.playlist.elements.addWell;
+        m.windows.playlist.elements["bar.add"] = well;
+        m.windows.playlist.elements["menu.add"] = well;
+      }),
+    );
+    const names = elementsOf(skin, "playlist", false).elements.map((e) => e.name);
+    expect(names).toContain("bar.add");
+    expect(names).toContain("menu.add");
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("a key ending in .titlebar is not the title bar", () =>
+    expect(() =>
+      parseSkin(
+        broken((m) => {
+          m.windows.main.elements["x.titlebar"] = m.windows.main.elements.titlebar;
+          delete m.windows.main.elements.titlebar;
+        }),
+      ),
+    ).toThrow(/titlebar/));
 });
 
 describe("parseSkin warns on the soft cases", () => {
@@ -314,13 +499,22 @@ describe("parseSkin warns on the soft cases", () => {
     expect(skin.visualizer.component).toBe("spectrum-bars");
   });
 
-  it("parses a list element, which the playlist's PR will draw", () => {
+  it("gives a list with only a face and a row height the usual colours (D99)", () => {
     const { skin, warnings } = parseSkin(
-      broken((m) => (m.windows.playlist.elements.rows = { type: "list", rect: [12, 20, 243, 58], rowHeight: 10 })),
+      broken(
+        (m) => (m.windows.playlist.elements.rows = { type: "list", rect: [12, 20, 243, 58], rowHeight: 12, font: "row" }),
+      ),
     );
     expect(warnings).toEqual([]);
     const rows = elementsOf(skin, "playlist", false).elements.find((e) => e.name === "rows");
-    expect(rows?.type === "list" && rows.rowHeight).toBe(10);
+    expect(rows).toMatchObject({
+      type: "list",
+      rowHeight: 12,
+      tint: "filament",
+      opacity: 1,
+      current: "strike",
+      selected: "arc",
+    });
   });
 
   it("ignores unknown keys", () => {

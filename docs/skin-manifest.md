@@ -120,7 +120,18 @@ Only the three classic windows are skinnable (**O13**). Library, Video, Download
 | `resizeStep` | Quantization for the splitter. Playlist is `[25,29]`; omit when not resizable |
 | `shade` | The windowshade layout — a separate element set at `[275,14]`, not a clipped version of the full one |
 
-**A window supplies values, never geometry.** The skin says where the clock is, what font it is in and how it is lit; the window hands the shell a `binds` record (what the clock reads) and a `slots` record of content to place inside a named element's box — the analyser goes in whatever rectangle the manifest gave the `visualizer`. Nothing outside the manifest knows a pixel.
+**A window supplies values, never geometry.** The skin says where the clock is, what font it is in and how it is lit; the window hands the shell a `binds` record (what the clock reads) and a `slots` record of content to place inside a named element's box — the analyser goes in whatever rectangle the manifest gave the visualizer named `vis`. Nothing outside the manifest knows a pixel.
+
+**The boxes a window fills are found by name, so those names are part of the format** (D99), like `titlebar`, and a full element set without one is refused rather than drawn with nothing in it:
+
+| Window | Name | Type | What the window puts there |
+|---|---|---|---|
+| `main` | `vis` | `visualizer` | The analyser |
+| `main` | `trackTitle` | `text` | The title, and a track it cannot open |
+| `equalizer` | `eqCurveWell` | `image` or `slot` | The response curve and the preset menu |
+| `playlist` | `list` | `list` | The rows |
+| `playlist` | `listStatus` | `slot` | The count and running time |
+| `playlist` | `urlField` | `slot` | The link field |
 
 **Every element set, full and shade, has a `titlebar` image with `"role": "drag"`.** It is the one move handle (D35) and carries the double-click that toggles shade (D60); a set without one is refused.
 
@@ -134,7 +145,7 @@ Every element that varies with focus declares an `inactive` variant. The rendere
 
 ## Elements
 
-Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom"` to keep its distance from that edge instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x and its buttons anchor right.
+Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom"` to keep its distance from that edge instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x, its shade button anchors right, its rows stretch along both, and its bottom bar anchors to the bottom (D99).
 
 ```jsonc
 "elements": {
@@ -173,20 +184,23 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 |---|---|---|
 | `image` | Static sprite | `rect`, `sprite`; `inactive`, `role: "drag"` and `opacity` optional |
 | `nineslice` | Stretchable frame. `rect: "fill"` tracks the window; a rect of its own edges a control | `sprite`, `insets`; `opacity` optional |
-| `button` | Clickable. `action` names an app command | `rect`, `sprite`, `action`; `hover`, `active` (pressed), `inactive` optional |
-| `toggle` | Two-state button, or an indicator | `rect`, `sprite`, `on` (`{ sprite, hover?, active?, inactive? }`), and either `action` (clickable) or `bind` + `when` (state-driven) |
-| `slider` | Continuous control | `rect`, `bind`, and at least one of `track`, `fill`, `thumb` |
-| `text` | Bitmap or system text | `rect`, `font`, and either `bind` or a literal `value`; `opacity`, `glow`, `lit`, `overflow` optional |
-| `list` | Playlist rows | `rect`, `rowHeight`, row color bindings |
+| `button` | Clickable. `action` names an app command | `rect`, `sprite`, `action`; `hover`, `active` (pressed), `inactive`, `label`, `disabled` optional (D99) |
+| `toggle` | Two-state button, or an indicator | `rect`, `sprite`, `on` (`{ sprite, hover?, active?, inactive? }`), and either `action` (clickable) or `bind` + `when` (state-driven); `label`, `disabled` optional (D99) |
+| `slider` | Continuous control | `rect`, `bind`, and at least one of `track`, `fill`, `thumb`; `origin`, `lit`, `hot` optional (D98) |
+| `text` | Bitmap or system text | `rect`, `font`, and either `bind` or a literal `value`; `opacity`, `glow`, `lit`, `overflow`, `align` optional |
+| `list` | Playlist rows. The window draws them in this box (D99) | `rect`, `rowHeight`, `font`; `tint`, `opacity`, `current`, `selected` optional |
+| `slot` | A box with no art, for something the window draws (D99) | `rect` |
 | `visualizer` | Where the component from `visualizer` draws | `rect` |
 
 A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter.
 
-`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`).
+**A centred slider (D98).** `origin`, 0..1, makes a slider a centred control: the fill runs from the origin to the value rather than from the start, the wheel nudges it by 1/48 of its range, and a double press returns it to the origin. The EQ's gains sit at `0.5`, which is 0 dB. `lit` is the same shape as on a text, `{ bind, when, tint?, opacity? }`, and gives the fill and thumb a second look while the binding holds; every EQ slider dims while the EQ is off. `hot`, `{ beyond, tint }`, tints the thumb once the value is more than `beyond` from the origin, and needs an origin to measure from. The dim wins over hot. A text's `align` is `left` (the default), `center` or `right`.
+
+`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`), and the equalizer's `eqOn` (`"on"`, `"off"`), `eqPreset`, `eqMenu` (`"open"`, `"closed"`), `eqTrim`, `eqClip`, `eqPre` and `eqBand1`–`eqBand10` (0..1, 0.5 being 0 dB). The EQ adds two actions, `eqOn` and `eqPresets`. The playlist (D99) adds the actions `add`, `addUrl`, `remove`, `library`, and the binds `shuffle` and `repeatOn` (`"on"`, `"off"`), `repeatLabel` (`"REP"`, `"1x"`, `"ALL"`) and `plCanRemove` (`"yes"`, `"no"`).
 
 ### `opacity`, so one sprite serves every strength (D93)
 
-Mask art carries strength in its own alpha, which would mean a near-identical sprite for every place a skin wants the same shape a little dimmer. An element may instead declare `opacity`, 0..1, over its tint: Eyewall draws one full-alpha `ring` and uses it as the window's frame at `0.3` and as the edge of the title strip, the seek bar and the volume bar at `0.14`, and one full-alpha `solid` as every well. Available on `image`, `nineslice` and `text`. An imported skin never sets it — its alpha is already in its pixels.
+Mask art carries strength in its own alpha, which would mean a near-identical sprite for every place a skin wants the same shape a little dimmer. An element may instead declare `opacity`, 0..1, over its tint: Eyewall draws one full-alpha `ring` and uses it as the window's frame at `0.3` and as the edge of the title strip, the seek bar and the volume bar at `0.14`, and one full-alpha `solid` as every well. Available on `image`, `nineslice`, `text` and `list`, and on a `label`. An imported skin never sets it — its alpha is already in its pixels.
 
 ### A `text` says what it shows (D93)
 
@@ -195,6 +209,18 @@ Mask art carries strength in its own alpha, which would mean a near-identical sp
 ### A `toggle` that watches instead of clicking (D93)
 
 `action` makes a toggle clickable and the app decides its on state. `bind` and `when` make it state-driven: the on art shows while that binding holds that value. A transport button has both — it plays when clicked and lights while playing. A toggle with a binding and no action is an indicator, which is why the format has no separate type for one. At least one of the two is required.
+
+### A button's words, and when it cannot be pressed (D99)
+
+`label` puts words in a `button` or `toggle`'s box: `{ "font", "value"?, "bind"?, "tint"?, "opacity"?, "hover"?, "on"? }`, with `value` and `bind` working as they do on a `text` (one is required). The words are centred and drawn with the box, so the halo takes them too; `hover` is their colour while the pointer is over the button, `on` their colour while a toggle is on, and both are a token at full strength. Words do not change with focus; the art does. Eyewall's playlist bar is six buttons on one 21 × 13 sprite, each with its own label. A separate `text` over a button still works, and stays right for words that should not answer the pointer (the EQ's preset name).
+
+`disabled`, `{ "bind", "when" }`, makes a button or toggle unpressable while the binding holds that value: drawn at 0.35, with no hover art, no halo and no click. The playlist's REM waits on `plCanRemove`.
+
+### A list, and a slot (D99)
+
+A `list` is the box the playlist's rows are drawn in, and the skin says how they look: `rowHeight` in logical pixels, `font` (a name from `fonts`), `tint` and `opacity` for a row, `current` for the playing row and `selected` for the selected one's highlight. The rows themselves are the window's — pressing, double-pressing, dragging to reorder and the keys are behaviour, not art — and it reads the skin's choices from `--list-fg`, `--list-hi`, `--list-now`, `--list-sel` and `--list-row` on the box. The well and edge around the rows are ordinary `image` and `nineslice` elements, and the edge goes after the list so a selected row never covers it.
+
+A `slot` is a placed box with nothing drawn in it: where the window puts something the skin has no element for. Eyewall's playlist has two, the count and running time, and the link field that lies over the whole bar while it is open. A slot lets the pointer through; what the window puts in it takes the pointer back where it needs it.
 
 ### Glow is declared, not assumed
 
