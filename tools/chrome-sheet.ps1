@@ -44,6 +44,12 @@ $states = @{
 # the same reason the analyser's glow lives in its ramp art (D73).
 $bloom = @(@{ r = 3; a = 0.16 }, @{ r = 2; a = 0.24 }, @{ r = 1; a = 0.38 })
 
+# Exactly the transport's lit states. Named, not matched on ".on": a
+# title-bar toggle's "on" is its other glyph (1x rather than 2x, the up arrow
+# rather than the down), not a lit state, and matching the suffix baked this
+# bloom into them and made the 1x button look fuzzy (#117).
+$latchedKinds = @("play.on", "pause.on", "stop.on")
+
 # Glyphs. Each string grid must be exactly the sprite's logical size: 13 x 9 on
 # a title-bar button, 17 x 14 on a transport button. Row 0 and the last row,
 # column 0 and the last column, are the ring.
@@ -378,7 +384,7 @@ function Draw-Sprite($g, $job, [int]$s) {
             if ($rows.Count -ne [int]$job.rect[3] -or $rows[0].Length -ne [int]$job.rect[2]) {
                 throw "glyph for '$($job.kind)' is $($rows[0].Length) x $($rows.Count), sprite is $($job.rect[2]) x $($job.rect[3])"
             }
-            $latched = $recipe.EndsWith(".on")
+            $latched = $latchedKinds -contains $recipe
             # `if` is a statement, not an argument: PS 5.1 rejects it inline.
             $boxFill = $st.fill
             if ($latched) { $boxFill = 0.14 }
