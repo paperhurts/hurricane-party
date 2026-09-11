@@ -145,7 +145,13 @@
   }
 
   async function play() {
-    if (!track) return;
+    // Nothing loaded: the library starts the list showing (#116), where the
+    // playlist window points or at the top. Main is the one transport (D81),
+    // so its Play, the strip's and the pipe's all reach this line.
+    if (!track) {
+      emitTo("library", "player:start").catch(() => {});
+      return;
+    }
     stopped = false;
     ensureGraph();
     try {
@@ -524,7 +530,11 @@
     push();
     tell();
   }}
-  onended={() => step(1)}
+  onended={() => {
+    // Not step(1): an ending is not a press of Next, and only an ending
+    // honours repeat one (#115). The library decides what follows.
+    emitTo("library", "player:ended").catch(() => {});
+  }}
   ontimeupdate={() => {
     pos = audio.currentTime;
     push();

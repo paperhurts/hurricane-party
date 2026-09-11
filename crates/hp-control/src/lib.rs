@@ -121,6 +121,20 @@ fn kind_audio() -> String {
     "audio".into()
 }
 
+/// What `status` answers: the transport's state, plus the play order's two
+/// switches (#115, D97). Flat on the wire — a client reading `state` and
+/// `volume` sees exactly what it saw before — and `shuffle` and `repeat` are
+/// additive. They come from the library, which owns the play order (D74), not
+/// from the window that reported `player`.
+#[derive(Debug, Clone, Serialize)]
+pub struct Status {
+    #[serde(flatten)]
+    pub player: PlayerState,
+    pub shuffle: bool,
+    /// `"off"`, `"one"` or `"all"`.
+    pub repeat: String,
+}
+
 /// Unsolicited. No `id`, which is how a client tells them from replies.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event")]
@@ -357,6 +371,32 @@ mod tests {
         assert_eq!(j["event"], "state_changed");
         assert_eq!(j["state"], "paused");
         assert!(j.get("id").is_none());
+    }
+
+    /// `status` is flat: a client written before shuffle and repeat existed
+    /// reads the same keys in the same places, and the new two sit beside
+    /// them rather than under a new object (#115).
+    #[test]
+    fn status_is_the_player_state_flat_with_the_play_mode_beside_it() {
+        let s = Status {
+            player: PlayerState {
+                state: "playing".into(),
+                kind: "audio".into(),
+                media_id: Some(7),
+                volume: 0.5,
+                ..Default::default()
+            },
+            shuffle: true,
+            repeat: "all".into(),
+        };
+        let j = serde_json::to_value(&s).unwrap();
+        assert_eq!(j["state"], "playing");
+        assert_eq!(j["kind"], "audio");
+        assert_eq!(j["media_id"], 7);
+        assert_eq!(j["volume"], 0.5);
+        assert_eq!(j["shuffle"], true);
+        assert_eq!(j["repeat"], "all");
+        assert!(j.get("player").is_none(), "flattened, not nested");
     }
 
     /// `kind` is additive (D70): a report or a client that never says it

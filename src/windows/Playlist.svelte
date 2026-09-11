@@ -22,6 +22,19 @@
   let queue = $state<Queue>({ name: "", listId: null, items: [] });
   let nowId = $state<number | null>(null);
   let selected = $state<number | null>(null);
+
+  // The play order's switches as the library holds them (#115). The library
+  // owns the order (D74); these buttons only ask it to change, and show what
+  // it says back.
+  type Repeat = "off" | "one" | "all";
+  let shuffle = $state(false);
+  let repeat = $state<Repeat>("off");
+
+  // A standing Play starts on the row selected here (#116), so the library
+  // hears of every change of selection, including the first.
+  $effect(() => {
+    emitTo("library", "queue:select", selected).catch(() => {});
+  });
   let rowsEl: HTMLDivElement;
 
   // The bottom bar doubles as a one-line URL field, and as a one-line notice
@@ -66,11 +79,16 @@
       listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
         nowId = e.payload.id;
       }),
+      listen<{ shuffle: boolean; repeat: Repeat }>("play:mode", (e) => {
+        shuffle = e.payload.shuffle;
+        repeat = e.payload.repeat;
+      }),
     ];
     // Pull once: the library's first broadcast may have gone out before this
     // window had a listener (D67), and a push it missed is a push it never
-    // gets.
+    // gets. Both the list and the switches.
     emit("queue:hello").catch(() => {});
+    emit("play:hello").catch(() => {});
     return () => {
       for (const s of subs) s.then((off) => off());
     };
@@ -305,6 +323,26 @@
           <button class="pb" onclick={openUrl} title="Queue a link for download">URL</button>
           <button class="pb rem" onclick={remove} disabled={!canRemove} title="Remove from this playlist">REM</button>
           <button class="pb" onclick={() => invoke("show_library")} title="Open the library window">LIB</button>
+          <!-- The play order's switches (#115). Words for now, in the bar's
+               own three-letter voice; they become drawn glyphs when this
+               window's interior moves into the skin (#3). -->
+          <button
+            class="pb"
+            class:lit={shuffle}
+            onclick={() => emitTo("library", "play:shuffle").catch(() => {})}
+            title={shuffle ? "Random order is on. Click to play in order" : "Play in a random order"}>RND</button
+          >
+          <button
+            class="pb rep"
+            class:lit={repeat !== "off"}
+            onclick={() => emitTo("library", "play:repeat").catch(() => {})}
+            title={repeat === "one"
+              ? "Repeating this track. Click to repeat the whole list"
+              : repeat === "all"
+                ? "Repeating the whole list. Click to turn repeat off"
+                : "Repeat is off. Click to repeat this track"}
+            >{repeat === "one" ? "1x" : repeat === "all" ? "ALL" : "REP"}</button
+          >
         </div>
         {#if flash}
           <div class="flash" title={flash}>{flash}</div>
@@ -454,6 +492,17 @@
   .pb:disabled {
     opacity: 0.35;
     cursor: default;
+  }
+  /* A switch that is on: random order, or a repeat mode. */
+  .pb.lit {
+    color: var(--arc);
+    background: color-mix(in srgb, var(--arc) 14%, var(--void));
+    box-shadow: inset 0 0 0 1px var(--arc);
+  }
+  /* The same width whatever it reads (REP, 1x, ALL), so the bar never shifts
+     under the pointer between presses. */
+  .pb.rep {
+    min-width: 22px;
   }
   .stat {
     display: flex;

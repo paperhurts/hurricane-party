@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
+  import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
   // allowed; everything around him is tokens.
@@ -61,6 +62,19 @@
   let current = $state<MediaRow | null>(null);
   let nowId = $state<number | null>(null);
   let isPlaying = $state(false);
+
+  // The play order's two switches (#115, D97). Held here because the order is
+  // (D74), saved in settings so they outlive a relaunch, and broadcast so the
+  // playlist window's buttons show them.
+  let shuffle = $state(false);
+  let repeat = $state<Repeat>("off");
+  // While shuffle is on, the sequence the transport walks: a permutation of
+  // the showing list. Plain, not $state: it changes only when shuffle turns on,
+  // the list changes, or a lap of it runs out, never as a side of rendering.
+  let shuffleOrder: number[] = [];
+  // The row the playlist window has selected, reported on every change, so
+  // Play from a standing start begins where the person is pointing (#116).
+  let queueSelected: number | null = null;
   let libraryPath = $state("");
   let concurrency = $state(2);
   let wantVideo = $state(false);
@@ -125,6 +139,14 @@
     refreshLibrary();
     invoke<string>("library_path").then((p) => (libraryPath = p));
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
+    // The switches as they were left (#115). Tell the playlist window once
+    // they are known, since it may already have asked.
+    invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
+      shuffle = m.shuffle;
+      repeat = isRepeat(m.repeat) ? m.repeat : "off";
+      if (shuffle) reshuffle(current?.id ?? null);
+      announceMode();
+    });
 
     const subs = [
       listen("jobs-changed", refreshJobs),
@@ -133,6 +155,17 @@
       // Main asks for the next or previous track because the play order —
       // which list is showing — is known only here.
       listen<number>("player:step", (e) => step(e.payload)),
+      // A track finishing on its own is not a press of Next: repeat one
+      // plays it again, and only an ending says so (#115).
+      listen("player:ended", ended),
+      // Play with nothing loaded, from any transport (#116).
+      listen("player:start", start),
+      // The playlist window's selected row, kept current so a standing start
+      // begins there, and its shuffle and repeat buttons.
+      listen<number | null>("queue:select", (e) => (queueSelected = e.payload)),
+      listen("play:shuffle", () => setMode(!shuffle, repeat)),
+      listen("play:repeat", () => setMode(shuffle, nextRepeat(repeat))),
+      listen("play:hello", announceMode),
       // ...and says what it is playing, so the row can light up and its
       // button can show pause.
       listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
@@ -324,12 +357,99 @@
     emitTo("main", "player:toggle").catch(() => {});
   }
 
-  function step(delta: number) {
-    if (!current) return;
-    const i = shown.findIndex((t) => t.id === current!.id);
-    const next = shown[i + delta];
-    if (next) play(next);
+  // ---- the play order (#115, #116, D97) ----
+  //
+  // The rules are in lib/playorder.ts, under test; these only hold the state
+  // and turn an id back into a row.
+
+  /** The sequence the transport walks right now. */
+  function order(): number[] {
+    return shuffle ? shuffleOrder : shown.map((t) => t.id);
   }
+
+  function playId(id: number | null) {
+    if (id == null) return;
+    const t = shown.find((x) => x.id === id);
+    if (t) play(t);
+  }
+
+  /** A fresh shuffle of the showing list, `first` leading when it is in it. */
+  function reshuffle(first: number | null) {
+    shuffleOrder = shuffled(
+      shown.map((t) => t.id),
+      first,
+    );
+  }
+
+  /** Next and Previous, from Main, the strip, or the control pipe. */
+  function step(delta: number) {
+    const o = order();
+    const at = current?.id ?? null;
+    // Shuffle with repeat all, walking off the end of a lap: a new lap in a
+    // new order, not the same order again, and never the song just heard
+    // first when there is any other.
+    if (shuffle && repeat === "all" && delta > 0 && at != null && o.indexOf(at) === o.length - 1) {
+      reshuffle(null);
+      if (shuffleOrder.length > 1 && shuffleOrder[0] === at) shuffleOrder.push(shuffleOrder.shift()!);
+      playId(shuffleOrder[0] ?? null);
+      return;
+    }
+    playId(stepId(o, at, delta, repeat === "all"));
+  }
+
+  /** A track finished on its own: repeat one plays it again (#115). */
+  function ended() {
+    // Shuffle with repeat all walks on through step(), which starts a fresh
+    // lap when this one runs out.
+    if (shuffle && repeat === "all") return step(1);
+    playId(endedId(order(), current?.id ?? null, repeat));
+  }
+
+  /**
+   * Play with nothing loaded (#116): start the showing list where the
+   * playlist window points, or at its top. Main is the one transport (D81), so
+   * its button, the strip's and the pipe's `play` all land here.
+   */
+  function start() {
+    if (!shown.length) {
+      notice = "Nothing to play: the list showing is empty.";
+      return;
+    }
+    if (shuffle) {
+      reshuffle(queueSelected);
+      playId(shuffleOrder[0] ?? null);
+      return;
+    }
+    playId(startId(order(), queueSelected));
+  }
+
+  function setMode(s: boolean, r: Repeat) {
+    const turnedOn = s && !shuffle;
+    shuffle = s;
+    repeat = r;
+    // Turning shuffle on mid-song keeps the song and shuffles what follows.
+    if (turnedOn) reshuffle(current?.id ?? null);
+    invoke("set_play_mode", { shuffle, repeat }).catch((e) => (error = String(e)));
+    announceMode();
+  }
+
+  /** Tell every window the switches, so the playlist window's buttons follow. */
+  function announceMode() {
+    emit("play:mode", { shuffle, repeat }).catch(() => {});
+  }
+
+  // A different list, or rows in and out: a shuffle of the old list would walk
+  // ids that are no longer there. Reshuffle around whatever is playing.
+  let shownKey = $derived(shown.map((t) => t.id).join(","));
+  $effect(() => {
+    void shownKey;
+    // Only the list is a dependency. Reading `shuffle` or `current` tracked
+    // would reshuffle on every song change, and Previous would walk back
+    // through an order that did not exist when those songs played.
+    untrack(() => {
+      if (shuffle) reshuffle(current?.id ?? null);
+    });
+  });
 
   /** A notice and the offers riding on it go together. */
   function clearNotice() {
