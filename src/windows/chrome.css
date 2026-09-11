@@ -599,3 +599,21 @@ body {
   opacity: 0.25;
   box-shadow: none;
 }
+
+/* ---- the glow toggle (#108, D100) ----
+ *
+ * Off, nothing in a classic window carries a halo. The renderer's own two,
+ * the buttons' filter and a text's glow, are Sprite.svelte's to leave off;
+ * these are the ones the windows draw, here for the strip and in each
+ * window's own styles for the rest. Two halos are not this switch's: the
+ * analyser's, which is its ramp art (D73), and the discharge, which is a
+ * bond breaking rather than decoration. */
+.chrome[data-glow="off"] .shade .sb.lit {
+  box-shadow: inset 0 0 0 1px var(--arc);
+}
+.chrome[data-glow="off"] .shade .stime {
+  text-shadow: none;
+}
+.chrome[data-glow="off"] .shade .sbars i {
+  box-shadow: none;
+}

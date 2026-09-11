@@ -528,6 +528,27 @@ fn set_play_mode(app: AppHandle, shuffle: bool, repeat: String) -> Result<(), db
     db::set_play_mode(&conn, shuffle, &repeat)
 }
 
+/// The chrome's glow (#108, D100). Every classic window reads it at mount
+/// and hears `chrome:glow` when it changes, so the three windows turn over
+/// together rather than on their next launch.
+#[tauri::command]
+fn get_glow(app: AppHandle) -> bool {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::glow(&conn)
+}
+
+#[tauri::command]
+fn set_glow(app: AppHandle, on: bool) -> Result<(), db::DbError> {
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_glow(&conn, on)?;
+    }
+    let _ = app.emit("chrome:glow", on);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Focus is a group property (v0.4-brief): when any bonded window has focus, all
 /// of them render active.
@@ -715,6 +736,8 @@ pub fn run() {
             set_concurrency,
             get_play_mode,
             set_play_mode,
+            get_glow,
+            set_glow,
             add_local_folder,
             list_roots,
             remove_from_library,
