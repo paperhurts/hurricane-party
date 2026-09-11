@@ -462,56 +462,16 @@
       <Oscilloscope {analyser} {palette} active={playing} />
     {/if}
   </div>
-
-  <!-- crossorigin is load-bearing. The file comes from the asset protocol,
-       which is another origin, and a media element inside a Web Audio graph
-       outputs SILENCE for a cross-origin resource fetched without CORS: the
-       element plays, the clock runs, and nothing reaches the speakers or
-       the analyser. Tauri's asset handler answers with Access-Control-Allow-
-       Origin for the app's origin, so anonymous mode is enough.
-
-       It lives in the visualizer's slot because it is hidden and the skin
-       owns every other box in this window. -->
-  <!-- svelte-ignore a11y_media_has_caption -->
-  <audio
-    bind:this={audio}
-    crossorigin="anonymous"
-    hidden
-    onplay={() => {
-      playing = true;
-      // One transport (D69), on the element's own event so it holds for
-      // every way of starting: this window's button, the pipe, a key. The
-      // library's row click already did this; this window's play did not,
-      // and a video kept running under a resumed track.
-      emitTo("video", "hp://pause").catch(() => {});
-      push();
-      tell();
-    }}
-    onpause={() => {
-      playing = false;
-      // Pause, stop, ended, unload: every way of going quiet ends here, so
-      // this is where the graph is told to let go of the device (#88).
-      graph?.idle();
-      push();
-      tell();
-    }}
-    onended={() => step(1)}
-    ontimeupdate={() => {
-      pos = audio.currentTime;
-      push();
-    }}
-    ondurationchange={() => {
-      if (Number.isFinite(audio.duration)) dur = audio.duration;
-    }}
-    onerror={onError}
-  ></audio>
 {/snippet}
 
 <!-- A file that will not open takes the title strip, and the way out rides on
      the message itself (#78). The skin drew the strip; this is what goes in
      it while there is something wrong, in place of the track's name. -->
 {#snippet strip()}
-  <span class="errline">{error}</span>
+  <!-- The whole message on hover: the strip is one line and most errors are
+       longer than it. The CSS strip always offered this; it came back with
+       the error's move into the skin's slot. -->
+  <span class="errline" title={error}>{error}</span>
   {#if missing && track}
     <button class="act" onpointerdown={eat} onclick={removeMissing} title="Remove from the library">
       remove
@@ -528,6 +488,52 @@
   onaction={action}
   onslide={slide}
 />
+
+<!-- crossorigin is load-bearing. The file comes from the asset protocol,
+     which is another origin, and a media element inside a Web Audio graph
+     outputs SILENCE for a cross-origin resource fetched without CORS: the
+     element plays, the clock runs, and nothing reaches the speakers or
+     the analyser. Tauri's asset handler answers with Access-Control-Allow-
+     Origin for the app's origin, so anonymous mode is enough.
+
+     It lives here, outside every skin element, because it must outlive
+     all of them. It once sat in the visualizer's slot, and the shade
+     layout has no visualizer: shading Main destroyed the element
+     mid-song, and every button after that talked to nothing. Hidden,
+     so it takes no space; the skin still owns every box on screen. -->
+<!-- svelte-ignore a11y_media_has_caption -->
+<audio
+  bind:this={audio}
+  crossorigin="anonymous"
+  hidden
+  onplay={() => {
+    playing = true;
+    // One transport (D69), on the element's own event so it holds for
+    // every way of starting: this window's button, the pipe, a key. The
+    // library's row click already did this; this window's play did not,
+    // and a video kept running under a resumed track.
+    emitTo("video", "hp://pause").catch(() => {});
+    push();
+    tell();
+  }}
+  onpause={() => {
+    playing = false;
+    // Pause, stop, ended, unload: every way of going quiet ends here, so
+    // this is where the graph is told to let go of the device (#88).
+    graph?.idle();
+    push();
+    tell();
+  }}
+  onended={() => step(1)}
+  ontimeupdate={() => {
+    pos = audio.currentTime;
+    push();
+  }}
+  ondurationchange={() => {
+    if (Number.isFinite(audio.duration)) dur = audio.duration;
+  }}
+  onerror={onError}
+></audio>
 
 <style>
   /* The analyser's box. The skin positions it; what is inside is the app's,
@@ -564,6 +570,9 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     color: var(--ember);
+    /* The text box lets the pointer through to the title bar; this one line
+       takes it back, or the tooltip never shows. */
+    pointer-events: auto;
   }
   /* The action on the message: a word in the strip's own type, boxed so it
      reads as a control, ember like the state it belongs to. The message
@@ -586,5 +595,27 @@
   .act:hover {
     background: color-mix(in srgb, var(--ember) 18%, transparent);
     border-color: var(--ember);
+  }
+
+  /* The windowshade strip's scrolling title. The strip's contents are still
+     this window's own markup (the shade snippet above), so its marquee is
+     this window's CSS: it went missing when the interior's styles moved to
+     the skin, and the strip sat still behind an ellipsis. */
+  .scroll {
+    display: inline-block;
+    animation: marquee linear infinite;
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scroll {
+      animation: none;
+    }
   }
 </style>

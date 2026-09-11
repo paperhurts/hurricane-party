@@ -117,18 +117,38 @@
   // reset-then-measure is what keeps it honest when the text gets shorter.
   let textBox = $state<HTMLElement | undefined>(undefined);
   let roll = $state(false);
+  // The text last measured. Plain, not $state, and that is the fix: this
+  // effect re-runs whenever the window's bindings change, which is every
+  // clock tick while a track plays, and resetting `roll` on each of those
+  // restarted the animation four times a second — a title that jinked a
+  // pixel back and forth and only scrolled once the clock stopped. Now a
+  // re-run with the same text leaves a running marquee alone.
+  let measured: string | null = null;
+  // The one measurement in flight. Also plain: it is cancelled only when the
+  // text changes, never by a re-run. Unshading rebuilds this element while
+  // several bindings land in the same instant, and when each re-run cancelled
+  // the last one's frame, the re-run that followed saw the text already
+  // "measured" and scheduled nothing, so the title sat behind an ellipsis.
+  let pending = 0;
   $effect(() => {
     const text = shown;
-    if (el.type !== "text" || el.overflow !== "scroll") return;
-    roll = false;
+    // Read before any early return, so a `bind:this` that lands after the
+    // first run is a dependency and brings this back to measure.
     const host = textBox;
-    if (!host || text === "") return;
-    const id = requestAnimationFrame(() => {
+    if (el.type !== "text" || el.overflow !== "scroll" || !host) return;
+    if (text === measured) return;
+    measured = text;
+    roll = false;
+    cancelAnimationFrame(pending);
+    if (text === "") return;
+    pending = requestAnimationFrame(() => {
+      pending = 0;
       const span = host.querySelector(".t");
       if (span) roll = span.scrollWidth > host.clientWidth + 1;
     });
-    return () => cancelAnimationFrame(id);
   });
+  // …and the frame dies with the element, and only then.
+  $effect(() => () => cancelAnimationFrame(pending));
 
   // ---- slider ----
 
@@ -230,7 +250,9 @@
     {#if slot}
       {@render slot()}
     {:else if roll}
-      <span class="t rolling" style="animation-duration:{Math.max(6, shown.length * 0.35)}s">
+      <!-- Not `.t`: that class clips and ellipsizes, which is right for a
+           title that fits and wrong for one that moves. -->
+      <span class="rolling" style="animation-duration:{Math.max(6, shown.length * 0.35)}s">
         {shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
       </span>
     {:else}
