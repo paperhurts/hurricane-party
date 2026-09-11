@@ -27,6 +27,9 @@ export type LoadedSkin = {
   dpr: number;
   /** The sprite at a reference. Memoised by sheet and rect. */
   slice(ref: SpriteRef): Slice;
+  /** A sheet's size in logical pixels. A bitmap font needs it: its glyphs are
+   * a grid, and how many fit across is the sheet's own width (D104). */
+  sheetSize(name: string): { w: number; h: number };
 };
 
 type Sheet = { canvas: HTMLCanvasElement; scale: Scale };
@@ -94,6 +97,11 @@ export async function loadSkin(
       const out: Slice = { url: c.toDataURL("image/png"), w, h, scale: s, tint: ref.tint };
       cache.set(key, out);
       return out;
+    },
+    sheetSize(name) {
+      const sheet = sheets.get(name);
+      if (!sheet) return { w: 0, h: 0 };
+      return { w: sheet.canvas.width / sheet.scale, h: sheet.canvas.height / sheet.scale };
     },
   };
 }

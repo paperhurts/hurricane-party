@@ -245,6 +245,24 @@ body {
     animation: none;
   }
 }
+/* Bitmap text (D104): a row of glyph sprites, each cut from the skin's sheet.
+ * `gap` is the font's tracking; a character with no glyph keeps its box and
+ * draws nothing. The row never shrinks, so a long line runs past its box and
+ * the marquee above carries it. */
+.sp-text .sp-run {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.sp-text .rolling .sp-run,
+.sp-text .sp-gap {
+  flex: none;
+}
+.sp-glyph {
+  flex: none;
+  display: block;
+}
+
 .sp-text .t {
   flex: 1 1 auto;
   min-width: 0;

@@ -88,11 +88,27 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     expect(els.eject).toMatchObject({ rect: [136, 89, 22, 16], action: "eject" });
     expect(els.seek).toMatchObject({ rect: [16, 72, 248, 10], bind: "position" });
     expect(els.vis).toMatchObject({ rect: [24, 43, 76, 16] });
-    expect(els.clock).toMatchObject({ rect: [36, 26, 63, 13], font: "time", bind: "elapsed" });
+    // Four digits with the colon painted into the window between them, so
+    // the clock is two elements, each two glyphs 3 apart (D104).
+    expect(els.clockMinutes).toMatchObject({ rect: [48, 26, 21, 13], font: "time", bind: "elapsedMinutes" });
+    expect(els.clockSeconds).toMatchObject({ rect: [78, 26, 21, 13], font: "time", bind: "elapsedSeconds" });
     // The two the play order drives, which the classic had and this app
     // gained at v0.4b (D97).
     expect(els.shuffleButton).toMatchObject({ action: "shuffle", bind: "shuffle", when: "on" });
     expect(els.repeatButton).toMatchObject({ action: "repeat", bind: "repeatOn", when: "on" });
+  });
+
+  it("declares its fonts as glyph grids, the clock's digits 3 apart", () => {
+    const { skin } = parseSkin(make().manifest);
+    expect(skin.fonts.time).toMatchObject({ type: "bitmap", sheet: "numbers", glyphSize: [9, 13], tracking: 3 });
+    expect(skin.fonts.chrome).toMatchObject({ type: "bitmap", sheet: "text", glyphSize: [5, 6], tracking: 0 });
+    const chrome = skin.fonts.chrome;
+    if (chrome.type !== "bitmap") throw new Error("chrome font is not a bitmap font");
+    // Three rows of 31, the classic sheet's own grid: letters, then digits
+    // and punctuation, then the three Nordic vowels and two marks.
+    expect(chrome.map).toHaveLength(93);
+    expect(chrome.map.slice(0, 26)).toBe("abcdefghijklmnopqrstuvwxyz");
+    expect(chrome.map.slice(31, 41)).toBe("0123456789");
   });
 
   it("hides the state lamps it is not showing behind the window's own pixels", () => {
