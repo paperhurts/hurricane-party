@@ -233,7 +233,7 @@ Three verbs, in `library.rs`, kept apart on purpose (D83, #78):
 - **Delete the file**: a separate call, made after the row is gone, from the notice that
   has already printed the path, behind a warning dialog. Rust refuses any path outside a
   library root. The only destructive action in the app.
-- **Prune** a root: a rescan of a known root counts the rows whose files are gone and the
+- **Prune** a root: a rescan of a known root (a click on the root in the library's sidebar, or Add folder on the same folder; D95) counts the rows whose files are gone and the
   user is offered to drop them. Nothing drops them unasked, and a root that is not
   mounted reports nothing (D28: unplugged is not missing).
 
