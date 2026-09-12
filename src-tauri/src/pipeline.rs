@@ -425,6 +425,9 @@ pub struct CookieExport {
     /// owner read three browsers in turn and the app never said "that one" —
     /// which it can, since it already knows what the stores are.
     pub elsewhere: Vec<String>,
+    /// This read had no sign-in and the jar already in use did, so the jar in
+    /// use stayed (D115). `path` is that jar either way.
+    pub kept: bool,
 }
 
 /// Read a browser's cookie store with yt-dlp and write the jar into the app's
@@ -453,7 +456,14 @@ pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport>
         .map_err(|e| PipelineError::Io(format!("no app data dir: {e}")))?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| PipelineError::Io(format!("couldn't create {}: {e}", dir.display())))?;
-    let out = dir.join("cookies.txt");
+    // The live jar, and a scratch file the export writes first (D115). The
+    // owner read a signed-in Firefox profile, then a signed-out Chrome one,
+    // and the second read overwrote the first: every age gate failed again
+    // with a working session one click behind it. So a read lands beside the
+    // jar and replaces it only when that loses nothing.
+    let live = dir.join("cookies.txt");
+    let out = dir.join("cookies.reading.txt");
+    let _ = std::fs::remove_file(&out);
 
     let args: Vec<String> = vec![
         "--cookies-from-browser".into(),
@@ -491,10 +501,13 @@ pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport>
         return Err(PipelineError::Io(explain_export(browser, &tail.text())));
     }
     let youtube = jar_has_youtube_session(&out);
+    let kept = settle_read(&out, &live)
+        .map_err(|e| PipelineError::Io(format!("couldn't keep the cookies it read: {e}")))?;
     Ok(CookieExport {
-        path: out.to_string_lossy().into_owned(),
+        path: live.to_string_lossy().into_owned(),
         count,
         youtube,
+        kept,
         // Only when there is bad news to explain: see `stores_with_session`.
         elsewhere: if youtube {
             Vec::new()
@@ -505,6 +518,22 @@ pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport>
                 .collect()
         },
     })
+}
+
+/// Put a fresh read where yt-dlp will use it, unless that loses a sign-in
+/// (D115). Returns whether the jar already in use was kept instead.
+///
+/// The one case that keeps the old jar: it has a YouTube session and the read
+/// does not. A store with no session is still worth hearing about — the notice
+/// says so — but it is not a reason to throw away one that works.
+fn settle_read(read: &Path, live: &Path) -> std::io::Result<bool> {
+    let keep = !jar_has_youtube_session(read) && live.is_file() && jar_has_youtube_session(live);
+    if keep {
+        let _ = std::fs::remove_file(read);
+    } else {
+        std::fs::rename(read, live)?;
+    }
+    Ok(keep)
 }
 
 /// Cookies in a Netscape jar: every line that is not blank and not a comment.
@@ -564,6 +593,9 @@ fn explain_export(browser: &str, tail: &str) -> String {
 /// browser, when they have pointed the app at one (D112). Unset, which is the
 /// default, means yt-dlp runs with no authentication at all.
 pub const COOKIES_SETTING: &str = "ytdlp.cookies";
+
+/// The store a read jar came from, for saying which one was kept (D115).
+pub const COOKIES_FROM_SETTING: &str = "ytdlp.cookies.from";
 
 /// That file, if it is set and still there.
 ///
@@ -1919,6 +1951,52 @@ mod tests {
             })
             .count();
         assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_read_without_a_sign_in_never_replaces_one_with() {
+        let dir = std::env::temp_dir().join(format!("hp-settle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let live = dir.join("cookies.txt");
+        let read = dir.join("cookies.reading.txt");
+        let jar = |name: &str| {
+            format!(
+                ".youtube.com	TRUE	/	TRUE	0	{name}	x
+"
+            )
+        };
+
+        // What happened to the owner: Firefox signed in, then a Chrome profile
+        // signed out. The second read must not cost them the first.
+        std::fs::write(&live, jar("SID")).unwrap();
+        std::fs::write(&read, jar("VISITOR_INFO1_LIVE")).unwrap();
+        assert!(settle_read(&read, &live).unwrap(), "kept the signed-in jar");
+        assert!(jar_has_youtube_session(&live));
+        assert!(
+            !read.exists(),
+            "the signed-out read is not left lying about"
+        );
+
+        // A signed-in read always replaces, even a jar that was also signed in:
+        // newer is better when both work.
+        std::fs::write(&read, jar("__Secure-1PSID")).unwrap();
+        assert!(!settle_read(&read, &live).unwrap());
+        assert!(std::fs::read_to_string(&live)
+            .unwrap()
+            .contains("__Secure-1PSID"));
+
+        // Nothing signed in to lose: a signed-out read replaces a signed-out jar,
+        // and fills an empty place.
+        std::fs::write(&live, jar("PREF")).unwrap();
+        std::fs::write(&read, jar("YSC")).unwrap();
+        assert!(!settle_read(&read, &live).unwrap());
+        assert!(std::fs::read_to_string(&live).unwrap().contains("YSC"));
+        std::fs::remove_file(&live).unwrap();
+        std::fs::write(&read, jar("YSC")).unwrap();
+        assert!(!settle_read(&read, &live).unwrap());
+        assert!(live.exists());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

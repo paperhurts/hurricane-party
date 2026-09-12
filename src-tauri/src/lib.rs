@@ -520,6 +520,15 @@ fn wm_visible(app: AppHandle, label: String) -> bool {
         .unwrap_or(false)
 }
 
+/// Which store the jar in use was read from, or "" when it was picked as a
+/// file or never read (D115).
+#[tauri::command]
+fn get_cookies_from(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::get_setting(&conn, pipeline::COOKIES_FROM_SETTING).unwrap_or_default()
+}
+
 /// The `cookies.txt` this app hands yt-dlp, or "" when there is none (D112).
 #[tauri::command]
 fn get_cookies_file(app: AppHandle) -> String {
@@ -574,13 +583,25 @@ async fn export_cookies_from_browser(
     app: AppHandle,
     browser: String,
 ) -> Result<pipeline::CookieExport, String> {
-    let made = pipeline::export_cookies(&app, browser.trim())
+    let spec = browser.trim();
+    let made = pipeline::export_cookies(&app, spec)
         .await
         .map_err(|e| e.to_string())?;
     {
         let state = app.state::<Db>();
         let conn = state.0.lock().unwrap();
         db::set_setting(&conn, pipeline::COOKIES_SETTING, &made.path).map_err(|e| e.to_string())?;
+        // Which store the jar in use came from, so a read that is not kept
+        // can say what was kept instead. Unchanged when this one was not.
+        if !made.kept {
+            let label = pipeline::cookie_sources()
+                .into_iter()
+                .find(|s| s.spec == spec)
+                .map(|s| s.label)
+                .unwrap_or_else(|| spec.to_string());
+            db::set_setting(&conn, pipeline::COOKIES_FROM_SETTING, &label)
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(made)
 }
@@ -1033,6 +1054,7 @@ pub fn run() {
             cookie_browsers,
             export_cookies_from_browser,
             get_cookies_file,
+            get_cookies_from,
             set_cookies_file,
             show_library,
             wm_hello,
