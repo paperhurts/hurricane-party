@@ -453,6 +453,69 @@ fn wm_visible(app: AppHandle, label: String) -> bool {
         .unwrap_or(false)
 }
 
+/// The `cookies.txt` this app hands yt-dlp, or "" when there is none (D112).
+#[tauri::command]
+fn get_cookies_file(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::get_setting(&conn, pipeline::COOKIES_SETTING).unwrap_or_default()
+}
+
+/// Point the app at one, or clear it with an empty string.
+///
+/// The file is a person's own session, exported from their own browser, and it
+/// stays exactly where they put it: this stores the path and nothing else,
+/// never the contents, never a copy in the library, never in a log (D112). It
+/// must exist when it is set, so a typo fails at the button rather than three
+/// minutes later inside a download.
+#[tauri::command]
+fn set_cookies_file(app: AppHandle, path: String) -> Result<String, String> {
+    let p = path.trim();
+    if !p.is_empty() {
+        let pb = std::path::PathBuf::from(p);
+        if !pb.is_absolute() {
+            return Err("that path is not absolute".into());
+        }
+        if !pb.is_file() {
+            return Err("there is no file there".into());
+        }
+    }
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::set_setting(&conn, pipeline::COOKIES_SETTING, p).map_err(|e| e.to_string())?;
+    Ok(p.to_string())
+}
+
+/// The browsers a cookie export can read (D113). One list, in Rust, so the
+/// picker cannot offer something the allowlist would then refuse.
+#[tauri::command]
+fn cookie_browsers() -> Vec<&'static str> {
+    pipeline::BROWSERS.to_vec()
+}
+
+/// Read a browser's cookies with yt-dlp, keep the jar in the app's own folder
+/// and use it from now on (D113).
+///
+/// This is the one place the app holds a credential rather than a path to
+/// one: the person asked for it with a click, the file is theirs, it sits in
+/// their own per-user app data, and the app only ever reports how many
+/// cookies are in it.
+#[tauri::command]
+async fn export_cookies_from_browser(
+    app: AppHandle,
+    browser: String,
+) -> Result<pipeline::CookieExport, String> {
+    let made = pipeline::export_cookies(&app, browser.trim())
+        .await
+        .map_err(|e| e.to_string())?;
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_setting(&conn, pipeline::COOKIES_SETTING, &made.path).map_err(|e| e.to_string())?;
+    }
+    Ok(made)
+}
+
 /// The playlist window's ADD button: the library is where tracks come from.
 /// A library hidden to the tray (#87) comes back the same way.
 #[tauri::command]
@@ -896,6 +959,10 @@ pub fn run() {
             wm_close,
             wm_toggle_visible,
             wm_visible,
+            cookie_browsers,
+            export_cookies_from_browser,
+            get_cookies_file,
+            set_cookies_file,
             show_library,
             wm_hello,
             wm_toggle_shade,
