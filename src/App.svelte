@@ -947,130 +947,130 @@
   main { margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
   header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   h1 { margin: 0; font-size: 19px; font-weight: 400; letter-spacing: 2px; text-transform: uppercase;
-       color: var(--arc); text-shadow: 0 0 10px color-mix(in srgb, var(--arc) 45%, transparent); }
+       color: var(--accent); text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); }
   h2 { margin: 0 0 6px; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
-       color: color-mix(in srgb, var(--filament) 45%, transparent); font-weight: 400; }
-  .ver { font-size: 12px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
+       color: color-mix(in srgb, var(--text) 45%, transparent); font-weight: 400; }
+  .ver { font-size: 12px; color: color-mix(in srgb, var(--text) 45%, transparent); }
   .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
-         color: color-mix(in srgb, var(--filament) 55%, transparent); white-space: nowrap; }
-  .notice { margin: 0; font-size: 12px; color: var(--arc); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+         color: color-mix(in srgb, var(--text) 55%, transparent); white-space: nowrap; }
+  .notice { margin: 0; font-size: 12px; color: var(--accent); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .notice span, .error span { overflow-wrap: anywhere; }
   .error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   /* The one destructive control reads as one: ember, not arc. */
-  .mini.danger { color: var(--ember); border-color: color-mix(in srgb, var(--ember) 50%, transparent); }
-  .mini.danger:hover { background: color-mix(in srgb, var(--ember) 14%, transparent); border-color: var(--ember); }
+  .mini.danger { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+  .mini.danger:hover { background: color-mix(in srgb, var(--warn) 14%, transparent); border-color: var(--warn); }
   .roots { display: flex; flex-direction: column; gap: 2px; margin-top: 10px;
-           padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--arc) 12%, transparent); }
+           padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--accent) 12%, transparent); }
   .rootlabel { font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
-               color: color-mix(in srgb, var(--filament) 30%, transparent); }
+               color: color-mix(in srgb, var(--text) 30%, transparent); }
   .root { font-size: 11px; padding: 2px 8px; display: flex; justify-content: space-between;
-          color: color-mix(in srgb, var(--filament) 70%, transparent); }
-  .root:hover:not(:disabled) { color: var(--arc); }
-  .root.gone { color: var(--ember); text-decoration: line-through; }
+          color: color-mix(in srgb, var(--text) 70%, transparent); }
+  .root:hover:not(:disabled) { color: var(--accent); }
+  .root.gone { color: var(--warn); text-decoration: line-through; }
   /* Not offered, but still read at full strength: the global disabled dim
      would wash an unplugged drive's strike-through out to nearly nothing. */
   .root.gone:disabled { opacity: 1; }
-  .conc { margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
+  .conc { margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--text) 45%, transparent); }
   .glow { font-size: 11px; display: flex; align-items: center; gap: 4px;
-          color: color-mix(in srgb, var(--filament) 45%, transparent); }
+          color: color-mix(in srgb, var(--text) 45%, transparent); }
   /* The skin picker sits with the other settings, not at the far right. */
   .skinpick { margin-left: 0; }
-  select { font: inherit; font-size: 11px; background: var(--well); color: var(--filament);
-           border: 1px solid color-mix(in srgb, var(--arc) 30%, transparent); padding: 2px 4px; }
+  select { font: inherit; font-size: 11px; background: var(--surface); color: var(--text);
+           border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); padding: 2px 4px; }
 
   form { display: flex; gap: 8px; }
   form input { flex: 1 1 auto; min-width: 0; }
 
   .queue { display: flex; flex-direction: column; gap: 8px; }
-  .job { display: flex; flex-direction: column; gap: 4px; padding: 7px 9px; background: var(--well);
-         border: 1px solid color-mix(in srgb, var(--arc) 16%, transparent); }
-  .job.failed { border-color: color-mix(in srgb, var(--ember) 45%, transparent); }
+  .job { display: flex; flex-direction: column; gap: 4px; padding: 7px 9px; background: var(--surface);
+         border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent); }
+  .job.failed { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
   .line { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
   .status { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
-  .status.running { color: var(--arc); }
-  .status.queued  { color: color-mix(in srgb, var(--filament) 45%, transparent); }
-  .status.failed  { color: var(--ember); }
-  .status.done    { color: var(--strike); }
-  .status.paused  { color: color-mix(in srgb, var(--filament) 35%, transparent); }
+  .status.running { color: var(--accent); }
+  .status.queued  { color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .status.failed  { color: var(--warn); }
+  .status.done    { color: var(--alert); }
+  .status.paused  { color: color-mix(in srgb, var(--text) 35%, transparent); }
   .stage { font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
-           color: color-mix(in srgb, var(--filament) 35%, transparent); }
+           color: color-mix(in srgb, var(--text) 35%, transparent); }
   .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bytes { font-size: 11px; color: color-mix(in srgb, var(--filament) 50%, transparent); }
-  .joberr { margin: 0; font-size: 11px; color: var(--ember); white-space: pre-wrap; }
+  .bytes { font-size: 11px; color: color-mix(in srgb, var(--text) 50%, transparent); }
+  .joberr { margin: 0; font-size: 11px; color: var(--warn); white-space: pre-wrap; }
 
-  .bar { height: 2px; background: color-mix(in srgb, var(--void) 80%, black); overflow: hidden; }
-  .fill { height: 100%; background: var(--arc); box-shadow: 0 0 6px var(--arc); transition: width 200ms linear; }
+  .bar { height: 2px; background: color-mix(in srgb, var(--ground) 80%, black); overflow: hidden; }
+  .fill { height: 100%; background: var(--accent); box-shadow: 0 0 6px var(--accent); transition: width 200ms linear; }
   .fill.indeterminate { animation: pulse 1.1s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: .25 } 50% { opacity: .9 } }
   @media (prefers-reduced-motion: reduce) { .fill.indeterminate { animation: none; opacity: .6 } }
 
-  .error { margin: 0; padding: 9px 11px; font-size: 13px; color: var(--ember);
-           border: 1px solid color-mix(in srgb, var(--ember) 45%, transparent);
-           background: color-mix(in srgb, var(--ember) 8%, transparent); white-space: pre-wrap; }
+  .error { margin: 0; padding: 9px 11px; font-size: 13px; color: var(--warn);
+           border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+           background: color-mix(in srgb, var(--warn) 8%, transparent); white-space: pre-wrap; }
 
   /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), and the track
      rows' nowrap titles make the list's minimum width the longest title, so the
      column grew past the window and the page scrolled sideways (#48). */
   .body { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; align-items: start; }
   nav { display: flex; flex-direction: column; gap: 3px; }
-  nav button { text-align: left; border-color: transparent; color: var(--filament);
+  nav button { text-align: left; border-color: transparent; color: var(--text);
                padding: 5px 8px; font-size: 12px; display: flex; justify-content: space-between; gap: 6px; }
-  nav button.sel { border-color: var(--arc); color: var(--arc); }
-  nav button.new { color: color-mix(in srgb, var(--filament) 45%, transparent); font-size: 11px; margin-top: 4px; }
-  .n { font-size: 10px; color: color-mix(in srgb, var(--filament) 35%, transparent); }
+  nav button.sel { border-color: var(--accent); color: var(--accent); }
+  nav button.new { color: color-mix(in srgb, var(--text) 45%, transparent); font-size: 11px; margin-top: 4px; }
+  .n { font-size: 10px; color: color-mix(in srgb, var(--text) 35%, transparent); }
 
-  .tracks { list-style: none; margin: 0; padding: 0; background: var(--well);
-            border: 1px solid color-mix(in srgb, var(--arc) 20%, transparent); }
+  .tracks { list-style: none; margin: 0; padding: 0; background: var(--surface);
+            border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .tracks li { display: flex; align-items: center; gap: 8px; padding: 6px 9px;
-               border-bottom: 1px solid color-mix(in srgb, var(--arc) 9%, transparent); }
+               border-bottom: 1px solid color-mix(in srgb, var(--accent) 9%, transparent); }
   .tracks li:last-child { border-bottom: none; }
-  .tracks li.current .title { color: var(--strike); text-shadow: 0 0 8px color-mix(in srgb, var(--strike) 45%, transparent); }
-  .tracks li.empty { color: color-mix(in srgb, var(--filament) 45%, transparent); font-size: 13px; }
+  .tracks li.current .title { color: var(--alert); text-shadow: 0 0 8px color-mix(in srgb, var(--alert) 45%, transparent); }
+  .tracks li.empty { color: color-mix(in srgb, var(--text) 45%, transparent); font-size: 13px; }
   /* The surfer's home. The image sits on the well; the words beside it. */
   .tracks li.hangten { gap: 22px; padding: 28px 24px; align-items: center; }
   .tracks li.hangten img { flex: 0 0 auto; width: 220px; height: 220px;
-                           filter: drop-shadow(0 0 18px color-mix(in srgb, var(--arc) 22%, transparent)); }
+                           filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)); }
   .tracks li.hangten .say { display: flex; flex-direction: column; gap: 8px; max-width: 420px; line-height: 1.5; }
-  .tracks li.hangten .big { font-size: 17px; color: var(--filament); }
+  .tracks li.hangten .big { font-size: 17px; color: var(--text); }
   .play { padding: 1px 7px; font-size: 10px; }
-  .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--arc) 30%, transparent); }
-  .mini.ghost { border-color: transparent; color: color-mix(in srgb, var(--filament) 55%, transparent); }
+  .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .mini.ghost { border-color: transparent; color: color-mix(in srgb, var(--text) 55%, transparent); }
   /* The right column: the selection bar, when there is one, sits on the list. */
   .listcol { display: flex; flex-direction: column; min-width: 0; }
   .selbar { display: flex; align-items: center; gap: 10px; padding: 5px 9px; font-size: 12px;
-            color: var(--arc); background: color-mix(in srgb, var(--arc) 10%, var(--well));
-            border: 1px solid color-mix(in srgb, var(--arc) 45%, transparent); border-bottom: none; }
+            color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+            border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-bottom: none; }
   .selbar .count { flex: 1 1 auto; }
-  .tick { flex: 0 0 auto; width: 13px; height: 13px; margin: 0; accent-color: var(--arc); cursor: pointer; }
+  .tick { flex: 0 0 auto; width: 13px; height: 13px; margin: 0; accent-color: var(--accent); cursor: pointer; }
   /* Drag-to-reorder: the grip, the lifted row, and the insertion line. */
   .grip { flex: 0 0 auto; padding: 0 2px; font-size: 12px; letter-spacing: -3px; line-height: 1;
-          color: color-mix(in srgb, var(--filament) 30%, transparent); cursor: grab; user-select: none; touch-action: none; }
-  .grip:hover { color: var(--arc); }
+          color: color-mix(in srgb, var(--text) 30%, transparent); cursor: grab; user-select: none; touch-action: none; }
+  .grip:hover { color: var(--accent); }
   .tracks li.lifted { opacity: 0.4; }
   .tracks li.lifted .grip { cursor: grabbing; }
-  .tracks li.drop-before { box-shadow: inset 0 2px 0 var(--arc); }
-  .tracks li.drop-after { box-shadow: inset 0 -2px 0 var(--arc); }
+  .tracks li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+  .tracks li.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 
   /* "+" opens a menu of playlists, anchored to the row. */
   .addwrap { position: relative; flex: 0 0 auto; }
   .add { width: 22px; height: 22px; padding: 0; display: grid; place-items: center;
-         font-size: 16px; line-height: 1; color: var(--arc);
-         border: 1px solid color-mix(in srgb, var(--arc) 35%, transparent); background: transparent; }
-  .add:hover, .add.open { background: color-mix(in srgb, var(--arc) 14%, transparent); border-color: var(--arc);
-                          box-shadow: 0 0 8px color-mix(in srgb, var(--arc) 35%, transparent); }
+         font-size: 16px; line-height: 1; color: var(--accent);
+         border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: transparent; }
+  .add:hover, .add.open { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: var(--accent);
+                          box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 35%, transparent); }
   .menu { position: absolute; right: 0; top: 26px; z-index: 5; min-width: 160px; padding: 4px 0;
-          display: flex; flex-direction: column; background: var(--void); border: 1px solid var(--arc);
-          box-shadow: 0 0 0 1px color-mix(in srgb, var(--arc) 40%, transparent), 0 0 12px color-mix(in srgb, var(--arc) 25%, transparent); }
-  .menu button { text-align: left; border: 0; color: var(--filament); padding: 6px 10px; font-size: 12px;
+          display: flex; flex-direction: column; background: var(--ground); border: 1px solid var(--accent);
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .menu button { text-align: left; border: 0; color: var(--text); padding: 6px 10px; font-size: 12px;
                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .menu button:hover { background: color-mix(in srgb, var(--arc) 14%, transparent); color: var(--arc); }
-  .menu .new { color: color-mix(in srgb, var(--filament) 55%, transparent); margin-top: 2px;
-               border-top: 1px solid color-mix(in srgb, var(--arc) 15%, transparent); }
-  .menu .none { padding: 6px 10px; font-size: 11px; color: color-mix(in srgb, var(--filament) 40%, transparent); }
+  .menu button:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .menu .new { color: color-mix(in srgb, var(--text) 55%, transparent); margin-top: 2px;
+               border-top: 1px solid color-mix(in srgb, var(--accent) 15%, transparent); }
+  .menu .none { padding: 6px 10px; font-size: 11px; color: color-mix(in srgb, var(--text) 40%, transparent); }
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .meta { font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); flex: 0 0 auto; }
+  .meta { font-size: 11px; color: color-mix(in srgb, var(--text) 45%, transparent); flex: 0 0 auto; }
 
   footer { display: flex; gap: 8px; align-items: baseline; font-size: 11px;
-           color: color-mix(in srgb, var(--filament) 35%, transparent); }
+           color: color-mix(in srgb, var(--text) 35%, transparent); }
   footer code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

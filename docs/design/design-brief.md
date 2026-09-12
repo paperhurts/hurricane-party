@@ -51,12 +51,12 @@ Design for a dark room, at 2am, with the power out.
 
 | Token | Hex | Role |
 |---|---|---|
-| `--void` | `#0C0A14` | Window fill. Near-black with a violet cast |
-| `--well` | `#05040A` | Insets — playlist background, seek trough, EQ bed |
-| `--filament` | `#E8F4FF` | Bright text. Cold near-white, reads as emission not paint |
-| `--arc` | `#6FE3FF` | Primary glow. Outlines, borders, active edges |
-| `--strike` | `#FF4FD8` | Now-playing, current row, peak indicator |
-| `--ember` | `#FFB347` | Warnings, storage pressure, failed state |
+| `--ground` | `#0C0A14` | Window fill. Near-black with a violet cast |
+| `--surface` | `#05040A` | Insets — playlist background, seek trough, EQ bed |
+| `--text` | `#E8F4FF` | Bright text. Cold near-white, reads as emission not paint |
+| `--accent` | `#6FE3FF` | Primary glow. Outlines, borders, active edges |
+| `--alert` | `#FF4FD8` | Now-playing, current row, peak indicator |
+| `--warn` | `#FFB347` | Warnings, storage pressure, failed state |
 
 Cyan and magenta together are the CRT phosphor pair — the historical source of "glowing outline on black."
 
@@ -79,7 +79,7 @@ A **crisp 1px stroke at full brightness with a soft halo underneath.** Glow read
 
 These windows magnetize to each other. Unlike Winamp, a shared edge between two bonded windows behaves like an Excel column divider: **drag it to resize both neighbors, double-click it to break the bond.**
 
-Make that visible. **When two windows are bonded, the shared edge lights up** — a hairline `--arc` seam brighter than any other edge in the interface. You can see at a glance which windows are joined.
+Make that visible. **When two windows are bonded, the shared edge lights up** — a hairline `--accent` seam brighter than any other edge in the interface. You can see at a glance which windows are joined.
 
 Four states to draw:
 1. **Idle** — bonded, hairline seam
@@ -100,7 +100,7 @@ Preamp plus 10 bands, preset dropdown, on/off and auto toggles.
 Band labels are the classic ten in Hz: 60, 170, 310, 600, 1k, 3k, 6k, 12k, 14k, 16k. Range is ±12 dB per band. Draw at least three states: flat, a preset applied with visible curve, and the clip indicator lit. The `auto` toggle means "load this track's saved preset on play" — make it read as a per-track binding, not a global on/off.
 
 ### Playlist (275 × 116 default, resizable)
-Track rows with index, title, duration. Current track in `--strike`. Selection state. Scrollbar. Bottom strip with total duration and add/remove controls.
+Track rows with index, title, duration. Current track in `--alert`. Selection state. Scrollbar. Bottom strip with total duration and add/remove controls.
 
 ### Windowshade states (275 × 14 each)
 All three collapsed. **The Main shade is the most important single screen in this brief** — it doubles as an always-on-top floating mini-player, and it's the state the owner will actually live in while working in another app. It needs the track title, transport, and a time readout in fourteen pixels of height.
@@ -160,7 +160,7 @@ The last one is the whole point of the app and the one that gets skipped. What d
 **Cone** puts a live weather radar loop behind the chrome, cached to disk so it keeps looping when the network dies. Three states:
 
 1. **Live** — recent frames, full saturation
-2. **Stale** — desaturated backdrop, age readout in `--ember`. `RADAR · 14:32 EDT · 4h 12m old · OFFLINE`
+2. **Stale** — desaturated backdrop, age readout in `--warn`. `RADAR · 14:32 EDT · 4h 12m old · OFFLINE`
 3. **No data** — never fetched. Falls back cleanly to plain Eyewall
 
 The stale state is the one that matters and the one that will get skipped. **Cached weather data must never look current** — someone glancing at this during a storm has to see instantly how old it is.

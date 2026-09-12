@@ -173,7 +173,7 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     expect(by("libraryButton")).toMatchObject({ anchor: "bottom-right", action: "library" });
     const add = by("addButton")!;
     if (add.type !== "button") throw new Error("addButton is not a button");
-    expect(add.sprite).toEqual({ sheet: "pledit", rect: [14, 80, 22, 18], tint: "filament" });
+    expect(add.sprite).toEqual({ sheet: "pledit", rect: [14, 80, 22, 18], tint: "text" });
 
     // Widened and heightened on the D30 grid, the corner pieces stay in their
     // corners and the rows take the slack.
@@ -188,10 +188,10 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     // D101: the theme paints what it can tint; a skin that brings its own
     // pixels brings the colours they sit beside.
     expect(skin.palette).toMatchObject({
-      void: SKIN_COLOURS.bg,
-      filament: SKIN_COLOURS.normal,
-      strike: SKIN_COLOURS.current,
-      arc: SKIN_COLOURS.selected,
+      ground: SKIN_COLOURS.bg,
+      text: SKIN_COLOURS.normal,
+      alert: SKIN_COLOURS.current,
+      accent: SKIN_COLOURS.selected,
     });
     expect(skin.viscolor).toHaveLength(24);
     expect(skin.viscolor[0]).toBe(hexOf(rampStep(0)));
@@ -204,7 +204,7 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     const { skin } = parseSkin(manifest);
     expect(warnings).toContain("no PLEDIT.TXT: the playlist's colours come from the theme");
     // Eyewall's own six, so the skin still loads and reads.
-    expect(skin.palette.filament).toBe(colorsFor("eyewall").filament);
+    expect(skin.palette.text).toBe(colorsFor("eyewall").text);
     expect(skin.viscolor).toHaveLength(24);
   });
 
@@ -319,8 +319,8 @@ describe("the two text files", () => {
 
   it("falls back for each colour the file leaves out", () => {
     const only = paletteFrom({ normal: SKIN_COLOURS.normal });
-    expect(only.filament).toBe(SKIN_COLOURS.normal);
-    expect(only.void).toBe(colorsFor("eyewall").void);
+    expect(only.text).toBe(SKIN_COLOURS.normal);
+    expect(only.ground).toBe(colorsFor("eyewall").ground);
   });
 
   it("reads a 24-colour ramp, comments and all", () => {
