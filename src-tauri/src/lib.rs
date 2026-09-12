@@ -118,9 +118,36 @@ fn retry_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
     jobs::retry(&app, id)
 }
 
+/// Stop a download and drop it from the queue (D117). Before this, the
+/// button that called `cancel_job` was labelled Pause and did neither.
 #[tauri::command]
 fn cancel_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
     jobs::cancel(&app, id)
+}
+
+/// Stop a download and keep its bytes for later (D117).
+#[tauri::command]
+fn pause_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    jobs::pause(&app, id)
+}
+
+/// Pick a paused download up where it stopped (D117).
+#[tauri::command]
+fn resume_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    jobs::resume(&app, id)
+}
+
+/// Pause, resume or cancel every unfinished download of one playlist import
+/// (D117). `action` is "pause", "resume" or "cancel"; returns how many changed.
+#[tauri::command]
+fn playlist_jobs(app: AppHandle, playlist_id: i64, action: String) -> Result<usize, String> {
+    let action = match action.as_str() {
+        "pause" => jobs::ListAction::Pause,
+        "resume" => jobs::ListAction::Resume,
+        "cancel" => jobs::ListAction::Cancel,
+        other => return Err(format!("no such action: {other}")),
+    };
+    jobs::apply_to_list(&app, playlist_id, action).map_err(|e| e.to_string())
 }
 
 // ---- library ----------------------------------------------------------------
@@ -948,6 +975,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(RunnerHandle::default())
+        .manage(jobs::Running::default())
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
         .manage(viz::VizHub::default())
@@ -1028,6 +1056,9 @@ pub fn run() {
             list_jobs,
             retry_job,
             cancel_job,
+            pause_job,
+            resume_job,
+            playlist_jobs,
             list_tracks,
             library_path,
             list_playlists,

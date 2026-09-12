@@ -35,4 +35,8 @@ impl WindowPlatform for StubPlatform {
     }
 
     fn restore_no_activate(&self, _w: NativeWindow) {}
+
+    // Elsewhere `CommandChild::kill`, which the caller always runs too, is
+    // what there is.
+    fn kill_tree(&self, _pid: u32) {}
 }
