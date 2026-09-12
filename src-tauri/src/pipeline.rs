@@ -20,7 +20,7 @@ use tauri_plugin_shell::ShellExt;
 pub enum PipelineError {
     #[error("{0}")]
     Sidecar(String),
-    #[error("yt-dlp failed ({code}). Last output: {tail}")]
+    #[error("{}", ytdlp_message(*.code, .tail))]
     YtDlp { code: i32, tail: String },
     #[error("ffmpeg failed ({code}). Last output: {tail}")]
     Ffmpeg { code: i32, tail: String },
@@ -32,6 +32,20 @@ pub enum PipelineError {
     BadUrl(String),
     #[error("{0}")]
     Io(String),
+}
+
+/// What a yt-dlp failure says to a person (D112). A failure we recognise leads
+/// with what to do about it and keeps yt-dlp's own words after, because the
+/// tail is what makes a bug report answerable.
+fn ytdlp_message(code: i32, tail: &str) -> String {
+    match explain(tail) {
+        Some(why) => format!(
+            "{why}
+
+yt-dlp ({code}) said: {tail}"
+        ),
+        None => format!("yt-dlp failed ({code}). Last output: {tail}"),
+    }
 }
 
 // Fully qualified: the `Result<T>` alias below shadows std's in this module.
@@ -158,18 +172,201 @@ fn bundled_ffmpeg() -> Option<PathBuf> {
     None
 }
 
-/// Args every yt-dlp invocation needs.
+/// The browsers yt-dlp can read a cookie store from on Windows (D113).
+///
+/// An allowlist because the value reaches argv: nothing a person picks goes
+/// near yt-dlp's flag surface, which is the same rule `validate_url` keeps
+/// about `--exec`. Safari is macOS-only and left out.
+pub const BROWSERS: [&str; 7] = [
+    "firefox", "brave", "chrome", "chromium", "edge", "opera", "vivaldi",
+];
+
+/// What an export produced: where the jar landed, and how many cookies are in
+/// it — the count is what tells a person it worked, and it is all this app
+/// ever says about the contents.
+#[derive(Debug, Clone, Serialize)]
+pub struct CookieExport {
+    pub path: String,
+    pub count: usize,
+}
+
+/// Read a browser's cookie store with yt-dlp and write the jar into the app's
+/// own data folder (D113).
+///
+/// yt-dlp dumps the jar it loaded whenever `--cookies` names a file, so this
+/// is one run of the tool that already ships. It needs a URL to accept the
+/// job, and the URL it gets is `https://cookies.invalid/`: `.invalid` is
+/// reserved by RFC 2606 and can never resolve, so the run cannot reach anyone
+/// — the extraction fails, the jar is written anyway, and the exit code is
+/// ignored on purpose. What counts as success is a file with cookies in it.
+pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExport> {
+    if !BROWSERS.contains(&browser) {
+        return Err(PipelineError::BadUrl(format!(
+            "{browser} is not a browser this can read"
+        )));
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| PipelineError::Io(format!("no app data dir: {e}")))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| PipelineError::Io(format!("couldn't create {}: {e}", dir.display())))?;
+    let out = dir.join("cookies.txt");
+
+    let args: Vec<String> = vec![
+        "--cookies-from-browser".into(),
+        browser.to_string(),
+        "--cookies".into(),
+        out.to_string_lossy().into_owned(),
+        "--simulate".into(),
+        "--skip-download".into(),
+        "--no-warnings".into(),
+        "--".into(),
+        "https://cookies.invalid/".into(),
+    ];
+    let (mut rx, _child) = app
+        .shell()
+        .sidecar("yt-dlp")
+        .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
+        .args(args)
+        .spawn()
+        .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+
+    let mut tail = Tail::new();
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                tail.push(String::from_utf8_lossy(&b).trim().to_string())
+            }
+            _ => {}
+        }
+    }
+
+    let count = count_cookies(&out);
+    if count == 0 {
+        // Nothing usable: leave no half-written jar behind for yt-dlp to send.
+        let _ = std::fs::remove_file(&out);
+        return Err(PipelineError::Io(explain_export(browser, &tail.text())));
+    }
+    Ok(CookieExport {
+        path: out.to_string_lossy().into_owned(),
+        count,
+    })
+}
+
+/// Cookies in a Netscape jar: every line that is not blank and not a comment.
+/// Reading the file this way is deliberate — the count is the only thing this
+/// process ever learns about it.
+fn count_cookies(path: &Path) -> usize {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+    text.lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+        .count()
+}
+
+/// Why a browser would not give up its cookies, in words a person can act on
+/// (D113). Both of these were seen on the owner's machine before any of this
+/// was written.
+fn explain_export(browser: &str, tail: &str) -> String {
+    if tail.contains("Could not copy") && tail.contains("cookie database") {
+        format!(
+            "{browser} is running, so its cookie database is locked. Close it completely — check the tray — and try again."
+        )
+    } else if tail.contains("DPAPI") || tail.contains("App-Bound") {
+        format!(
+            "{browser} encrypts its cookies in a way yt-dlp cannot read (Chromium's App-Bound Encryption). Firefox works, or export a cookies.txt yourself and pick it with Cookies."
+        )
+    } else if tail.contains("could not find") {
+        format!("No {browser} profile with cookies was found on this machine.")
+    } else {
+        format!("{browser} gave up no cookies. yt-dlp said: {tail}")
+    }
+}
+
+/// Where a person keeps the `cookies.txt` they exported from their own
+/// browser, when they have pointed the app at one (D112). Unset, which is the
+/// default, means yt-dlp runs with no authentication at all.
+pub const COOKIES_SETTING: &str = "ytdlp.cookies";
+
+/// That file, if it is set and still there.
+///
+/// A path that has gone — an unplugged drive, a file they deleted — is no
+/// authentication rather than an error: the next age-gated video says what it
+/// needs, and everything else keeps working. The file is never read here,
+/// never copied, and never logged; only its path is stored, and only yt-dlp
+/// opens it.
+pub fn cookies_file(app: &AppHandle) -> Option<PathBuf> {
+    let state = app.state::<crate::Db>();
+    let raw = {
+        let conn = state.0.lock().unwrap();
+        crate::db::get_setting(&conn, COOKIES_SETTING)
+    }?;
+    let p = PathBuf::from(raw.trim());
+    // Absolute, so nothing resolves against the working directory, and a
+    // value that begins with `-` can never reach argv looking like a flag.
+    (p.is_absolute() && p.is_file()).then_some(p)
+}
+
+/// Args every yt-dlp invocation needs, plus the person's cookies when they
+/// have set some (D112).
+fn ytdlp_base(app: &AppHandle) -> Vec<String> {
+    ytdlp_args(cookies_file(app).as_deref())
+}
+
+/// The same list without the lookup, so its shape can be tested without an app.
 ///
 /// `--js-runtimes deno` is D46. Without a JS runtime, yt-dlp warns that
 /// "YouTube extraction without a JS runtime has been deprecated" and silently
 /// returns fewer formats — a degradation that looks like success.
-fn ytdlp_base() -> Vec<String> {
-    vec![
+fn ytdlp_args(cookies: Option<&Path>) -> Vec<String> {
+    let mut args: Vec<String> = vec![
         "--js-runtimes".into(),
         "deno".into(),
         "--no-playlist".into(),
         "--no-warnings".into(),
-    ]
+    ];
+    if let Some(c) = cookies {
+        args.push("--cookies".into());
+        args.push(c.to_string_lossy().into_owned());
+    }
+    args
+}
+
+/// The yt-dlp failures a person can do something about, in a line rather than
+/// the wall of text yt-dlp writes (D112). Everything else keeps yt-dlp's own
+/// words: a message nobody has read yet beats a wrong guess at what it means.
+pub(crate) fn explain(tail: &str) -> Option<String> {
+    const COOKIES: &str = "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.";
+    let (why, needs_cookies) = if tail.contains("Sign in to confirm your age") {
+        (
+            "YouTube wants a signed-in session for this one: it is age-restricted.",
+            true,
+        )
+    } else if tail.contains("confirm you") && tail.contains("not a bot") {
+        (
+            "YouTube asked this download to prove it is not a bot.",
+            true,
+        )
+    } else if tail.contains("members-only") || tail.contains("available to this channel's members")
+    {
+        (
+            "That video is members-only, so it needs an account that has it.",
+            true,
+        )
+    } else if tail.contains("Private video") {
+        ("That video is private, so nothing can fetch it.", false)
+    } else if tail.contains("Video unavailable") {
+        ("YouTube says that video is unavailable.", false)
+    } else {
+        return None;
+    };
+    Some(if needs_cookies {
+        format!("{why} {COOKIES}")
+    } else {
+        why.to_string()
+    })
 }
 
 /// Reject anything that isn't a plain http(s) URL, before it reaches argv.
@@ -216,7 +413,7 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         },
     );
 
-    let mut args = ytdlp_base();
+    let mut args = ytdlp_base(app);
     // `--` ends option parsing: everything after it is a positional argument.
     args.extend([
         "-J".to_string(),
@@ -336,7 +533,7 @@ async fn download_media(
     // own browser is a DB query (O6), not a directory listing.
     let outtmpl = root.join("%(extractor)s/%(title)s [%(id)s].%(ext)s");
 
-    let mut args = ytdlp_base();
+    let mut args = ytdlp_base(app);
     // Point yt-dlp at our ffmpeg rather than letting it search PATH.
     if let Some(ff) = bundled_ffmpeg() {
         args.extend([
@@ -1150,7 +1347,7 @@ mod tests {
     /// Every yt-dlp invocation must terminate option parsing before the URL.
     #[test]
     fn terminator_is_added_per_call_site_not_in_base() {
-        assert!(!ytdlp_base().contains(&"--".to_string()));
+        assert!(!ytdlp_args(None).contains(&"--".to_string()));
     }
 
     /// The progress template is pipe-delimited and parsed positionally — never
@@ -1164,6 +1361,85 @@ mod tests {
         assert!(speed.unwrap() > 52318.0);
         assert_eq!(eta, Some(3));
         assert_eq!(status, "downloading");
+    }
+
+    #[test]
+    fn only_browsers_on_the_list_reach_argv() {
+        // The value lands in argv, so it is an allowlist, not a sanitiser.
+        assert!(BROWSERS.contains(&"firefox"));
+        assert!(!BROWSERS.contains(&"--exec"));
+        assert!(!BROWSERS.contains(&"safari"));
+    }
+
+    #[test]
+    fn a_jar_is_counted_by_its_cookie_lines() {
+        let dir = std::env::temp_dir().join(format!("hp-jar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("cookies.txt");
+        std::fs::write(
+            &p,
+            "# Netscape HTTP Cookie File
+# This file is generated by yt-dlp
+
+.youtube.com	TRUE	/	TRUE	0	PREF	x
+.youtube.com	TRUE	/	TRUE	0	SID	y
+",
+        )
+        .unwrap();
+        assert_eq!(count_cookies(&p), 2);
+        assert_eq!(count_cookies(&dir.join("nothing.txt")), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_browser_that_refuses_says_which_wall_it_is() {
+        let locked = explain_export(
+            "brave",
+            "ERROR: Could not copy Chrome cookie database. See ...",
+        );
+        assert!(locked.contains("running"), "{locked}");
+        let dpapi = explain_export("chrome", "ERROR: Failed to decrypt with DPAPI. See ...");
+        assert!(dpapi.contains("App-Bound"), "{dpapi}");
+        // Anything else keeps yt-dlp's words rather than guessing.
+        let odd = explain_export("opera", "ERROR: something nobody has seen");
+        assert!(odd.contains("something nobody has seen"), "{odd}");
+    }
+
+    #[test]
+    fn cookies_become_one_flag_and_its_path() {
+        let none = ytdlp_args(None);
+        assert!(!none.contains(&"--cookies".to_string()));
+        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")));
+        let at = with
+            .iter()
+            .position(|a| a == "--cookies")
+            .expect("the flag");
+        // Its own argv entry, so a path with spaces stays one argument.
+        assert_eq!(with[at + 1], r"C:\keys\cookies.txt");
+        assert_eq!(with.len(), none.len() + 2);
+    }
+
+    #[test]
+    fn a_failure_a_person_can_act_on_says_what_to_do_first() {
+        let tail = "ERROR: [youtube] aAkI4EKKHMw: Sign in to confirm your age. Use --cookies-from-browser or --cookies";
+        let said = ytdlp_message(1, tail);
+        assert!(
+            said.starts_with("YouTube wants a signed-in session"),
+            "{said}"
+        );
+        assert!(
+            said.contains("Cookies"),
+            "the way out is in the message: {said}"
+        );
+        // yt-dlp's own words survive: a bug report needs them.
+        assert!(said.contains(tail), "{said}");
+    }
+
+    #[test]
+    fn a_failure_we_do_not_know_keeps_yt_dlps_words() {
+        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]");
+        assert!(said.starts_with("yt-dlp failed (2)"), "{said}");
+        assert!(said.contains("WinError 32"), "{said}");
     }
 
     /// yt-dlp emits "NA" for anything it doesn't know yet — most importantly
