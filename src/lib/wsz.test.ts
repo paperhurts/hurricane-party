@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSkin, placeRect, SkinError, type Element } from "./skin";
+import { elementsOf, parseSkin, placeRect, SkinError, type Element } from "./skin";
 import { colorsFor } from "./theme";
 import { parsePledit, parseViscolor, paletteFrom, wszManifest } from "./wsz";
 
@@ -96,6 +96,32 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     // gained at v0.4b (D97).
     expect(els.shuffleButton).toMatchObject({ action: "shuffle", bind: "shuffle", when: "on" });
     expect(els.repeatButton).toMatchObject({ action: "repeat", bind: "repeatOn", when: "on" });
+    // And the two that show and hide a window, lit while it is on screen
+    // (D109). Eyewall draws neither, so nothing bound them until a .wsz did.
+    expect(els.eqButton).toMatchObject({ action: "eq", bind: "eqOpen", when: "on" });
+    expect(els.plButton).toMatchObject({ action: "playlist", bind: "plOpen", when: "on" });
+  });
+
+  it("makes the windowshade strip's painted controls answer a press (D111)", () => {
+    const { skin } = parseSkin(make().manifest);
+    const shade = elementsOf(skin, "main", true).elements;
+    const by = (n: string) => shade.find((e) => e.name === n);
+    // The classic painted these into the strip and hit-tested rectangles over
+    // them, so each draws the strip's own pixels and has no pressed art.
+    expect(by("shadePlay")).toMatchObject({ type: "button", rect: [176, 2, 10, 10], action: "play" });
+    expect((by("shadePlay") as { sprite: { sheet: string; rect: number[] } }).sprite).toEqual({
+      sheet: "titlebar",
+      rect: [203, 31, 10, 10],
+      tint: "text",
+    });
+    expect(by("shadePrev")).toMatchObject({ action: "prev" });
+    expect(by("shadeStop")).toMatchObject({ action: "stop" });
+    expect(by("shadeEject")).toMatchObject({ action: "eject" });
+    // The seek bar is the one control here the classic gave its own art.
+    expect(by("shadeSeek")).toMatchObject({ type: "slider", rect: [226, 4, 17, 7], bind: "position" });
+    // And the strip shows what it always showed: the time, and the analyser.
+    expect(by("clockMinutes")).toMatchObject({ font: "chrome", bind: "elapsedMinutes" });
+    expect(by("vis")).toMatchObject({ type: "visualizer", rect: [79, 5, 38, 5] });
   });
 
   it("declares its fonts as glyph grids, the clock's digits 3 apart", () => {

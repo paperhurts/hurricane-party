@@ -200,7 +200,7 @@ A `slider`'s three pieces are each optional and at least one is required: `track
 
 **A centred slider (D98).** `origin`, 0..1, makes a slider a centred control: the fill runs from the origin to the value rather than from the start, the wheel nudges it by 1/48 of its range, and a double press returns it to the origin. The EQ's gains sit at `0.5`, which is 0 dB. `lit` is the same shape as on a text, `{ bind, when, tint?, opacity? }`, and gives the fill and thumb a second look while the binding holds; every EQ slider dims while the EQ is off. `hot`, `{ beyond, tint }`, tints the thumb once the value is more than `beyond` from the origin, and needs an origin to measure from. The dim wins over hot. A text's `align` is `left` (the default), `center` or `right`.
 
-`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `elapsedMinutes`, `elapsedSeconds`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`), and the equalizer's `eqOn` (`"on"`, `"off"`), `eqPreset`, `eqMenu` (`"open"`, `"closed"`), `eqTrim`, `eqClip`, `eqPre` and `eqBand1`–`eqBand10` (0..1, 0.5 being 0 dB). The EQ adds two actions, `eqOn` and `eqPresets`. The playlist (D99) adds the actions `add`, `addUrl`, `remove`, `library`, and the binds `shuffle` and `repeatOn` (`"on"`, `"off"`), `repeatLabel` (`"REP"`, `"1x"`, `"ALL"`) and `plCanRemove` (`"yes"`, `"no"`).
+`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `elapsedMinutes`, `elapsedSeconds`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`), and the equalizer's `eqOn` (`"on"`, `"off"`), `eqPreset`, `eqMenu` (`"open"`, `"closed"`), `eqTrim`, `eqClip`, `eqPre` and `eqBand1`–`eqBand10` (0..1, 0.5 being 0 dB). The EQ adds two actions, `eqOn` and `eqPresets`. The playlist (D99) adds the actions `add`, `addUrl`, `remove`, `library`, and the binds `shuffle` and `repeatOn` (`"on"`, `"off"`), `repeatLabel` (`"REP"`, `"1x"`, `"ALL"`) and `plCanRemove` (`"yes"`, `"no"`). Main supplies `shuffle`, `repeatOn` and `repeatLabel` too, and adds `eqOpen` and `plOpen` (`"on"`, `"off"`, whether that window is on screen): a classic skin puts all four switches on Main, where Eyewall puts two of them on the playlist, and the same words serve both (D109). Main's `eq` and `playlist` actions hide and show their window; `eject` opens the library.
 
 ### `opacity`, so one sprite serves every strength (D93)
 
@@ -259,13 +259,13 @@ Animate `opacity` on a pre-composited glow layer. Never animate `box-shadow`.
 
 Both importers are mappings *into* the above. That is the entire justification for locking this schema before either one is written.
 
-### `.wsz` — full support, v0.5
+### `.wsz` — supported to a degree, v0.5 (D110)
 
 | Classic file | Maps to |
 |---|---|
 | `MAIN.BMP` | `windows.main.elements.frame` + backdrop |
 | `CBUTTONS.BMP` | The five transport `button` elements, at conventional offsets |
-| `TITLEBAR.BMP` | `titlebar` sprite + `inactive` variant, plus the shade-mode strips |
+| `TITLEBAR.BMP` | `titlebar` sprite + `inactive` variant; the shade-mode strips, and the controls painted into them (D111) |
 | `NUMBERS.BMP` / `NUMS_EX.BMP` | `fonts.time` |
 | `TEXT.BMP` | `fonts.chrome` |
 | `VOLUME.BMP` / `BALANCE.BMP` | The volume and balance `slider` elements |
@@ -281,7 +281,11 @@ Sprite coordinates in `.wsz` are **conventional, not declared** — the offsets 
 
 Classic skins set `resizable: false` on all three windows (except playlist), so on a `.wsz` most edges offer the move cursor and the interaction degrades gracefully. Same engine, fewer capabilities.
 
-### `.wal` — partial, explicitly, v0.5+
+**The windowshade strip's controls are painted into its art** (D111). The classic gave the shade transport no sprites of its own and no pressed state; Winamp hit-tested fixed rectangles over the picture, and so does the importer — six `button` elements whose sprite is the strip's own pixels at the same offset, in the focused and the idle strip both. The seek bar there does have four small sprites of its own, the time is two `text` elements either side of the colon painted into the strip (D104's split, at 5 × 6), and the analyser is a 38 × 5 `visualizer` box.
+
+**What an imported skin does not get, and why it is said out loud** (D110). A classic skin also draws balance, mono/stereo, the playlist's own transport row, and its SEL and MISC menus. This app has one transport (D81), no balance and no menus, so in an imported skin those stay pictures. The importer writes what it could not use into the manifest as `notes` — an unknown key, ignored by the validator, beside `generator` (D107) — and the library repeats it every time that skin is picked, rather than once at import where a person reads it and forgets. The promise is that a skin wears and that anything making the app *unusable* is a bug; a control this app has no feature for is not.
+
+### `.wal` — partial, explicitly, and not v0.5 (D110)
 
 Parse the XML layout, map what corresponds to native concepts, render the PNGs, **ignore the `.maki` bytecode entirely** (D17, and `windows.md` argues it at length).
 
