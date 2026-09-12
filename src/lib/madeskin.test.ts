@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import eyewall from "../../skins/eyewall/manifest.json";
 import { colorsWorn } from "./theme";
-import { madeManifest, MAKER_VERSION, nameFrom, PICTURE_OPACITY } from "./madeskin";
+import { madeManifest, MAKER_VERSION, nameFrom, PICTURE_OPACITY, QUIET_FLOOR } from "./madeskin";
 import { elementsOf, parseSkin, TOKENS, WINDOWS } from "./skin";
 import { paletteFromPixels } from "./palette";
 
@@ -65,6 +65,43 @@ describe("a skin made from a picture (#131)", () => {
     // The playlist grows, so its third of the picture has to grow with it.
     expect(bands[2].stretch).toBe("xy");
     expect(bands[0].stretch).toBeUndefined();
+  });
+
+  // Seen on the first real made skin: Eyewall's quiet chrome (0.14 edges, 0.3
+  // frames, 0.4 labels) vanished over a bright picture.
+  it("lifts every piece of chrome over the floor, and keeps quiet things quieter than loud ones", () => {
+    const opacities = (m: unknown, out: number[] = []): number[] => {
+      if (Array.isArray(m)) m.forEach((v) => opacities(v, out));
+      else if (m && typeof m === "object") {
+        for (const [k, v] of Object.entries(m)) {
+          if (k === "opacity" && typeof v === "number") out.push(v);
+          else opacities(v, out);
+        }
+      }
+      return out;
+    };
+    const made_ = madeManifest(made()) as { windows: Record<string, { elements: Record<string, unknown> }> };
+    for (const w of Object.values(made_.windows)) {
+      const { backdrop, ...chrome } = w.elements;
+      expect((backdrop as { opacity: number }).opacity).toBe(PICTURE_OPACITY);
+      for (const o of opacities(chrome)) expect(o).toBeGreaterThanOrEqual(QUIET_FLOOR);
+    }
+    // Order is kept: the same walk over Eyewall and over the made skin, pairwise.
+    const before = opacities((eyewall as { windows: unknown }).windows);
+    const after = opacities(
+      Object.fromEntries(
+        Object.entries(made_.windows).map(([k, w]) => {
+          const { backdrop: _b, ...elements } = w.elements;
+          return [k, { ...w, elements }];
+        }),
+      ),
+    );
+    expect(after).toHaveLength(before.length);
+    for (let i = 0; i < before.length; i++) {
+      for (let j = 0; j < before.length; j++) {
+        if (before[i] < before[j]) expect(after[i]).toBeLessThanOrEqual(after[j]);
+      }
+    }
   });
 
   it("carries a maker stamp and no importer stamp, so it is never rebuilt as a .wsz", () => {
