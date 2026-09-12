@@ -811,11 +811,16 @@
     reading = true;
     notice = `Reading cookies from ${browser}…`;
     try {
-      const made = await invoke<{ path: string; count: number }>("export_cookies_from_browser", {
-        browser,
-      });
+      const made = await invoke<{ path: string; count: number; youtube: boolean }>(
+        "export_cookies_from_browser",
+        { browser },
+      );
       cookies = made.path;
-      notice = `Read ${made.count} cookies from ${browser}. Videos that want a signed-in session will import now; do it again when they stop.`;
+      // A jar with no YouTube sign-in in it fails every age gate, and saying
+      // so here beats saying it once per download (D113).
+      notice = made.youtube
+        ? `Read ${made.count} cookies from ${browser}, with a YouTube sign-in among them. Videos that want one will import now; read them again when they stop.`
+        : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused. Sign in to YouTube in ${browser}, then read them again.`;
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
     } finally {

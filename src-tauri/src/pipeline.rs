@@ -20,8 +20,15 @@ use tauri_plugin_shell::ShellExt;
 pub enum PipelineError {
     #[error("{0}")]
     Sidecar(String),
-    #[error("{}", ytdlp_message(*.code, .tail))]
-    YtDlp { code: i32, tail: String },
+    #[error("{}", ytdlp_message(*.code, .tail, *.cookies))]
+    YtDlp {
+        code: i32,
+        tail: String,
+        /// Whether the app had a cookies file when this failed, which changes
+        /// what a sign-in refusal means: no file is "give me one", a file is
+        /// "the one you gave me has no session in it" (D113).
+        cookies: bool,
+    },
     #[error("ffmpeg failed ({code}). Last output: {tail}")]
     Ffmpeg { code: i32, tail: String },
     #[error("couldn't understand yt-dlp's metadata: {0}")]
@@ -37,8 +44,8 @@ pub enum PipelineError {
 /// What a yt-dlp failure says to a person (D112). A failure we recognise leads
 /// with what to do about it and keeps yt-dlp's own words after, because the
 /// tail is what makes a bug report answerable.
-fn ytdlp_message(code: i32, tail: &str) -> String {
-    match explain(tail) {
+fn ytdlp_message(code: i32, tail: &str, cookies: bool) -> String {
+    match explain(tail, cookies) {
         Some(why) => format!(
             "{why}
 
@@ -188,6 +195,10 @@ pub const BROWSERS: [&str; 7] = [
 pub struct CookieExport {
     pub path: String,
     pub count: usize,
+    /// Whether a YouTube sign-in is among them (D113). A jar full of a
+    /// browser's ordinary cookies still fails every age gate, and finding
+    /// that out at the export beats finding it out per download.
+    pub youtube: bool,
 }
 
 /// Read a browser's cookie store with yt-dlp and write the jar into the app's
@@ -251,6 +262,7 @@ pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExpo
     Ok(CookieExport {
         path: out.to_string_lossy().into_owned(),
         count,
+        youtube: jar_has_youtube_session(&out),
     })
 }
 
@@ -264,6 +276,28 @@ fn count_cookies(path: &Path) -> usize {
     text.lines()
         .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
         .count()
+}
+
+/// Whether a jar carries a YouTube sign-in (D113).
+///
+/// By cookie **name**, never by value: the names below are the first-party
+/// session cookies YouTube treats as signed in, and the only thing this
+/// process wants to know is whether one of them is there. `__Secure-3PSID`
+/// deliberately does not count — it is the cross-site variant, and a jar that
+/// has it without the first-party set still gets the age gate, which is
+/// exactly what happened on the owner's machine.
+fn jar_has_youtube_session(path: &Path) -> bool {
+    const SESSION: [&str; 3] = ["SID", "__Secure-1PSID", "LOGIN_INFO"];
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            (f.len() >= 7 && f[0].contains("youtube.com")).then(|| f[5])
+        })
+        .any(|name| SESSION.contains(&name))
 }
 
 /// Why a browser would not give up its cookies, in words a person can act on
@@ -350,8 +384,13 @@ fn ytdlp_args(cookies: Option<&Path>, playlists: bool) -> Vec<String> {
 /// The yt-dlp failures a person can do something about, in a line rather than
 /// the wall of text yt-dlp writes (D112). Everything else keeps yt-dlp's own
 /// words: a message nobody has read yet beats a wrong guess at what it means.
-pub(crate) fn explain(tail: &str) -> Option<String> {
-    const COOKIES: &str = "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.";
+pub(crate) fn explain(tail: &str, cookies: bool) -> Option<String> {
+    // Two different problems wearing one error. Without a jar, the app needs
+    // one; with a jar, the jar is signed out — and telling someone to do the
+    // thing they have already done is the worst answer available (D113).
+    const GET: &str = "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.";
+    const STALE: &str = "The cookies this app has carry no YouTube sign-in, or no longer do. Sign in to YouTube in that browser, read them again with From a browser, and retry.";
+    let cookies_hint = if cookies { STALE } else { GET };
     let (why, needs_cookies) = if tail.contains("Sign in to confirm your age") {
         (
             "YouTube wants a signed-in session for this one: it is age-restricted.",
@@ -376,7 +415,7 @@ pub(crate) fn explain(tail: &str) -> Option<String> {
         return None;
     };
     Some(if needs_cookies {
-        format!("{why} {COOKIES}")
+        format!("{why} {cookies_hint}")
     } else {
         why.to_string()
     })
@@ -459,6 +498,7 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
+            cookies: cookies_file(app).is_some(),
         });
     }
 
@@ -618,6 +658,7 @@ pub async fn probe_playlist(app: &AppHandle, url: &str) -> Result<PlaylistProbe>
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
+            cookies: cookies_file(app).is_some(),
         });
     }
     let v: serde_json::Value =
@@ -808,6 +849,7 @@ async fn download_media(
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
+            cookies: cookies_file(app).is_some(),
         });
     }
 
@@ -1675,7 +1717,7 @@ mod tests {
     #[test]
     fn a_failure_a_person_can_act_on_says_what_to_do_first() {
         let tail = "ERROR: [youtube] aAkI4EKKHMw: Sign in to confirm your age. Use --cookies-from-browser or --cookies";
-        let said = ytdlp_message(1, tail);
+        let said = ytdlp_message(1, tail, false);
         assert!(
             said.starts_with("YouTube wants a signed-in session"),
             "{said}"
@@ -1689,8 +1731,61 @@ mod tests {
     }
 
     #[test]
+    fn a_sign_in_refusal_says_something_different_once_cookies_are_set() {
+        let tail = "ERROR: [youtube] DgYSM91vJko: Sign in to confirm your age.";
+        // Nothing set: ask for a jar.
+        let without = ytdlp_message(1, tail, false);
+        assert!(
+            without.contains("Point the app at a cookies.txt"),
+            "{without}"
+        );
+        // A jar set and still refused: the jar is the problem, and telling
+        // someone to do what they have already done is the worst answer.
+        let with = ytdlp_message(1, tail, true);
+        assert!(with.contains("carry no YouTube sign-in"), "{with}");
+        assert!(!with.contains("Point the app at a cookies.txt"), "{with}");
+    }
+
+    #[test]
+    fn a_jar_is_signed_in_only_with_a_first_party_session() {
+        let dir = std::env::temp_dir().join(format!("hp-sess-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("cookies.txt");
+        let row = |domain: &str, name: &str| {
+            format!(
+                "{domain}	TRUE	/	TRUE	0	{name}	x
+"
+            )
+        };
+        // What the owner's export actually held: third-party only, which
+        // YouTube still treats as signed out.
+        std::fs::write(
+            &p,
+            format!(
+                "# Netscape HTTP Cookie File
+{}{}{}",
+                row(".youtube.com", "__Secure-3PSID"),
+                row(".youtube.com", "VISITOR_INFO1_LIVE"),
+                row(".google.com", "SID"),
+            ),
+        )
+        .unwrap();
+        assert!(!jar_has_youtube_session(&p), "3P alone is not a sign-in");
+        std::fs::write(&p, row(".youtube.com", "__Secure-1PSID")).unwrap();
+        assert!(jar_has_youtube_session(&p));
+        std::fs::write(
+            &p,
+            "# only a comment
+",
+        )
+        .unwrap();
+        assert!(!jar_has_youtube_session(&p));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_failure_we_do_not_know_keeps_yt_dlps_words() {
-        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]");
+        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]", false);
         assert!(said.starts_with("yt-dlp failed (2)"), "{said}");
         assert!(said.contains("WinError 32"), "{said}");
     }
