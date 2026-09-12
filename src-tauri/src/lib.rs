@@ -586,6 +586,11 @@ fn set_cookies_file(app: AppHandle, path: String) -> Result<String, String> {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
     db::set_setting(&conn, pipeline::COOKIES_SETTING, p).map_err(|e| e.to_string())?;
+    // A file picked by hand came from no store this app read, and a cleared
+    // path has no jar at all, so the label naming a browser goes (D118). It
+    // used to outlive the jar it described and say "firefox" about a file
+    // that was not.
+    db::set_setting(&conn, pipeline::COOKIES_FROM_SETTING, "").map_err(|e| e.to_string())?;
     Ok(p.to_string())
 }
 
