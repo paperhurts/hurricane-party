@@ -429,6 +429,30 @@ fn wm_close(app: AppHandle, label: String) {
     }
 }
 
+/// The EQ and PL buttons a classic skin puts on Main (D109). They hide and show
+/// their window rather than closing it: `wm_close` destroys, and a destroyed
+/// satellite cannot come back until the next launch, which is the wrong price
+/// for a button a person taps to get the clutter off the screen. Returns
+/// whether the window is on screen afterwards, so the button lights without a
+/// second call.
+#[tauri::command]
+fn wm_toggle_visible(app: AppHandle, label: String) -> bool {
+    let Some(win) = app.get_webview_window(&label) else {
+        return false;
+    };
+    let shown = win.is_visible().unwrap_or(false);
+    let _ = if shown { win.hide() } else { win.show() };
+    !shown
+}
+
+/// What those buttons show at mount, since nothing pushes visibility.
+#[tauri::command]
+fn wm_visible(app: AppHandle, label: String) -> bool {
+    app.get_webview_window(&label)
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+}
+
 /// The playlist window's ADD button: the library is where tracks come from.
 /// A library hidden to the tray (#87) comes back the same way.
 #[tauri::command]
@@ -870,6 +894,8 @@ pub fn run() {
             wm_resize_end,
             wm_minimize,
             wm_close,
+            wm_toggle_visible,
+            wm_visible,
             show_library,
             wm_hello,
             wm_toggle_shade,

@@ -302,7 +302,7 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
  * this number moves on (D107). Bump it whenever the mapping changes what it
  * writes for the same art.
  */
-export const WSZ_GENERATION = 3;
+export const WSZ_GENERATION = 4;
 
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
@@ -597,6 +597,8 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
       active: sp("shufrep", s.eqDown),
       on: { sprite: sp("shufrep", s.eqOn) },
       action: "eq",
+      bind: "eqOpen",
+      when: "on",
     };
     els.plButton = {
       type: "toggle",
@@ -605,6 +607,8 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
       active: sp("shufrep", s.playlistDown),
       on: { sprite: sp("shufrep", s.playlistOn) },
       action: "playlist",
+      bind: "plOpen",
+      when: "on",
     };
     els.shuffleButton = {
       type: "toggle",

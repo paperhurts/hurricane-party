@@ -96,6 +96,10 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     // gained at v0.4b (D97).
     expect(els.shuffleButton).toMatchObject({ action: "shuffle", bind: "shuffle", when: "on" });
     expect(els.repeatButton).toMatchObject({ action: "repeat", bind: "repeatOn", when: "on" });
+    // And the two that show and hide a window, lit while it is on screen
+    // (D109). Eyewall draws neither, so nothing bound them until a .wsz did.
+    expect(els.eqButton).toMatchObject({ action: "eq", bind: "eqOpen", when: "on" });
+    expect(els.plButton).toMatchObject({ action: "playlist", bind: "plOpen", when: "on" });
   });
 
   it("declares its fonts as glyph grids, the clock's digits 3 apart", () => {
