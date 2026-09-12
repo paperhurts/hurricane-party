@@ -553,11 +553,13 @@ fn set_cookies_file(app: AppHandle, path: String) -> Result<String, String> {
     Ok(p.to_string())
 }
 
-/// The browsers a cookie export can read (D113). One list, in Rust, so the
-/// picker cannot offer something the allowlist would then refuse.
+/// Every browser profile a cookie export can read (D113, D115). Built in
+/// Rust, so the picker cannot offer a store the export would then refuse —
+/// and so a second Chrome profile, which is where a YouTube sign-in often
+/// lives, is offered by name instead of hidden behind "chrome".
 #[tauri::command]
-fn cookie_browsers() -> Vec<&'static str> {
-    pipeline::BROWSERS.to_vec()
+fn cookie_browsers() -> Vec<pipeline::CookieSource> {
+    pipeline::cookie_sources()
 }
 
 /// Read a browser's cookies with yt-dlp, keep the jar in the app's own folder
