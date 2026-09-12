@@ -5,6 +5,7 @@
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
   import { parseSkin } from "./lib/skin";
+  import { measureSheets } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
@@ -50,7 +51,14 @@
 
   // What came out of a skin's zip (#107): where it went, and the two text
   // files, which are colours rather than art and so travel as strings.
-  type Unpacked = { id: string; name: string; files: string[]; pledit: string | null; viscolor: string | null };
+  type Unpacked = {
+    id: string;
+    name: string;
+    dir: string;
+    files: string[];
+    pledit: string | null;
+    viscolor: string | null;
+  };
 
   let url = $state("");
   let error = $state<string | null>(null);
@@ -686,11 +694,16 @@
     let unpacked: Unpacked | null = null;
     try {
       unpacked = await invoke<Unpacked>("import_skin", { path: picked });
+      // Look at the sheets before mapping them (D106): a classic skin often
+      // stops a file short, and a manifest must not claim art that is not
+      // there.
+      const sizes = await measureSheets(unpacked.dir, unpacked.files);
       const built = wszManifest({
         files: unpacked.files,
         name: unpacked.name,
         pledit: unpacked.pledit ?? undefined,
         viscolor: unpacked.viscolor ?? undefined,
+        sizes,
       });
       // The same validator the shipped skin goes through.
       parseSkin(built.manifest);

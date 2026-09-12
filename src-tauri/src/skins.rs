@@ -58,6 +58,9 @@ impl From<std::io::Error> for SkinError {
 pub struct Unpacked {
     /// The folder's name inside the skins directory, which is also the id.
     pub id: String,
+    /// That folder, in full, so the webview can ask for its sheets over the
+    /// asset protocol and measure them before mapping (D106).
+    pub dir: String,
     /// The name to show, from the zip's own file name.
     pub name: String,
     /// Every file written, lower case, without a path.
@@ -127,6 +130,7 @@ pub fn unpack(zip_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> 
 
     let mut out = Unpacked {
         id: id.clone(),
+        dir: dir.to_string_lossy().to_string(),
         name: if stem.is_empty() { id } else { stem },
         files: Vec::new(),
         pledit: None,

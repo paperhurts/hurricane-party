@@ -303,6 +303,8 @@ Packs are untrusted input from the internet even without code in them. Same rule
 
 The asymmetry is deliberate: structural errors fail loudly at load time, missing art falls back quietly at render time. The first is a broken file; the second is an incomplete one, and incomplete skins are the norm.
 
+**For an imported skin, “incomplete” includes a sheet that stops short** (D106), which is common: a `.wsz` whose `volume.bmp` has no thumb frames, or whose `eqmain.bmp` ends above the sliders. The importer measures every sheet before it maps and leaves out the art that is not there, so what it writes is a manifest this validator accepts; an element that loses art it can do without keeps going, one that loses art it cannot is dropped, the equalizer's curve box degrades to a `slot`, and a missing title bar is still a refusal. Out-of-bounds stays a hard failure for the manifest itself — a native skin's rectangle outside its sheet is a mistake worth refusing.
+
 ---
 
 ## Open
