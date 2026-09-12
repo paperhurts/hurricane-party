@@ -297,6 +297,8 @@ yt-dlp -J --flat-playlist "<url>"
 
 Returns JSON. For a playlist you get the item list without hitting every video. Parse it, show a checklist with estimated sizes, let her deselect. *This is the difference between a good app and a frustrating one* — a 200-video playlist that starts downloading on paste is hostile.
 
+**Built at v0.5** (#137, D114). `probe_playlist` is that one call — the only one that drops `--no-playlist`, so the list expands there and nowhere else. The picker shows every entry with its duration and marks what the library already has, the kept entries queue as one job each, and the list becomes a playlist they are filed into as they finish (`jobs.playlist_id`). A `RD…` mix is refused: YouTube makes those up per person, so there is nothing to snapshot.
+
 ### Phase 2 — fetch
 
 For each selected item:

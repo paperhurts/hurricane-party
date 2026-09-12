@@ -34,6 +34,10 @@ pub struct Job {
     pub error: Option<String>,
     pub attempts: i64,
     pub want_video: bool,
+    /// The list this job was queued as part of (#137). Set once, at enqueue;
+    /// the finished track is added to it, so closing the app mid-queue does
+    /// not lose which playlist forty downloads were for.
+    pub playlist_id: Option<i64>,
     pub created_at: i64,
 }
 
@@ -51,6 +55,7 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
         error: r.get("error")?,
         attempts: r.get("attempts")?,
         want_video: r.get::<_, i64>("want_video")? != 0,
+        playlist_id: r.get("playlist_id")?,
         created_at: r.get("created_at")?,
     })
 }
@@ -71,15 +76,21 @@ impl Default for RunnerHandle {
     }
 }
 
-pub fn enqueue(app: &AppHandle, url: &str, want_video: bool) -> Result<i64, DbError> {
+pub fn enqueue(
+    app: &AppHandle,
+    url: &str,
+    want_video: bool,
+    playlist_id: Option<i64>,
+) -> Result<i64, DbError> {
     let id = {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
         let t = db::now();
         conn.execute(
-            "INSERT INTO jobs (url, want_video, want_audio, status, stage, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'queued', 'probe', ?4, ?4)",
-            params![url, want_video as i64, !want_video as i64, t],
+            "INSERT INTO jobs (url, want_video, want_audio, status, stage, playlist_id,
+                               created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'queued', 'probe', ?5, ?4, ?4)",
+            params![url, want_video as i64, !want_video as i64, t, playlist_id],
         )?;
         conn.last_insert_rowid()
     };
@@ -207,7 +218,7 @@ pub fn cancel(app: &AppHandle, id: i64) -> Result<(), DbError> {
 }
 
 /// Record a finished download in the library.
-fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<(), DbError> {
+fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<i64, DbError> {
     let db = app.state::<Db>();
     let conn = db.0.lock().unwrap();
 
@@ -243,7 +254,14 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<(), DbError>
                 .unwrap_or("mp3"),
         ],
     )?;
-    Ok(())
+    // Read back rather than trusting `last_insert_rowid`: the statement above
+    // is an upsert, and on the update path that id belongs to another row.
+    let id = conn.query_row(
+        "SELECT id FROM media WHERE root_id = ?1 AND relpath = ?2",
+        params![root_id, relpath],
+        |r| r.get::<_, i64>(0),
+    )?;
+    Ok(id)
 }
 
 /// Run one job to completion. Errors are recorded, never propagated — a failed
@@ -256,12 +274,23 @@ async fn run_one(app: AppHandle, job: Job) {
     let db = app.state::<Db>();
     match result {
         Ok(track) => {
-            if let Err(e) = record_media(&app, &track) {
-                let conn = db.0.lock().unwrap();
-                let _ = fail(&conn, job.id, &format!("downloaded, but not recorded: {e}"));
-            } else {
-                let conn = db.0.lock().unwrap();
-                let _ = finish(&conn, job.id);
+            match record_media(&app, &track) {
+                Err(e) => {
+                    let conn = db.0.lock().unwrap();
+                    let _ = fail(&conn, job.id, &format!("downloaded, but not recorded: {e}"));
+                }
+                Ok(media_id) => {
+                    let conn = db.0.lock().unwrap();
+                    // The list this job was queued for (#137). A track that
+                    // lands twice is added once: `playlist::add` is the same
+                    // call the library's own button makes.
+                    if let Some(pid) = job.playlist_id {
+                        if let Err(e) = crate::playlist::add(&conn, pid, media_id) {
+                            eprintln!("job {}: downloaded, but not filed: {e}", job.id);
+                        }
+                    }
+                    let _ = finish(&conn, job.id);
+                }
             }
             let _ = app.emit("library-changed", ());
         }

@@ -167,6 +167,27 @@ pub fn delete_file(conn: &Connection, path: &str) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Whether the library already holds the file a video id produced (#137).
+///
+/// The id is *in the file name* because D49 made it load-bearing for resume:
+/// `%(title)s [%(id)s].%(ext)s`. That makes the name the cheapest fingerprint
+/// there is — `media.source_id` would be the better answer and nothing
+/// populates it yet, so this is what a second import of the same list can
+/// honestly check. Underscores and percents are escaped: a YouTube id may
+/// contain `_`, which LIKE would otherwise treat as "any character".
+pub fn have_video_id(conn: &Connection, video_id: &str) -> bool {
+    let esc = video_id
+        .replace('\\', "\\\\")
+        .replace('_', "\\_")
+        .replace('%', "\\%");
+    conn.query_row(
+        r"SELECT 1 FROM media WHERE relpath LIKE ?1 ESCAPE '\' LIMIT 1",
+        [format!("%[{esc}]%")],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +213,29 @@ mod tests {
             playlist::add(&conn, pid, conn.last_insert_rowid()).unwrap();
         }
         (conn, pid)
+    }
+
+    #[test]
+    fn a_video_already_on_disk_is_recognised_by_the_id_in_its_name() {
+        let (conn, _) = fixture("C:/lib", 0);
+        conn.execute(
+            "INSERT INTO media (root_id, relpath, kind, title, added_at)
+             VALUES (1, ?1, 'audio', 'have it', 0)",
+            ["youtube/A Song [dQw4w9WgXcQ].mp3"],
+        )
+        .unwrap();
+        assert!(have_video_id(&conn, "dQw4w9WgXcQ"));
+        assert!(!have_video_id(&conn, "aaaaaaaaaaa"));
+        // `_` is a LIKE wildcard and a legal character in a YouTube id, so an
+        // id that differs only there must not count as a match.
+        conn.execute(
+            "INSERT INTO media (root_id, relpath, kind, title, added_at)
+             VALUES (1, ?1, 'audio', 'underscore', 0)",
+            ["youtube/Another [ab_defghijk].mp3"],
+        )
+        .unwrap();
+        assert!(have_video_id(&conn, "ab_defghijk"));
+        assert!(!have_video_id(&conn, "abXdefghijk"));
     }
 
     /// What the library holds, sorted: the browser orders by added_at, and
