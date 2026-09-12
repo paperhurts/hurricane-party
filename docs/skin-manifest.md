@@ -76,7 +76,11 @@ A sprite reference is `{ "sheet", "rect" }`, plus `"tint"`, a palette token name
 
 ### Fonts: bitmap or system (D92)
 
-`fonts.<name>` is `{ "type": "bitmap", "sheet", "glyphSize", "map" }`, the classic glyph strip, or `{ "type": "system", "size", "case": "upper" | "none", "tracking": <em> }`, the theme's chrome typeface (`design/tokens.json`, `type.chrome`) at that size. Eyewall's title bar is a system font, the look v0.4b shipped; every `.wsz` font is a bitmap. A skin never names a family: that is the theme's.
+`fonts.<name>` is `{ "type": "bitmap", "sheet", "glyphSize", "map", "tracking"? }`, the classic glyph strip, or `{ "type": "system", "size", "case": "upper" | "none", "tracking": <em> }`, the theme's chrome typeface (`design/tokens.json`, `type.chrome`) at that size. Eyewall's title bar is a system font, the look v0.4b shipped; every `.wsz` font is a bitmap.
+
+A skin never names a family: that is the theme's.
+
+**How a bitmap font draws** (D104): the sheet is a grid of `glyphSize` cells and `map` says what sits in each, in reading order; how many fit across is the sheet's own width. One sprite is cut per character, matched without case. A character the sheet has no glyph for keeps its box and draws nothing, rather than shifting the line. `tracking` is the gap between boxes in pixels, 0 by default — 3 on the classic clock, whose colon is painted into the window between two pairs of digits, which is also why `elapsedMinutes` and `elapsedSeconds` exist beside `elapsed`.
 
 ### `viscolor` is one array, used twice
 
@@ -145,7 +149,7 @@ Every element that varies with focus declares an `inactive` variant. The rendere
 
 ## Elements
 
-Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom"` to keep its distance from that edge instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x, its shade button anchors right, its rows stretch along both, and its bottom bar anchors to the bottom (D99).
+Every element is an absolute rectangle in window space. Origin is the window's top-left, units are logical px at 1x (D92). In a resizable window (the playlist, D30) an element may add `"anchor": "right" | "bottom" | "bottom-right"` to keep its distance from that edge, or from that corner (D103), instead of from the origin, and `"stretch": "x" | "y" | "xy"` to grow with the window along those axes: the playlist's title bar stretches along x, its shade button anchors right, its rows stretch along both, and its bottom bar anchors to the bottom (D99).
 
 ```jsonc
 "elements": {
@@ -196,7 +200,7 @@ A `slider`'s three pieces are each optional and at least one is required: `track
 
 **A centred slider (D98).** `origin`, 0..1, makes a slider a centred control: the fill runs from the origin to the value rather than from the start, the wheel nudges it by 1/48 of its range, and a double press returns it to the origin. The EQ's gains sit at `0.5`, which is 0 dB. `lit` is the same shape as on a text, `{ bind, when, tint?, opacity? }`, and gives the fill and thumb a second look while the binding holds; every EQ slider dims while the EQ is off. `hot`, `{ beyond, tint }`, tints the thumb once the value is more than `beyond` from the origin, and needs an origin to measure from. The dim wins over hot. A text's `align` is `left` (the default), `center` or `right`.
 
-`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`), and the equalizer's `eqOn` (`"on"`, `"off"`), `eqPreset`, `eqMenu` (`"open"`, `"closed"`), `eqTrim`, `eqClip`, `eqPre` and `eqBand1`–`eqBand10` (0..1, 0.5 being 0 dB). The EQ adds two actions, `eqOn` and `eqPresets`. The playlist (D99) adds the actions `add`, `addUrl`, `remove`, `library`, and the binds `shuffle` and `repeatOn` (`"on"`, `"off"`), `repeatLabel` (`"REP"`, `"1x"`, `"ALL"`) and `plCanRemove` (`"yes"`, `"no"`).
+`action` and `bind` are drawn from **fixed vocabularies the app defines** — the same discipline as the companion pack's seven behavior states (D23). A skin selects from the list; it cannot extend it. An unknown `action` fails validation; an unknown `bind` renders empty and warns. The lists are `ACTIONS` and `BINDS` in `src/lib/skin.ts`. Today: actions `minimize`, `shade`, `zoom`, `close`, `play`, `pause`, `stop`, `prev`, `next`, `eject`, `eq`, `playlist`, `shuffle`, `repeat`; binds `windowTitle`, `trackTitle`, `elapsed`, `elapsedMinutes`, `elapsedSeconds`, `remaining`, `kbps`, `khz`, `position`, `volume`, `volumePercent`, `balance`, `playState` (`"playing"`, `"paused"`, `"stopped"`), and the equalizer's `eqOn` (`"on"`, `"off"`), `eqPreset`, `eqMenu` (`"open"`, `"closed"`), `eqTrim`, `eqClip`, `eqPre` and `eqBand1`–`eqBand10` (0..1, 0.5 being 0 dB). The EQ adds two actions, `eqOn` and `eqPresets`. The playlist (D99) adds the actions `add`, `addUrl`, `remove`, `library`, and the binds `shuffle` and `repeatOn` (`"on"`, `"off"`), `repeatLabel` (`"REP"`, `"1x"`, `"ALL"`) and `plCanRemove` (`"yes"`, `"no"`).
 
 ### `opacity`, so one sprite serves every strength (D93)
 
@@ -266,7 +270,7 @@ Both importers are mappings *into* the above. That is the entire justification f
 | `TEXT.BMP` | `fonts.chrome` |
 | `VOLUME.BMP` / `BALANCE.BMP` | The volume and balance `slider` elements |
 | `POSBAR.BMP` | `seekbar` track and thumb |
-| `PLEDIT.BMP` + `PLEDIT.TXT` | `windows.playlist` frame and row color bindings |
+| `PLEDIT.BMP` + `PLEDIT.TXT` | `windows.playlist` frame, its bar's buttons, and the row colours |
 | `EQMAIN.BMP` | `windows.equalizer` |
 | `VISCOLOR.TXT` | `viscolor` (24 entries — the format's own count) |
 | `REGION.TXT` | `regions`, best-effort |
@@ -292,12 +296,14 @@ Document the limitation honestly: *many modern skins load; heavily scripted ones
 Packs are untrusted input from the internet even without code in them. Same rules as `companion.json` (`purricane.md`):
 
 - **Validate against the schema and refuse to load rather than half-load.** A partially-valid skin is a support burden and an unreproducible bug report
-- **Cap sheet dimensions and total decoded size.** A 16k × 16k PNG is a denial of service dressed as a skin
+- **Cap sheet dimensions and total decoded size.** A 16k × 16k PNG is a denial of service dressed as a skin. The `.wsz` importer's caps are 200 entries, 8 MB a file and 32 MB unpacked (D105), and it writes only `.bmp` and `.txt`, by basename — which is also what closes zip slip
 - **Every `sprite.rect` must lie inside its sheet.** Out-of-bounds is a hard failure, not a clamp
 - **Unknown keys are ignored, not errors**, so `hp-skin/2` degrades rather than dying
 - **Missing required elements are a hard failure.** Missing *optional* ones fall back to the default skin's art for that element, so a skin that forgets the balance slider still loads
 
 The asymmetry is deliberate: structural errors fail loudly at load time, missing art falls back quietly at render time. The first is a broken file; the second is an incomplete one, and incomplete skins are the norm.
+
+**For an imported skin, “incomplete” includes a sheet that stops short** (D106), which is common: a `.wsz` whose `volume.bmp` has no thumb frames, or whose `eqmain.bmp` ends above the sliders. The importer measures every sheet before it maps and leaves out the art that is not there, so what it writes is a manifest this validator accepts; an element that loses art it can do without keeps going, one that loses art it cannot is dropped, the equalizer's curve box degrades to a `slot`, and a missing title bar is still a refusal. Out-of-bounds stays a hard failure for the manifest itself — a native skin's rectangle outside its sheet is a mistake worth refusing.
 
 ---
 

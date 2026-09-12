@@ -7,6 +7,7 @@ mod localimport;
 mod pipeline;
 pub mod platform;
 mod playlist;
+mod skins;
 mod tray;
 mod video;
 mod viz;
@@ -528,6 +529,106 @@ fn set_play_mode(app: AppHandle, shuffle: bool, repeat: String) -> Result<(), db
     db::set_play_mode(&conn, shuffle, &repeat)
 }
 
+// ---- skins (#107, D6) ------------------------------------------------------
+//
+// Importing is a click, never a watched folder (D91): the dialog, the
+// validation and the refusal all happen where the person who chose the file
+// is looking. Rust unpacks and stores; the frontend maps a `.wsz` into a
+// manifest and validates it, then asks for it to be written or thrown away.
+
+/// Where imported skins live. Configurable like every other sensitive path,
+/// and under the app's own data directory by default.
+fn skins_dir(app: &AppHandle) -> std::path::PathBuf {
+    let state = app.state::<Db>();
+    let configured = {
+        let conn = state.0.lock().unwrap();
+        db::get_setting(&conn, SKINS_DIR_SETTING)
+    };
+    match configured {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => app
+            .path()
+            .app_data_dir()
+            .expect("no app data dir")
+            .join("skins"),
+    }
+}
+
+const SKINS_DIR_SETTING: &str = "skins.dir";
+const SKIN_SETTING: &str = "skin.current";
+
+#[tauri::command]
+fn import_skin(app: AppHandle, path: String) -> Result<skins::Unpacked, skins::SkinError> {
+    skins::unpack(std::path::Path::new(&path), &skins_dir(&app))
+}
+
+#[tauri::command]
+fn write_skin_manifest(app: AppHandle, id: String, json: String) -> Result<(), skins::SkinError> {
+    skins::write_manifest(&skins_dir(&app), &id, &json)
+}
+
+#[tauri::command]
+fn discard_skin(app: AppHandle, id: String) -> Result<(), skins::SkinError> {
+    skins::discard(&skins_dir(&app), &id)
+}
+
+/// Every skin a person can pick: the one that ships, first and always (D90),
+/// then whatever they have imported.
+#[tauri::command]
+fn list_skins(app: AppHandle) -> Vec<String> {
+    let mut out = vec!["eyewall".to_string()];
+    out.extend(skins::installed(&skins_dir(&app)));
+    out
+}
+
+#[tauri::command]
+fn get_skin(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::get_setting(&conn, SKIN_SETTING).unwrap_or_else(|| "eyewall".into())
+}
+
+/// Wear a skin. The three classic windows hear `skin:changed` and reload,
+/// so a switch is immediate rather than a relaunch.
+#[tauri::command]
+fn set_skin(app: AppHandle, id: String) -> Result<(), db::DbError> {
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_setting(&conn, SKIN_SETTING, &id)?;
+    }
+    let _ = app.emit("skin:changed", &id);
+    Ok(())
+}
+
+/// The manifest of an imported skin, and the folder its sheets are in, so the
+/// webview can ask for them over the asset protocol.
+#[derive(serde::Serialize)]
+struct SkinOnDisk {
+    manifest: String,
+    dir: String,
+    /// Everything the importer needs to build the manifest again: the art it
+    /// maps and the two text files it reads (D107).
+    files: Vec<String>,
+    pledit: Option<String>,
+    viscolor: Option<String>,
+}
+
+#[tauri::command]
+fn read_skin(app: AppHandle, id: String) -> Result<SkinOnDisk, skins::SkinError> {
+    let dir = skins_dir(&app).join(&id);
+    let manifest = std::fs::read_to_string(dir.join("manifest.json"))
+        .map_err(|e| skins::SkinError::Io(format!("{id}: {e}")))?;
+    let art = skins::contents(&dir);
+    Ok(SkinOnDisk {
+        manifest,
+        dir: dir.to_string_lossy().to_string(),
+        files: art.files,
+        pledit: art.pledit,
+        viscolor: art.viscolor,
+    })
+}
+
 /// The chrome's glow (#108, D100). Every classic window reads it at mount
 /// and hears `chrome:glow` when it changes, so the three windows turn over
 /// together rather than on their next launch.
@@ -738,6 +839,13 @@ pub fn run() {
             set_play_mode,
             get_glow,
             set_glow,
+            import_skin,
+            write_skin_manifest,
+            discard_skin,
+            list_skins,
+            get_skin,
+            set_skin,
+            read_skin,
             add_local_folder,
             list_roots,
             remove_from_library,
