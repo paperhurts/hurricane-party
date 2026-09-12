@@ -135,6 +135,59 @@
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let shown = $derived(selectedList == null ? tracks : listItems);
 
+  // The list playback belongs to (D120): what the classic playlist window
+  // shows, and what Next, Previous and a track ending walk. It used to be
+  // whatever list the library was showing, so opening Library to look for
+  // something replaced the playlist in the other window and changed what
+  // played next. Now browsing moves nothing; playing a row from a list makes
+  // that list the queue. Until anything has been played it follows the list
+  // showing, so a cold start still plays what is on screen.
+  //   undefined — not chosen yet, follow the list showing
+  //   null      — the whole library
+  //   a number  — that playlist
+  const QUEUE_KEY = "hp.queueFrom";
+  let queueFrom = $state<number | null | undefined>(loadQueueFrom());
+  let queueItems = $state<MediaRow[]>([]);
+  let queue = $derived(queueFrom === undefined ? shown : queueFrom === null ? tracks : queueItems);
+  let queueListId = $derived(queueFrom === undefined ? selectedList : queueFrom);
+
+  function loadQueueFrom(): number | null | undefined {
+    try {
+      const raw = localStorage.getItem(QUEUE_KEY);
+      if (raw === null) return undefined;
+      return raw === "library" ? null : Number(raw) || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Make the list showing the queue, because a row of it was just played. */
+  function adoptShowingAsQueue() {
+    queueFrom = selectedList;
+    queueItems = selectedList == null ? [] : listItems;
+    try {
+      localStorage.setItem(QUEUE_KEY, selectedList == null ? "library" : String(selectedList));
+    } catch {
+      // A private window or a blocked store: the queue still works this session.
+    }
+  }
+
+  /** Re-read the queue's own list, or let go of a playlist that is gone. */
+  async function refreshQueue() {
+    if (queueFrom === undefined || queueFrom === null) return;
+    if (!playlists.some((p) => p.id === queueFrom)) {
+      queueFrom = undefined;
+      queueItems = [];
+      try {
+        localStorage.removeItem(QUEUE_KEY);
+      } catch {
+        // as above
+      }
+      return;
+    }
+    queueItems = await invoke<MediaRow[]>("playlist_items", { id: queueFrom });
+  }
+
   const mb = (n: number | null) => (n == null ? "—" : (n / 1_048_576).toFixed(1) + " MB");
 
   function duration(s: number | null) {
@@ -161,6 +214,7 @@
     playlists = await invoke<Playlist[]>("list_playlists");
     roots = await invoke<Root[]>("list_roots");
     if (selectedList != null) await openList(selectedList);
+    await refreshQueue();
   }
 
   onMount(() => {
@@ -229,11 +283,15 @@
       // stays in one place.
       listen("queue:hello", announceQueue),
       listen<number>("queue:play", (e) => {
-        const t = shown.find((x) => x.id === e.payload);
+        const t = queue.find((x) => x.id === e.payload);
+        // Playing from the playlist window fixes the queue it shows (D120).
+        if (queueFrom === undefined) adoptShowingAsQueue();
         if (t) play(t);
       }),
-      listen<number>("queue:remove", (e) => removeAt(e.payload)),
-      listen<{ from: number; to: number }>("queue:move", (e) => move(e.payload.from, e.payload.to)),
+      // The playlist window edits the list it shows, which is the queue, not
+      // whatever the library happens to be showing (D120).
+      listen<number>("queue:remove", (e) => removeFrom(queueListId, e.payload)),
+      listen<{ from: number; to: number }>("queue:move", (e) => moveIn(queueListId, e.payload.from, e.payload.to)),
     ];
     // The DB is the source of truth for progress, and it's written throttled
     // to ~4Hz. Polling it while work is in flight beats trying to reconcile a
@@ -374,11 +432,11 @@
     listPick = new SvelteSet(keep.map((i) => i.id));
   }
 
-  /** Broadcast the play queue: whatever list is showing, as the playlist window sees it. */
+  /** Broadcast the play queue, as the playlist window sees it (D120). */
   function announceQueue() {
     const name =
-      selectedList == null ? "Library" : (playlists.find((p) => p.id === selectedList)?.name ?? "Playlist");
-    const items = shown.map((t) => ({
+      queueListId == null ? "Library" : (playlists.find((p) => p.id === queueListId)?.name ?? "Playlist");
+    const items = queue.map((t) => ({
       id: t.id,
       title: t.title,
       uploader: t.uploader,
@@ -386,7 +444,7 @@
       kind: t.kind,
       position: t.position,
     }));
-    emit("queue:set", { name, listId: selectedList, items }).catch(() => {});
+    emit("queue:set", { name, listId: queueListId, items }).catch(() => {});
   }
 
   // Re-broadcast whenever the queue changes: a list switch, a scan, a
@@ -615,16 +673,26 @@
     refreshLibrary();
   }
 
-  async function removeAt(position: number) {
-    if (selectedList == null) return;
-    await invoke("remove_from_playlist", { playlistId: selectedList, position });
+  async function removeFrom(listId: number | null, position: number) {
+    if (listId == null) return;
+    await invoke("remove_from_playlist", { playlistId: listId, position });
     refreshLibrary();
   }
 
-  async function move(from: number, to: number) {
-    if (selectedList == null) return;
-    await invoke("reorder_playlist", { playlistId: selectedList, from, to });
+  async function moveIn(listId: number | null, from: number, to: number) {
+    if (listId == null) return;
+    await invoke("reorder_playlist", { playlistId: listId, from, to });
     refreshLibrary();
+  }
+
+  // The library's own rows act on the list showing.
+  const removeAt = (position: number) => removeFrom(selectedList, position);
+  const move = (from: number, to: number) => moveIn(selectedList, from, to);
+
+  /** A row's own play button: play it, and make its list the queue (D120). */
+  function playFromView(t: MediaRow) {
+    adoptShowingAsQueue();
+    play(t);
   }
 
   function play(t: MediaRow) {
@@ -665,19 +733,19 @@
 
   /** The sequence the transport walks right now. */
   function order(): number[] {
-    return shuffle ? shuffleOrder : shown.map((t) => t.id);
+    return shuffle ? shuffleOrder : queue.map((t) => t.id);
   }
 
   function playId(id: number | null) {
     if (id == null) return;
-    const t = shown.find((x) => x.id === id);
+    const t = queue.find((x) => x.id === id);
     if (t) play(t);
   }
 
   /** A fresh shuffle of the showing list, `first` leading when it is in it. */
   function reshuffle(first: number | null) {
     shuffleOrder = shuffled(
-      shown.map((t) => t.id),
+      queue.map((t) => t.id),
       first,
     );
   }
@@ -714,19 +782,22 @@
    * pipe's `play` all land here.
    */
   function start(stoppedOn: number | null) {
-    const pick = picked !== null && shown.some((t) => t.id === picked) ? picked : null;
+    // The first thing played, from anywhere, fixes the queue (D120); until then
+    // it followed the list showing, and browsing would have swapped it.
+    if (queueFrom === undefined) adoptShowingAsQueue();
+    const pick = picked !== null && queue.some((t) => t.id === picked) ? picked : null;
     // From cold, a shuffle is a fresh lap led by the pick. Stopped, the lap
     // already running stands, as it would for a double-click: Previous still
     // walks back through what played.
     if (shuffle && stoppedOn === null) reshuffle(pick);
     const id = startId(order(), pick, stoppedOn);
     if (id === null) {
-      notice = "Nothing to play: the list showing is empty.";
+      notice = "Nothing to play: the playlist is empty.";
       return;
     }
     // The stopped track can be from a list no longer showing; it is still in
     // the library.
-    const t = shown.find((x) => x.id === id) ?? tracks.find((x) => x.id === id);
+    const t = queue.find((x) => x.id === id) ?? tracks.find((x) => x.id === id);
     if (t) play(t);
   }
 
@@ -747,7 +818,7 @@
 
   // A different list, or rows in and out: a shuffle of the old list would walk
   // ids that are no longer there. Reshuffle around whatever is playing.
-  let shownKey = $derived(shown.map((t) => t.id).join(","));
+  let shownKey = $derived(queue.map((t) => t.id).join(","));
   $effect(() => {
     void shownKey;
     // Only the list is a dependency. Reading `shuffle` or `current` tracked
@@ -1409,11 +1480,11 @@
             />
           {/if}
           {#if t.kind === "video"}
-            <button class="play" onclick={() => play(t)}>▣</button>
+            <button class="play" onclick={() => playFromView(t)}>▣</button>
           {:else if nowId === t.id}
             <button class="play" onclick={toggle}>{isPlaying ? "‖" : "▶"}</button>
           {:else}
-            <button class="play" onclick={() => play(t)}>▶</button>
+            <button class="play" onclick={() => playFromView(t)}>▶</button>
           {/if}
           <span class="title">{t.title}</span>
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
