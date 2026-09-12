@@ -825,7 +825,9 @@
         title="Read cookies straight out of a browser you are signed in with"
       >
         <option value="" disabled selected>{reading ? "Reading…" : "From a browser…"}</option>
-        {#each browsers as b (b)}<option value={b}>{b}</option>{/each}
+        <!-- Windows lets another program read Firefox's cookie store and not
+           Chromium's, so the list says which is which before a click (D113). -->
+        {#each browsers as b (b)}<option value={b}>{b === "firefox" ? b : `${b} — encrypted`}</option>{/each}
       </select>
       {#if cookies}
         <button class="mini" onclick={clearCookies} title="Stop using that file">&times;</button>
