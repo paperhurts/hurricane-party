@@ -234,6 +234,96 @@ pub fn contents(dir: &Path) -> Contents {
     out
 }
 
+// ---- making a skin from a picture (#131) ------------------------------------
+
+/// The sheets a made skin wears: Eyewall's own. They are mask art the renderer
+/// tints (D73), so a made skin needs no drawing at all — its palette is what
+/// makes it look like its picture, and the picture itself is the backdrop.
+const EYEWALL_CHROME: &[u8] = include_bytes!("../../skins/eyewall/chrome.png");
+const EYEWALL_CHROME_2X: &[u8] = include_bytes!("../../skins/eyewall/chrome@2x.png");
+
+/// The largest picture the maker reads. A phone photo is a few megabytes; this
+/// is room for a large one without handing the webview something that will
+/// stall it decoding.
+const MAX_PICTURE: u64 = 25 * 1024 * 1024;
+
+/// A made skin's folder, before its manifest exists.
+#[derive(serde::Serialize)]
+pub struct Made {
+    pub id: String,
+    pub dir: String,
+}
+
+/// Start a made skin: a folder named after it, with Eyewall's sheets in it.
+/// The picture and the manifest follow; a skin that never gets its manifest is
+/// thrown away by the caller, the same as a refused import.
+pub fn make(skins_dir: &Path, name: &str) -> Result<Made, SkinError> {
+    fs::create_dir_all(skins_dir)?;
+    let id = slug_for(skins_dir, name);
+    let dir = skins_dir.join(&id);
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join("chrome.png"), EYEWALL_CHROME)?;
+    fs::write(dir.join("chrome@2x.png"), EYEWALL_CHROME_2X)?;
+    Ok(Made {
+        id,
+        dir: dir.to_string_lossy().into_owned(),
+    })
+}
+
+/// A picture's first bytes, for the four formats a webview decodes. The
+/// extension is not trusted: a file picked in a dialog can be called anything.
+fn is_picture(b: &[u8]) -> bool {
+    b.starts_with(&[0x89, b'P', b'N', b'G'])
+        || b.starts_with(&[0xFF, 0xD8, 0xFF])
+        || b.starts_with(b"GIF8")
+        || (b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP")
+}
+
+/// Read a picture a person chose in a dialog, for the webview to decode.
+///
+/// Through Rust rather than the asset protocol because the asset scope is the
+/// app's own folders, and a picture lives wherever the person keeps it. It is
+/// read once, here, and never stored: what the skin keeps is the crop the
+/// webview makes, written back with `write_picture`.
+pub fn read_picture(path: &Path) -> Result<Vec<u8>, SkinError> {
+    let size = fs::metadata(path)?.len();
+    if size > MAX_PICTURE {
+        return Err(SkinError::TooBig(format!(
+            "that picture is {} MB; the maker reads up to {} MB",
+            size / (1024 * 1024),
+            MAX_PICTURE / (1024 * 1024)
+        )));
+    }
+    let bytes = fs::read(path)?;
+    if !is_picture(&bytes) {
+        return Err(SkinError::Io(
+            "that file is not a PNG, JPEG, GIF or WebP picture".into(),
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Write the backdrop cropped from that picture into a made skin's folder.
+/// Two names only, PNG only, and no bigger than any sheet an import may write:
+/// the webview made these bytes, but the command is callable, so it is checked
+/// like any other input.
+pub fn write_picture(skins_dir: &Path, id: &str, scale: u8, bytes: &[u8]) -> Result<(), SkinError> {
+    let name = match scale {
+        1 => "picture.png",
+        2 => "picture@2x.png",
+        _ => return Err(SkinError::Io(format!("no picture at scale {scale}"))),
+    };
+    if !bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Err(SkinError::Io("a skin's picture is written as PNG".into()));
+    }
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(SkinError::TooBig(format!("{name} is too big")));
+    }
+    let dir = child_of(skins_dir, id)?;
+    fs::write(dir.join(name), bytes)?;
+    Ok(())
+}
+
 /// Write the manifest the frontend built, beside the art it describes.
 pub fn write_manifest(skins_dir: &Path, id: &str, json: &str) -> Result<(), SkinError> {
     let dir = child_of(skins_dir, id)?;
@@ -277,6 +367,49 @@ fn child_of(skins_dir: &Path, id: &str) -> Result<PathBuf, SkinError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_made_skin_starts_as_a_folder_of_eyewall_sheets() {
+        let root = temp();
+        let made = make(&root, "Storm Kitty").unwrap();
+        assert_eq!(made.id, "storm-kitty");
+        let dir = root.join(&made.id);
+        assert_eq!(fs::read(dir.join("chrome.png")).unwrap(), EYEWALL_CHROME);
+        assert_eq!(
+            fs::read(dir.join("chrome@2x.png")).unwrap(),
+            EYEWALL_CHROME_2X
+        );
+        // A second skin of the same name keeps both, as a second import does.
+        assert_eq!(make(&root, "Storm Kitty").unwrap().id, "storm-kitty-2");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn only_a_picture_is_read_and_only_a_png_is_written() {
+        let root = temp();
+        let png = [0x89, b'P', b'N', b'G', 13, 10, 26, 10, 0, 0];
+        let not = root.join("notes.txt");
+        fs::write(&not, b"just some words").unwrap();
+        assert!(read_picture(&not).is_err(), "an extension is not trusted");
+        let pic = root.join("cat.dat");
+        fs::write(&pic, png).unwrap();
+        assert!(read_picture(&pic).is_ok(), "a PNG called anything is a PNG");
+
+        let made = make(&root, "cat").unwrap();
+        assert!(write_picture(&root, &made.id, 1, &png).is_ok());
+        assert!(root.join(&made.id).join("picture.png").is_file());
+        assert!(
+            write_picture(&root, &made.id, 3, &png).is_err(),
+            "no scale 3"
+        );
+        assert!(
+            write_picture(&root, &made.id, 1, b"GIF89a").is_err(),
+            "PNG only"
+        );
+        // The id is a path segment inside the skins folder, never a way out.
+        assert!(write_picture(&root, "../escape", 1, &png).is_err());
+        fs::remove_dir_all(&root).ok();
+    }
     use std::io::Write;
 
     fn zip_with(files: &[(&str, &[u8])]) -> Vec<u8> {

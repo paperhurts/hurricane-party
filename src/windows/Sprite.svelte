@@ -49,7 +49,11 @@
     onslide?: (frac: number) => void;
   } = $props();
 
-  let mask = $derived(skin.skin.art === "mask");
+  // A mask skin tints its art, except a sheet that says it is final (D122): a
+  // made skin's picture is drawn as the picture, not as a silhouette of it.
+  let mask = $derived(
+    skin.skin.art === "mask" && !("sprite" in el && skin.skin.finalSheets.includes(el.sprite.sheet)),
+  );
   // The renderer's halo (D73): only for a skin that leaves the glow to it,
   // and only while the person has it on (D100). A `baked` skin's halo is in
   // its pixels either way.
