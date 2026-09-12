@@ -910,6 +910,7 @@
         youtube: boolean;
         elsewhere: string[];
         kept: boolean;
+        encrypted: boolean;
       }>("export_cookies_from_browser", { browser: spec });
       const from = await invoke<string>("get_cookies_from").catch(() => "");
       cookies = made.path;
@@ -917,15 +918,33 @@
       // so here beats saying it once per download (D113).
       // Where the sign-in actually is beats telling someone to make one
       // they may already have, in a profile the export never looked at.
-      const found = made.elsewhere.length
-        ? ` These do have one: ${made.elsewhere.join(", ")}. Try one of those instead — a Chromium profile may still refuse to decrypt, Firefox will not.`
-        : ` Sign in to YouTube in ${browser}, then read them again.`;
+      // What to say when no sign-in came through (D115). Three cases, and
+      // only one of them is "you are not signed in": Firefox's store is
+      // plain, so an empty jar from it means what it says. A Chromium store
+      // encrypts the sign-in where no other program can open it, and when the
+      // browser is running its database is locked too, so an empty jar from
+      // one is "encrypted" when the database shows the session and "cannot
+      // tell" when it cannot be read — never "sign in", which the owner was
+      // told three times while signed in everywhere.
+      const src = browsers.find((b) => b.spec === spec);
+      const chromium = src ? src.browser !== "firefox" : false;
+      const reason = made.encrypted
+        ? `${browser} is signed in to YouTube, but keeps that sign-in encrypted so only the browser itself can open it.`
+        : chromium
+          ? `No YouTube sign-in came through from ${browser}. If you are signed in there, it is encrypted so only the browser itself can open it.`
+          : `${browser} has no YouTube sign-in.`;
+      const advice =
+        chromium || made.encrypted
+          ? " Firefox is the browser Windows lets another program read: sign in to YouTube there once, then read firefox with From a browser."
+          : made.elsewhere.length
+            ? ` These do have one: ${made.elsewhere.join(", ")}.`
+            : ` Sign in to YouTube in ${browser}, then read it again.`;
       notice = made.youtube
         ? `Read ${made.count} cookies from ${browser}, with a YouTube sign-in among them. Videos that want one will import now; read them again when they stop.`
         : made.kept
           ? // A read with no sign-in never replaces one that has it (D115).
-            `${browser} has no YouTube sign-in, so the app kept the cookies it already had${from ? ` from ${from}` : ""}. Nothing changed; age-restricted videos still import.`
-          : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused.${found}`;
+            `${reason} The app kept the cookies it already had${from ? ` from ${from}` : ""}, so age-restricted videos still import.`
+          : `${reason}${advice}`;
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
     } finally {
