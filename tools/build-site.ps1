@@ -123,7 +123,7 @@ function Build-Social([string]$Out) {
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-        $g.Clear([System.Drawing.ColorTranslator]::FromHtml($colors.void))
+        $g.Clear([System.Drawing.ColorTranslator]::FromHtml($colors.ground))
 
         # The art takes the right 600 px; the words keep the left 640 clear.
         $art = [System.Drawing.Bitmap]::FromFile((Join-Path $root "design\icon\capybara-florida-1254.png"))
@@ -132,10 +132,10 @@ function Build-Social([string]$Out) {
             $g.DrawImage($art, $W - $aw, 20, $aw, $ah)
         } finally { $art.Dispose() }
 
-        $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.filament))
+        $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.text))
         $arc = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.arc))
         $strike = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.strike))
-        $dim = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, [System.Drawing.ColorTranslator]::FromHtml($colors.filament)))
+        $dim = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, [System.Drawing.ColorTranslator]::FromHtml($colors.text)))
         $mono = @("Iosevka", "Consolas", "Cascadia Mono")
         $eyebrow = Find-Font $mono 18 ([System.Drawing.FontStyle]::Regular)
         $title = Find-Font $mono 92 ([System.Drawing.FontStyle]::Bold)

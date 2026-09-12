@@ -9,24 +9,24 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: var(--void);
-  color: var(--filament);
+  background: var(--ground);
+  color: var(--text);
 }
 button {
   font: inherit;
-  color: var(--arc);
+  color: var(--accent);
   background: transparent;
-  border: 1px solid var(--arc);
+  border: 1px solid var(--accent);
   padding: 6px 12px;
   cursor: pointer;
 }
-button:hover:not(:disabled) { background: color-mix(in srgb, var(--arc) 14%, transparent); }
+button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 button:disabled { opacity: 0.35; cursor: default; }
 input {
   font: inherit;
-  color: var(--filament);
-  background: var(--well);
-  border: 1px solid color-mix(in srgb, var(--arc) 35%, transparent);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   padding: 7px 10px;
 }
-input:focus { outline: none; border-color: var(--arc); }
+input:focus { outline: none; border-color: var(--accent); }

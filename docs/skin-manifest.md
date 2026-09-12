@@ -38,15 +38,15 @@ So this schema is deliberately closer to Winamp's model than to the web's — ab
   "art":  "mask",              // "final": full-colour pixels drawn as they are;
                                // "mask": alpha, tinted from the palette (D73)
   "glow": "renderer",          // "baked": the halo is in the pixels, none added;
-                               // "renderer": painted from `arc`, user-toggleable (D73)
+                               // "renderer": painted from `accent`, user-toggleable (D73)
 
-  "palette": {                 // the six tokens. imported from design/tokens.json,
-    "void":     "#0C0A14",     // never hardcoded in a component
-    "well":     "#05040A",
-    "filament": "#E8F4FF",
-    "arc":      "#6FE3FF",
-    "strike":   "#FF4FD8",
-    "ember":    "#FFB347"
+  "palette": {                 // the six roles. imported from design/tokens.json,
+    "ground":  "#0C0A14",      // never hardcoded in a component
+    "surface": "#05040A",
+    "text":    "#E8F4FF",
+    "accent":  "#6FE3FF",
+    "alert":   "#FF4FD8",
+    "warn":    "#FFB347"
   },
 
   "viscolor": [ /* exactly 24 hex entries, low energy -> peak */ ],
@@ -72,7 +72,7 @@ Every `rect` in a manifest is in logical pixels at 1x, whatever the sheet. A she
 
 ### `tint` on a sprite, for `art: mask` (D92)
 
-A sprite reference is `{ "sheet", "rect" }`, plus `"tint"`, a palette token name, when the skin is `art: mask`: the sprite's alpha is the shape and the token is its colour, so a theme reaches every piece of chrome live. Default `filament`. Ignored under `art: final`, and absent from every imported skin. A `text` element carries a `tint` the same way, and an `inactive: { "tint" }` for when the group loses focus.
+A sprite reference is `{ "sheet", "rect" }`, plus `"tint"`, a palette token name, when the skin is `art: mask`: the sprite's alpha is the shape and the token is its colour, so a theme reaches every piece of chrome live. Default `text`. Ignored under `art: final`, and absent from every imported skin. A `text` element carries a `tint` the same way, and an `inactive: { "tint" }` for when the group loses focus.
 
 ### Fonts: bitmap or system (D92)
 
@@ -208,7 +208,7 @@ Mask art carries strength in its own alpha, which would mean a near-identical sp
 
 ### A `text` says what it shows (D93)
 
-`bind` names a value the app supplies; `value` is a literal, and a `{}` in it is replaced by the bound value, so `"value": "VOL {}"` with `"bind": "volumePercent"` is one element rather than two. One of the two is required. `glow: true` asks for the theme's static glow, for text a `.wsz` would have baked into glyph art — Eyewall's clock. `lit` is a second appearance chosen by state, `{ bind, when, tint?, opacity?, glow? }`: the PLAY tag lights when `playState` is `"playing"`, and STOP lights `strike` where the others light `arc`.
+`bind` names a value the app supplies; `value` is a literal, and a `{}` in it is replaced by the bound value, so `"value": "VOL {}"` with `"bind": "volumePercent"` is one element rather than two. One of the two is required. `glow: true` asks for the theme's static glow, for text a `.wsz` would have baked into glyph art — Eyewall's clock. `lit` is a second appearance chosen by state, `{ bind, when, tint?, opacity?, glow? }`: the PLAY tag lights when `playState` is `"playing"`, and STOP lights `alert` where the others light `accent`.
 
 ### A `toggle` that watches instead of clicking (D93)
 
@@ -228,7 +228,7 @@ A `slot` is a placed box with nothing drawn in it: where the window puts somethi
 
 ### Glow is declared, not assumed
 
-Two top-level fields say what kind of art this is (D73). **`glow`** is `"baked"` — the halo is in the pixels and the renderer adds none — or `"renderer"`, where the renderer paints a halo from the palette's `arc` behind glow-eligible chrome and the user's glow toggle applies: a `glow` checkbox in the library's header until there is a settings window, saved in `settings` and heard by all three classic windows at once (D100). Off, the renderer adds no halo anywhere in a classic window, a text's `glow` included, and the windows drop the halos they draw themselves; a `baked` skin is untouched either way, since its halo is in its pixels. **`art`** is `"final"` — full-colour pixels, drawn as they are — or `"mask"`, alpha masks the renderer tints from the palette, so a theme change reaches the whole chrome rather than only its halo. Both importers produce `art: final, glow: baked`, which is what their source art is, so an imported skin never double-glows and native and imported skins take one rendering path.
+Two top-level fields say what kind of art this is (D73). **`glow`** is `"baked"` — the halo is in the pixels and the renderer adds none — or `"renderer"`, where the renderer paints a halo from the palette's `accent` behind glow-eligible chrome and the user's glow toggle applies: a `glow` checkbox in the library's header until there is a settings window, saved in `settings` and heard by all three classic windows at once (D100). Off, the renderer adds no halo anywhere in a classic window, a text's `glow` included, and the windows drop the halos they draw themselves; a `baked` skin is untouched either way, since its halo is in its pixels. **`art`** is `"final"` — full-colour pixels, drawn as they are — or `"mask"`, alpha masks the renderer tints from the palette, so a theme change reaches the whole chrome rather than only its halo. Both importers produce `art: final, glow: baked`, which is what their source art is, so an imported skin never double-glows and native and imported skins take one rendering path.
 
 What no manifest can change: **no CSS filter on the visualizer surface or any ancestor of it.** That is the 60 Hz path, a filter on a parent runs the child through it every frame, and the analyser's own glow is pre-rendered into its ramp art for that reason. The renderer scopes the toggle per chrome element and does not consult the skin about the exemption — the same status as `prefers-reduced-motion` on the seam below. The modern decorated windows compute glow in CSS and aren't described by this manifest at all.
 
@@ -242,7 +242,7 @@ The signature element, and the one thing here Winamp has no equivalent for — s
 "seam": {
   "thickness": 1,
   "hoverThickness": 2,
-  "color": "arc",              // palette token, never a hex literal
+  "color": "accent",           // palette role, never a hex literal
   "discharge": { "durationMs": 120, "peakThickness": 4 }
 }
 ```

@@ -28,14 +28,18 @@ That keeps the thesis intact. It's not light mode, it's a different color temper
 
 ## Palette
 
-| Token | Hex | Role |
-|---|---|---|
-| `--sugar` | `#FFF4FB` | Field. Near-white with a pink cast — bright, not neutral |
-| `--floss` | `#FF9FD6` | Hot pink. Primary accent |
-| `--mint` | `#7FFFD4` | Aquamarine. Secondary |
-| `--butter` | `#FFE97F` | Pale yellow. Tertiary, warmth |
-| `--periwinkle` | `#A99FFF` | Violet. The callback to paperhurts' base — same hue family as `--void`, opposite end of the value scale |
-| `--ink` | `#4A2A5C` | Deep violet. Text |
+Purricane fills the same six roles every theme fills (D108). Its own words
+for them live in `design/tokens.json` under `names` and are used below, because
+this document was written in them; the token a component reads is the role.
+
+| Token | Purricane calls it | Hex | Role |
+|---|---|---|---|
+| `--ground` | sugar | `#FFF4FB` | Field. Near-white with a pink cast — bright, not neutral |
+| `--surface` | floss | `#FF9FD6` | Hot pink. Insets, and this theme's loudest surface |
+| `--accent` | mint | `#7FFFD4` | Aquamarine. The live edge, where Eyewall glows cyan |
+| `--warn` | butter | `#FFE97F` | Pale yellow. Warmth, and warnings |
+| `--alert` | periwinkle | `#A99FFF` | Violet. Now-playing. The callback to paperhurts' base — same hue family as Eyewall's `--ground`, opposite end of the value scale |
+| `--text` | ink | `#4A2A5C` | Deep violet. Text |
 
 This is the one theme where text is dark on light rather than bright on dark. That's fine; don't fight it. Everything *else* still glows.
 

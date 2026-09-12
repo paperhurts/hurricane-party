@@ -172,7 +172,7 @@
     display: block;
     width: 100%;
     height: 100%;
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
   }
 </style>
