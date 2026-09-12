@@ -171,7 +171,7 @@
     invoke<string>("get_skin").then((s) => (skin = s));
     invoke<string[]>("list_skins").then((s) => (skins = s));
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
-    invoke<string[]>("cookie_browsers").then((b) => (browsers = b));
+    invoke<CookieSource[]>("cookie_browsers").then((b) => (browsers = b));
     // The switches as they were left (#115). Tell the playlist window once
     // they are known, since it may already have asked.
     invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
@@ -804,16 +804,18 @@
    * own cookie store and writes the jar into this app's folder. The list comes
    * from Rust so the picker cannot offer something the allowlist refuses.
    */
-  let browsers = $state<string[]>([]);
+  type CookieSource = { browser: string; profile: string | null; label: string; spec: string };
+  let browsers = $state<CookieSource[]>([]);
   let reading = $state(false);
-  async function fromBrowser(browser: string) {
-    if (!browser || reading) return;
+  async function fromBrowser(spec: string) {
+    if (!spec || reading) return;
+    const browser = browsers.find((b) => b.spec === spec)?.label ?? spec;
     reading = true;
     notice = `Reading cookies from ${browser}…`;
     try {
       const made = await invoke<{ path: string; count: number; youtube: boolean }>(
         "export_cookies_from_browser",
-        { browser },
+        { browser: spec },
       );
       cookies = made.path;
       // A jar with no YouTube sign-in in it fails every age gate, and saying
@@ -932,7 +934,7 @@
         <option value="" disabled selected>{reading ? "Reading…" : "From a browser…"}</option>
         <!-- Windows lets another program read Firefox's cookie store and not
            Chromium's, so the list says which is which before a click (D113). -->
-        {#each browsers as b (b)}<option value={b}>{b === "firefox" ? b : `${b} — encrypted`}</option>{/each}
+        {#each browsers as b (b.spec)}<option value={b.spec}>{b.label}</option>{/each}
       </select>
       {#if cookies}
         <button class="mini" onclick={clearCookies} title="Stop using that file">&times;</button>
