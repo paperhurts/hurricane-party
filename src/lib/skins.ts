@@ -69,6 +69,40 @@ export async function currentSkin(): Promise<Wearable> {
   }
 }
 
+/**
+ * How big each of a skin's sheets really is, in pixels, by file name (D106).
+ * The classic format never declared a sheet's size, and plenty of skins ship
+ * a short one - no volume thumb, an equalizer sheet that stops above the
+ * sliders - so the importer has to look before it can write a manifest that
+ * only claims art the skin has. The webview's own decoder is the authority,
+ * since it is the one that will draw them.
+ *
+ * A file that will not decode is left out rather than guessed at; the caller
+ * then keeps every rectangle for it, and `parseSkin` refuses the skin with
+ * the reason, which is the honest outcome for art nothing can read.
+ */
+export async function measureSheets(dir: string, files: string[]): Promise<Record<string, [number, number]>> {
+  const sizes: Record<string, [number, number]> = {};
+  await Promise.all(
+    files
+      .filter((f) => f.endsWith(".bmp"))
+      .map(
+        (f) =>
+          new Promise<void>((done) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+              sizes[f] = [img.naturalWidth, img.naturalHeight];
+              done();
+            };
+            img.onerror = () => done();
+            img.src = convertFileSrc(`${dir}/${f}`);
+          }),
+      ),
+  );
+  return sizes;
+}
+
 /** The three classic windows' labels are not the manifest's names. */
 export function windowNameOf(label: string): WindowName {
   switch (label) {
