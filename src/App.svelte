@@ -25,6 +25,8 @@
     bytes_total: number | null;
     error: string | null;
     attempts: number;
+    playlist_id: number | null;
+    playlist_name: string | null;
   };
 
   type MediaRow = {
@@ -484,6 +486,66 @@
     grip.addEventListener("pointermove", onMove);
     grip.addEventListener("pointerup", onUp);
     grip.addEventListener("pointercancel", onUp);
+  }
+
+  // ---- stopping downloads (D117) ----
+  //
+  // Pause stops the download and keeps its bytes, Resume picks them up,
+  // Cancel drops the job. An import of a playlist is many jobs, so it also
+  // gets one line that does the same to all of them at once: a Pause button
+  // that flickers past while each 40-second job runs is not a way to stop 40.
+  async function jobAction(cmd: "pause_job" | "resume_job" | "cancel_job" | "retry_job", id: number) {
+    try {
+      await invoke(cmd, { id });
+    } catch (e) {
+      error = String(e);
+    }
+    refreshJobs();
+  }
+
+  type Import = {
+    id: number;
+    name: string;
+    left: number;
+    running: number;
+    queued: number;
+    paused: number;
+    failed: number;
+    done: number;
+  };
+  // Every playlist import with something still to do, in the order its jobs
+  // appear. One job on its own is just a row; the header starts at two.
+  let imports = $derived.by(() => {
+    const by = new Map<number, Import>();
+    for (const j of jobs) {
+      if (j.playlist_id == null) continue;
+      const g =
+        by.get(j.playlist_id) ??
+        { id: j.playlist_id, name: j.playlist_name ?? "Playlist", left: 0, running: 0, queued: 0, paused: 0, failed: 0, done: 0 };
+      g[j.status] += 1;
+      if (j.status !== "done") g.left += 1;
+      by.set(j.playlist_id, g);
+    }
+    return [...by.values()].filter((g) => g.left > 0 && g.left + g.done >= 2);
+  });
+
+  async function importAction(g: Import, action: "pause" | "resume" | "cancel") {
+    if (action === "cancel") {
+      const yes = await ask(
+        `Cancel the ${g.left} unfinished ${g.left === 1 ? "download" : "downloads"} of "${g.name}"?\n\n` +
+          `What already finished stays in the library and in the playlist.`,
+        { title: "Cancel import", kind: "warning", okLabel: "Cancel downloads", cancelLabel: "Keep going" },
+      );
+      if (!yes) return;
+    }
+    try {
+      const n = await invoke<number>("playlist_jobs", { playlistId: g.id, action });
+      const verb = action === "pause" ? "Paused" : action === "resume" ? "Resumed" : "Cancelled";
+      notice = `${verb} ${n} ${n === 1 ? "download" : "downloads"} of "${g.name}".`;
+    } catch (e) {
+      error = String(e);
+    }
+    refreshJobs();
   }
 
   async function newList() {
@@ -1165,6 +1227,32 @@
   {#if jobs.length}
     <section class="queue">
       <h2>Downloads</h2>
+      <!-- One line per playlist import that is still going (D117). -->
+      {#each imports as g (g.id)}
+        <div class="import">
+          <span class="what">Importing <strong>{g.name}</strong></span>
+          <span class="tally">
+            {[
+              g.running && `${g.running} running`,
+              g.queued && `${g.queued} queued`,
+              g.paused && `${g.paused} paused`,
+              g.failed && `${g.failed} failed`,
+              // Finished jobs leave this list after five minutes, so a count
+              // of them here is only ever the recent ones; zero says nothing.
+              g.done && `${g.done} just finished`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          {#if g.running || g.queued}
+            <button class="mini" onclick={() => importAction(g, "pause")}>Pause all</button>
+          {/if}
+          {#if g.paused}
+            <button class="mini" onclick={() => importAction(g, "resume")}>Resume all</button>
+          {/if}
+          <button class="mini ghost" onclick={() => importAction(g, "cancel")}>Cancel the rest</button>
+        </div>
+      {/each}
       {#each jobs as j (j.id)}
         <div class="job" class:failed={j.status === "failed"}>
           <div class="line">
@@ -1175,10 +1263,16 @@
               <span class="bytes">{mb(j.bytes_done)} / {mb(j.bytes_total)}</span>
             {/if}
             {#if j.status === "failed"}
-              <button class="mini" onclick={() => invoke("retry_job", { id: j.id }).then(refreshJobs)}>Retry</button>
+              <button class="mini" onclick={() => jobAction("retry_job", j.id)}>Retry</button>
+              <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Take it off the list">Dismiss</button>
             {/if}
             {#if j.status === "queued" || j.status === "running"}
-              <button class="mini" onclick={() => invoke("cancel_job", { id: j.id }).then(refreshJobs)}>Pause</button>
+              <button class="mini" onclick={() => jobAction("pause_job", j.id)} title="Stop, and keep what has downloaded">Pause</button>
+              <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Stop, and take it off the list">Cancel</button>
+            {/if}
+            {#if j.status === "paused"}
+              <button class="mini" onclick={() => jobAction("resume_job", j.id)} title="Carry on from where it stopped">Resume</button>
+              <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Take it off the list">Cancel</button>
             {/if}
           </div>
           {#if j.status === "running"}
@@ -1412,6 +1506,14 @@
   .status.failed  { color: var(--warn); }
   .status.done    { color: var(--alert); }
   .status.paused  { color: color-mix(in srgb, var(--text) 35%, transparent); }
+  /* A playlist import's own line above its rows (D117). */
+  .import { display: flex; align-items: center; gap: 8px; padding: 6px 9px; font-size: 12px;
+            border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+            background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+  .import .what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .import .what strong { color: var(--accent); font-weight: 400; }
+  .import .tally { flex: 1 1 auto; font-size: 11px; white-space: nowrap;
+                   color: color-mix(in srgb, var(--text) 50%, transparent); }
   .stage { font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
            color: color-mix(in srgb, var(--text) 35%, transparent); }
   .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

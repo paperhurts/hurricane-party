@@ -731,6 +731,22 @@ pub(crate) fn validate_url(raw: &str) -> Result<String> {
 }
 
 /// Phase 1 — probe. No download. Cheap enough to run on paste.
+/// Hand a job's current child to the runner's registry, so Pause and Cancel
+/// can stop it (D117). Each stage replaces the last: probe, download, extract.
+fn track_child(
+    app: &AppHandle,
+    job_id: Option<i64>,
+    child: tauri_plugin_shell::process::CommandChild,
+) {
+    if let Some(id) = job_id {
+        app.state::<crate::jobs::Running>()
+            .0
+            .lock()
+            .unwrap()
+            .insert(id, child);
+    }
+}
+
 pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Probed> {
     let url = &validate_url(url)?;
     emit(
@@ -756,13 +772,15 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         url.to_string(),
     ]);
 
-    let (mut rx, _child) = app
+    let (mut rx, child) = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+    // Pause and Cancel stop this child (D117).
+    track_child(app, job_id, child);
 
     let mut json = String::new();
     let mut tail = Tail::new();
@@ -1080,13 +1098,15 @@ async fn download_media(
         url.to_string(),
     ]);
 
-    let (mut rx, _child) = app
+    let (mut rx, child) = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+    // Pause and Cancel stop this child (D117).
+    track_child(app, job_id, child);
 
     let mut tail = Tail::new();
     let mut code = 0;
@@ -1398,13 +1418,15 @@ async fn extract_mp3(
         scratch.to_string_lossy().into_owned(),
     ]);
 
-    let (mut rx, _child) = app
+    let (mut rx, child) = app
         .shell()
         .sidecar("ffmpeg")
         .map_err(|e| PipelineError::Sidecar(format!("ffmpeg sidecar missing: {e}")))?
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start ffmpeg: {e}")))?;
+    // Pause and Cancel stop this child (D117).
+    track_child(app, job_id, child);
 
     let mut tail = Tail::new();
     let mut code = 0;
