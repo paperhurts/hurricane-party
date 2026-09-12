@@ -139,6 +139,33 @@
 
   let shown = $derived(el.type === "text" ? wording(el.value, el.bind) : "");
 
+  // ---- bitmap text (D104) ----
+  //
+  // A classic skin's words are art: a grid of glyphs on a sheet, and a string
+  // is drawn by cutting one per character. How many fit across the grid is
+  // the sheet's own width. A character the sheet has no glyph for leaves its
+  // box empty, which is what the classic drew too; `tracking` is the gap
+  // between boxes, 3 on the clock whose colon is painted into the window.
+  let glyphs = $derived.by(() => {
+    if (el.type !== "text" || font?.type !== "bitmap" || !look) return null;
+    const [gw, gh] = font.glyphSize;
+    const cols = Math.max(1, Math.floor(skin.sheetSize(font.sheet).w / gw));
+    const cells = [...shown].map((ch) => {
+      const i = font.map.indexOf(ch.toLowerCase());
+      if (i < 0) return null;
+      const rect: [number, number, number, number] = [(i % cols) * gw, Math.floor(i / cols) * gh, gw, gh];
+      return skin.slice({ sheet: font.sheet, rect, tint: look.tint });
+    });
+    const width = cells.length * (gw + font.tracking) - font.tracking;
+    return { cells, w: gw, h: gh, tracking: font.tracking, width };
+  });
+  /** A bitmap line too long for its box scrolls, and its width is arithmetic
+   * rather than a measurement: every glyph is the same size. */
+  let glyphRoll = $derived.by(() => {
+    if (!glyphs || el.type !== "text" || el.overflow !== "scroll") return false;
+    return glyphs.width > placeRect(el, base, current).w;
+  });
+
   // ---- a button's words and its disabled state (D99) ----
 
   let label = $derived(el.type === "button" || el.type === "toggle" ? (el.label ?? null) : null);
@@ -422,6 +449,35 @@
   >
     {#if slot}
       {@render slot()}
+    {:else if glyphs}
+      <!-- Cut from the skin's own sheet, so `mask` art takes the text's tint
+           and `final` art is the picture the author drew. -->
+      {#snippet run()}
+        <span class="sp-run" style="gap:{glyphs.tracking}px">
+          {#each glyphs.cells as cell, i (i)}
+            {#if cell}
+              <span
+                class="sp sp-glyph"
+                class:mask
+                class:final={!mask}
+                style="width:{glyphs.w}px;height:{glyphs.h}px;{vars({ n: cell })}"
+              ></span>
+            {:else}
+              <span class="sp-glyph" style="width:{glyphs.w}px;height:{glyphs.h}px"></span>
+            {/if}
+          {/each}
+        </span>
+      {/snippet}
+      {#if glyphRoll}
+        <span class="rolling" style="animation-duration:{Math.max(6, glyphs.cells.length * 0.35)}s">
+          {@render run()}<span class="sp-gap" style="width:{glyphs.w * 3}px"></span>{@render run()}<span
+            class="sp-gap"
+            style="width:{glyphs.w * 3}px"
+          ></span>
+        </span>
+      {:else}
+        {@render run()}
+      {/if}
     {:else if roll}
       <!-- Not `.t`: that class clips and ellipsizes, which is right for a
            title that fits and wrong for one that moves. -->

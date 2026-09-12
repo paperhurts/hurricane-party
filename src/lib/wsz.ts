@@ -148,6 +148,12 @@ const PLEDIT_SP = {
   bottomLeft: [0, 72, 125, 38] as Rect,
   bottomRight: [126, 72, 150, 38] as Rect,
   shadeBar: [72, 57, 25, 14] as Rect,
+  close: [52, 42, 9, 9] as Rect,
+  collapse: [62, 42, 9, 9] as Rect,
+  // The menu glyphs a press shows, from the popups the classic opened.
+  addDir: [0, 130, 22, 18] as Rect,
+  removeSelected: [54, 149, 22, 18] as Rect,
+  loadList: [204, 149, 22, 18] as Rect,
 };
 
 // ---- where each element sits in the window ----
@@ -160,7 +166,11 @@ const L = {
   minimize: [244, 3, 9, 9] as Rect,
   shade: [254, 3, 9, 9] as Rect,
   close: [264, 3, 9, 9] as Rect,
-  clock: [36, 26, 63, 13] as Rect,
+  // The clock is four digits with the colon painted into MAIN.BMP between
+  // them, so it is two elements, not one string (D104). Each pair is two
+  // 9-wide glyphs 3 apart, which is the font's tracking.
+  clockMinutes: [48, 26, 21, 13] as Rect,
+  clockSeconds: [78, 26, 21, 13] as Rect,
   state: [26, 28, 9, 9] as Rect,
   title: [111, 27, 153, 6] as Rect,
   kbps: [111, 43, 15, 6] as Rect,
@@ -188,11 +198,25 @@ const L = {
   eqBandY: 38,
   eqBandW: 14,
   eqBandH: 63,
-  // The playlist, at its base size. Its edges tile, so these carry `stretch`.
+  // The playlist, at its base size. Its edges tile, so these carry `stretch`,
+  // and its bottom-right block carries the corner (D103).
   plTopHeight: 20,
   plLeftWidth: 12,
   plRightWidth: 20,
   plBottomHeight: 38,
+  plBottomLeftWidth: 125,
+  plBottomRightWidth: 150,
+  // All at the base size, 275 x 116; the anchors carry them from there.
+  /** The bar's menu buttons, 22 x 18, twelve up from the bottom. */
+  plAdd: [14, 86, 22, 18] as Rect,
+  plRemove: [43, 86, 22, 18] as Rect,
+  plList: [231, 86, 22, 18] as Rect,
+  /** The running time, in the bottom-right block. */
+  plStatus: [132, 88, 60, 10] as Rect,
+  /** The link field, over the bar's left half while it is open. */
+  plUrl: [12, 86, 219, 18] as Rect,
+  /** The title bar's own buttons. */
+  plShade: [254, 3, 9, 9] as Rect,
 };
 
 /** The 5 x 6 font in TEXT.BMP: three rows of 31 glyphs, in this order. The
@@ -224,9 +248,14 @@ export function parsePledit(text: string): Record<string, string> {
 }
 
 /**
- * `VISCOLOR.TXT`, the visualizer's ramp: 24 lines of `r,g,b`, anything after
- * them ignored, comments after `//`. Fewer than 24 usable lines is not a ramp,
- * and the caller falls back to the theme's.
+ * `VISCOLOR.TXT`, the visualizer's ramp: lines of `r,g,b`, anything after
+ * them ignored, comments after `//`.
+ *
+ * The format wants 24 and the skins in the wild ship 23, 24 or 25 - of
+ * thirteen real skins, seven were not 24 (D106). So take what is there: the
+ * first 24, and when the file is short, repeat its last colour to fill. Only
+ * a file with no colours at all is not a ramp, and then the caller keeps the
+ * theme's.
  */
 export function parseViscolor(text: string): string[] | null {
   const out: string[] = [];
@@ -239,7 +268,9 @@ export function parseViscolor(text: string): string[] | null {
     out.push(`#${hex}`);
     if (out.length === 24) break;
   }
-  return out.length === 24 ? out : null;
+  if (out.length === 0) return null;
+  while (out.length < 24) out.push(out[out.length - 1]);
+  return out;
 }
 
 /**
@@ -265,6 +296,14 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
 
 // ---- the manifest ----
 
+/**
+ * What this importer is up to. A manifest is not a skin, it is what this code
+ * made of one, so it carries the generation that wrote it and is rebuilt when
+ * this number moves on (D107). Bump it whenever the mapping changes what it
+ * writes for the same art.
+ */
+export const WSZ_GENERATION = 2;
+
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
   files: string[];
@@ -273,6 +312,12 @@ export type WszInput = {
   /** `PLEDIT.TXT` and `VISCOLOR.TXT`, when the zip has them. */
   pledit?: string;
   viscolor?: string;
+  /** Each sheet's real size in pixels, by file name, when they have been
+   * measured. A classic skin's sheets are conventionally sized and often are
+   * not: the format never declared a size, so an author who needed no volume
+   * thumb simply stopped the file short. Given sizes, the art that is not
+   * there is left out of the manifest rather than refusing the skin (D106). */
+  sizes?: Record<string, [number, number]>;
 };
 
 /** A sprite reference in the manifest's shape. Tint is the renderer's word for
@@ -310,19 +355,29 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
   const pledit = input.pledit ? parsePledit(input.pledit) : {};
   if (!input.pledit) warnings.push("no PLEDIT.TXT: the playlist's colours come from the theme");
   const ramp = input.viscolor ? parseViscolor(input.viscolor) : null;
-  if (input.viscolor && !ramp) warnings.push("VISCOLOR.TXT is not 24 colours: the analyser keeps the theme's ramp");
+  if (input.viscolor && !ramp) warnings.push("VISCOLOR.TXT has no colours in it: the analyser keeps the theme's ramp");
 
   const fonts: Record<string, unknown> = {};
   if (has("text")) fonts.chrome = { type: "bitmap", sheet: "text", glyphSize: [5, 6], map: TEXT_MAP };
-  if (has("numbers")) fonts.time = { type: "bitmap", sheet: "numbers", glyphSize: [9, 13], map: NUMBERS_MAP };
+  if (has("numbers")) {
+    fonts.time = { type: "bitmap", sheet: "numbers", glyphSize: [9, 13], map: NUMBERS_MAP, tracking: 3 };
+  }
 
-  const main = mainWindow(sheets, fonts, warnings);
-  const equalizer = eqWindow(sheets, warnings);
-  const playlist = playlistWindow(sheets, fonts, warnings);
+  const windows: Record<string, WindowJson> = {
+    main: mainWindow(sheets, fonts, warnings),
+    equalizer: eqWindow(sheets, warnings),
+    playlist: playlistWindow(sheets, fonts, warnings),
+  };
+  if (input.sizes) prune(windows, sheets, input.sizes, warnings);
 
   return {
     manifest: {
       format: "hp-skin/1",
+      // Not part of hp-skin/1 - an unknown key is ignored by the validator -
+      // and the whole point of it: an imported skin's manifest is derived
+      // from its art, so a better importer rewrites it rather than leaving a
+      // person with what an older one could manage (D107).
+      generator: WSZ_GENERATION,
       name: input.name,
       author: "",
       authoredScale: 1,
@@ -333,10 +388,102 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
       viscolor: ramp ?? themeRamp("eyewall"),
       visualizer: { component: "spectrum-bars" },
       fonts,
-      windows: { main, equalizer, playlist },
+      windows,
     },
     warnings,
   };
+}
+
+// ---- what the sheets actually have (D106) ----
+
+type ElementJson = Record<string, unknown>;
+type SetJson = { size: number[]; elements: Record<string, ElementJson>; [k: string]: unknown };
+type WindowJson = { elements: Record<string, ElementJson>; shade: SetJson; [k: string]: unknown };
+
+/** Which keys of an element hold a sprite, and whether the element can go on
+ * without that one. A button with no art is nothing to look at; a slider with
+ * a track but no thumb is still a slider. */
+const SPRITE_KEYS: Record<string, { required: string[]; optional: string[] }> = {
+  image: { required: ["sprite"], optional: ["inactive"] },
+  nineslice: { required: ["sprite"], optional: [] },
+  button: { required: ["sprite"], optional: ["hover", "active", "inactive"] },
+  toggle: { required: ["sprite"], optional: ["hover", "active", "inactive"] },
+  slider: { required: [], optional: ["track", "fill", "thumb"] },
+};
+
+const fitsIn = (size: [number, number] | undefined, rect: Rect) =>
+  !size || (rect[0] >= 0 && rect[1] >= 0 && rect[0] + rect[2] <= size[0] && rect[1] + rect[3] <= size[1]);
+
+/**
+ * Drop the art a skin's sheets do not actually have (D106).
+ *
+ * Every rectangle in the table is where the classic format puts a sprite, but
+ * plenty of skins ship a shorter file: no volume thumb, an equalizer sheet
+ * that stops above the sliders, a seek bar five pixels tall. The renderer
+ * refuses a manifest whose rect leaves its sheet, and rightly — so the
+ * manifest must not claim what is not there. An element that loses art it
+ * cannot do without is left out, and the window carries on with the rest.
+ */
+function prune(
+  windows: Record<string, WindowJson>,
+  sheets: Record<string, string>,
+  sizes: Record<string, [number, number]>,
+  warnings: string[],
+) {
+  const has = (ref: unknown) => {
+    const r = ref as { sheet: string; rect: Rect } | undefined;
+    if (!r) return true;
+    return fitsIn(sizes[sheets[r.sheet]], r.rect);
+  };
+
+  for (const [wname, win] of Object.entries(windows)) {
+    const lost: string[] = [];
+    for (const set of [win as unknown as SetJson, win.shade]) {
+      for (const [name, el] of Object.entries(set.elements)) {
+        const keys = SPRITE_KEYS[el.type as string];
+        if (!keys) continue;
+        for (const k of keys.optional) if (k in el && !has(el[k])) delete el[k];
+        const on = el.on as Record<string, unknown> | undefined;
+        if (on) {
+          for (const k of ["hover", "active", "inactive"]) if (k in on && !has(on[k])) delete on[k];
+          // A toggle with no `on` art cannot show its other state; it keeps
+          // the art it has and stops being a toggle, so a click still works.
+          if (!has(on.sprite)) {
+            delete el.on;
+            if (el.action) {
+              el.type = "button";
+              delete el.bind;
+              delete el.when;
+            }
+          }
+        }
+        const gone =
+          keys.required.some((k) => !has(el[k])) ||
+          (el.type === "slider" && !["track", "fill", "thumb"].some((k) => k in el)) ||
+          (el.type === "toggle" && !el.on);
+        if (gone) {
+          // The curve's box is required (D99); without art it is a plain box
+          // and the window draws the curve on the window's own ground.
+          if (name === "eqCurveWell") {
+            set.elements[name] = { type: "slot", rect: el.rect };
+          } else if (name === "titlebar") {
+            // Every set needs its drag handle, and a skin without one is not
+            // a skin this app can show (skin-manifest.md).
+            throw new SkinError(`${wname}: the title bar's art is not in the sheet`);
+          } else {
+            delete set.elements[name];
+            lost.push(name);
+          }
+        }
+      }
+    }
+    if (lost.length) {
+      const shown = lost.slice(0, 6).join(", ");
+      warnings.push(
+        `${wname}: this skin's sheets stop short of ${shown}${lost.length > 6 ? ` and ${lost.length - 6} more` : ""}`,
+      );
+    }
+  }
 }
 
 /** The title bar's four buttons, which every window set repeats. */
@@ -376,7 +523,7 @@ function lamp(state: string, rect: Rect) {
 function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknown>, warnings: string[]) {
   const has = (s: string) => s in sheets;
   const buttons = titleButtons(false);
-  const els: Record<string, unknown> = {
+  const els: Record<string, ElementJson> = {
     backdrop: { type: "image", rect: [0, 0, 275, 116], sprite: sp("main", MAIN_SP.background) },
     titlebar: {
       type: "image",
@@ -388,7 +535,10 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
     ...buttons,
   };
 
-  if (fonts.time) els.clock = { type: "text", rect: L.clock, font: "time", bind: "elapsed" };
+  if (fonts.time) {
+    els.clockMinutes = { type: "text", rect: L.clockMinutes, font: "time", bind: "elapsedMinutes" };
+    els.clockSeconds = { type: "text", rect: L.clockSeconds, font: "time", bind: "elapsedSeconds" };
+  }
   if (fonts.chrome) {
     els.trackTitle = { type: "text", rect: L.title, font: "chrome", bind: "trackTitle", overflow: "scroll" };
     els.kbps = { type: "text", rect: L.kbps, font: "chrome", bind: "kbps" };
@@ -514,7 +664,7 @@ function eqWindow(sheets: Record<string, string>, warnings: string[]) {
   const sheet = "eqmain" in sheets ? "eqmain" : "titlebar";
   const bar = "eqmain" in sheets ? e.barActive : TITLEBAR_SP.barActive;
   const barIdle = "eqmain" in sheets ? e.bar : TITLEBAR_SP.bar;
-  const els: Record<string, unknown> = {};
+  const els: Record<string, ElementJson> = {};
   if ("eqmain" in sheets) {
     els.backdrop = { type: "image", rect: [0, 0, 275, 116], sprite: sp("eqmain", e.background) };
   }
@@ -584,7 +734,7 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
   const hasArt = "pledit" in sheets;
   if (!hasArt) warnings.push("no PLEDIT.BMP: the playlist wears Main's title bar over the theme's ground");
   const top = L.plTopHeight;
-  const els: Record<string, unknown> = {};
+  const els: Record<string, ElementJson> = {};
 
   if (hasArt) {
     els.topLeft = { type: "image", rect: [0, 0, 25, top], sprite: sp("pledit", p.topLeft) };
@@ -600,11 +750,22 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
     els.leftTile = { type: "image", rect: [0, top, 12, 58], stretch: "y", sprite: sp("pledit", p.leftTile) };
     els.rightTile = { type: "image", rect: [255, top, 20, 58], anchor: "right", stretch: "y", sprite: sp("pledit", p.rightTile) };
     els.bottomLeft = { type: "image", rect: [0, 78, 125, 38], anchor: "bottom", sprite: sp("pledit", p.bottomLeft) };
-    // The classic's bottom-right corner carries the resize grip and the mini
-    // transport. It wants the bottom AND the right edge, and an element may
-    // name only one; at the base width it is where it belongs, and widening
-    // the window leaves it behind. The next PR gives the format the corner.
-    els.bottomRight = { type: "image", rect: [125, 78, 150, 38], anchor: "bottom", sprite: sp("pledit", p.bottomRight) };
+    // The classic's bottom-right block carries the running time and the grip,
+    // and wants the corner rather than an edge (D103).
+    els.bottomRight = {
+      type: "image",
+      rect: [125, 78, 150, 38],
+      anchor: "bottom-right",
+      sprite: sp("pledit", p.bottomRight),
+    };
+    els.shade = {
+      type: "toggle",
+      rect: L.plShade,
+      anchor: "right",
+      sprite: sp("pledit", p.collapse),
+      on: { sprite: sp("pledit", p.collapse) },
+      action: "shade",
+    };
   } else {
     els.titlebar = {
       type: "image",
@@ -617,10 +778,11 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
   }
 
   const listTop = hasArt ? top : 14;
-  const listHeight = 116 - listTop - (hasArt ? 38 : 13);
+  const listHeight = 116 - listTop - (hasArt ? L.plBottomHeight : 13);
   els.list = {
     type: "list",
-    rect: [hasArt ? 12 : 4, listTop, hasArt ? 251 : 267, listHeight],
+    // Between the two tiled edges, 12 and 20 wide, as the classic's rows sit.
+    rect: [hasArt ? L.plLeftWidth : 4, listTop, hasArt ? 275 - L.plLeftWidth - L.plRightWidth : 267, listHeight],
     stretch: "xy",
     rowHeight: 13,
     font: fonts.chrome ? "chrome" : "system",
@@ -629,8 +791,33 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
     selected: "arc",
   };
   if (!fonts.chrome && !fonts.system) fonts.system = { type: "system", size: 6, case: "none", tracking: 0 };
-  els.listStatus = { type: "slot", rect: [150, 116 - (hasArt ? 30 : 13), 110, 12], anchor: "bottom", stretch: "x" };
-  els.urlField = { type: "slot", rect: [12, 116 - (hasArt ? 30 : 13), 251, 12], anchor: "bottom", stretch: "x" };
+
+  if (hasArt) {
+    // The classic's bottom bar is five buttons that opened menus. This app
+    // has no menus, so each maps to the one thing its menu was mostly for,
+    // and a press shows that menu item's own glyph (D103). The select and
+    // misc menus have nothing here to be, and stay as the art they are drawn
+    // into.
+    const barButton = (rect: Rect, patch: Rect, glyph: Rect, action: string, anchor?: string) => ({
+      type: "button",
+      rect,
+      ...(anchor ? { anchor } : {}),
+      sprite: sp("pledit", patch),
+      active: sp("pledit", glyph),
+      action,
+    });
+    els.addButton = barButton(L.plAdd, [14, 80, 22, 18], p.addDir, "add", "bottom");
+    els.removeButton = barButton(L.plRemove, [43, 80, 22, 18], p.removeSelected, "remove", "bottom");
+    els.libraryButton = barButton(L.plList, [232, 80, 22, 18], p.loadList, "library", "bottom-right");
+    // No URL button: the classic's Add was a menu, and a link is added from
+    // the library window. Nothing of the skin is lost, so this is a line in
+    // the docs rather than a warning on every import.
+    els.listStatus = { type: "slot", rect: L.plStatus, anchor: "bottom-right" };
+    els.urlField = { type: "slot", rect: L.plUrl, anchor: "bottom", stretch: "x" };
+  } else {
+    els.listStatus = { type: "slot", rect: [150, 103, 110, 12], anchor: "bottom", stretch: "x" };
+    els.urlField = { type: "slot", rect: [4, 103, 267, 12], anchor: "bottom", stretch: "x" };
+  }
 
   return {
     size: [275, 116],

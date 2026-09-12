@@ -27,6 +27,9 @@ export type LoadedSkin = {
   dpr: number;
   /** The sprite at a reference. Memoised by sheet and rect. */
   slice(ref: SpriteRef): Slice;
+  /** A sheet's size in logical pixels. A bitmap font needs it: its glyphs are
+   * a grid, and how many fit across is the sheet's own width (D104). */
+  sheetSize(name: string): { w: number; h: number };
 };
 
 type Sheet = { canvas: HTMLCanvasElement; scale: Scale };
@@ -34,6 +37,15 @@ type Sheet = { canvas: HTMLCanvasElement; scale: Scale };
 function decode(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    // An imported skin's sheets arrive over the asset protocol, which is a
+    // different origin from the window (`http://asset.localhost` on Windows).
+    // A plain image load is a no-CORS request, so the image is never
+    // CORS-clean, and drawing it to a canvas taints the canvas: every
+    // `toDataURL` in `slice` below then throws and the skin cannot be worn.
+    // The protocol answers CORS requests with the window's own origin, so
+    // asking for one is all it takes - before `src`, or the load has already
+    // started without it. Harmless for the shipped skin's data: URLs.
+    img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => reject(new SkinError(`sheet failed to decode: ${url.slice(0, 64)}`));
     img.src = url;
@@ -94,6 +106,11 @@ export async function loadSkin(
       const out: Slice = { url: c.toDataURL("image/png"), w, h, scale: s, tint: ref.tint };
       cache.set(key, out);
       return out;
+    },
+    sheetSize(name) {
+      const sheet = sheets.get(name);
+      if (!sheet) return { w: 0, h: 0 };
+      return { w: sheet.canvas.width / sheet.scale, h: sheet.canvas.height / sheet.scale };
     },
   };
 }

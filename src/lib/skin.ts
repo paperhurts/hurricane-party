@@ -53,6 +53,10 @@ export const BINDS = [
   "windowTitle",
   "trackTitle",
   "elapsed",
+  // The same time in two halves, for a clock whose colon is painted into the
+  // window behind its digits (D104): minutes blank-padded, seconds zero-padded.
+  "elapsedMinutes",
+  "elapsedSeconds",
   "remaining",
   "kbps",
   "khz",
@@ -104,14 +108,23 @@ export type SpriteRef = { sheet: string; rect: Rect; tint: Token };
 
 export type Font =
   | { type: "system"; size: number; case: "upper" | "none"; tracking: number }
-  | { type: "bitmap"; sheet: string; glyphSize: [number, number]; map: string };
+  | {
+      type: "bitmap";
+      sheet: string;
+      glyphSize: [number, number];
+      map: string;
+      /** Pixels between one glyph's box and the next. Classic text runs flush
+       * (0); the classic clock's digits sit 3 apart, because the colon
+       * between its pairs is painted into the window behind them (D104). */
+      tracking: number;
+    };
 
 type Placed = {
   name: string;
   rect: Rect;
   /** Which edge the rect is measured from when the window is bigger than its
    * base size. Absent means the left/top edge, as it always did. */
-  anchor?: "right" | "bottom";
+  anchor?: "right" | "bottom" | "bottom-right";
   /** Which axes the rect grows along with the window. */
   stretch?: "x" | "y" | "xy";
 };
@@ -372,7 +385,9 @@ function optSprite(o: Obj, key: string, sheets: Skin["sheets"], path: string): S
 // collide and take the whole window down with them.
 function placed(o: Obj, name: string, path: string): Placed & { name: string } {
   const p: Placed = { name, rect: rect(o.rect, `${path}.rect`) };
-  if (o.anchor !== undefined) p.anchor = oneOf(o.anchor, ["right", "bottom"] as const, `${path}.anchor`);
+  if (o.anchor !== undefined) {
+    p.anchor = oneOf(o.anchor, ["right", "bottom", "bottom-right"] as const, `${path}.anchor`);
+  }
   if (o.stretch !== undefined) p.stretch = oneOf(o.stretch, ["x", "y", "xy"] as const, `${path}.stretch`);
   return p;
 }
@@ -657,7 +672,13 @@ function font(v: unknown, sheets: Skin["sheets"], path: string): Font {
   }
   const sheet = str(v, "sheet", path);
   if (!(sheet in sheets)) fail(`${path}.sheet`, "names no sheet");
-  return { type, sheet, glyphSize: pair(v.glyphSize, `${path}.glyphSize`, 1), map: str(v, "map", path) };
+  return {
+    type,
+    sheet,
+    glyphSize: pair(v.glyphSize, `${path}.glyphSize`, 1),
+    map: str(v, "map", path),
+    tracking: v.tracking === undefined ? 0 : int(v.tracking, `${path}.tracking`, 0),
+  };
 }
 
 function sheetsOf(v: unknown, authored: Scale, path: string): Skin["sheets"] {
@@ -894,9 +915,11 @@ export function checkSheetBounds(skin: Skin, sizes: Record<string, { w: number; 
 
 /**
  * Where an element sits in a window that may be bigger than the skin's base
- * size (the playlist, D30). Left/top-anchored rects stay put; a `right` or
- * `bottom` anchor moves with that edge; `stretch` grows the rect along the
- * axes named. All in logical px; the webview's zoom does the rest (D76).
+ * size (the playlist, D30). Left/top-anchored rects stay put; a `right`,
+ * `bottom` or `bottom-right` anchor moves with that edge or corner, which a
+ * classic skin's bottom-right block needs (D103); `stretch` grows the rect
+ * along the axes named. All in logical px; the webview's zoom does the rest
+ * (D76).
  */
 export function placeRect(
   e: Placed,
@@ -906,8 +929,8 @@ export function placeRect(
   const dx = current[0] - base[0];
   const dy = current[1] - base[1];
   let [x, y, w, h] = e.rect;
-  if (e.anchor === "right") x += dx;
-  if (e.anchor === "bottom") y += dy;
+  if (e.anchor === "right" || e.anchor === "bottom-right") x += dx;
+  if (e.anchor === "bottom" || e.anchor === "bottom-right") y += dy;
   if (e.stretch === "x" || e.stretch === "xy") w += dx;
   if (e.stretch === "y" || e.stretch === "xy") h += dy;
   return { x, y, w, h };

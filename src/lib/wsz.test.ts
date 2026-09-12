@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSkin, SkinError, type Element } from "./skin";
+import { parseSkin, placeRect, SkinError, type Element } from "./skin";
 import { colorsFor } from "./theme";
 import { parsePledit, parseViscolor, paletteFrom, wszManifest } from "./wsz";
 
@@ -88,11 +88,27 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     expect(els.eject).toMatchObject({ rect: [136, 89, 22, 16], action: "eject" });
     expect(els.seek).toMatchObject({ rect: [16, 72, 248, 10], bind: "position" });
     expect(els.vis).toMatchObject({ rect: [24, 43, 76, 16] });
-    expect(els.clock).toMatchObject({ rect: [36, 26, 63, 13], font: "time", bind: "elapsed" });
+    // Four digits with the colon painted into the window between them, so
+    // the clock is two elements, each two glyphs 3 apart (D104).
+    expect(els.clockMinutes).toMatchObject({ rect: [48, 26, 21, 13], font: "time", bind: "elapsedMinutes" });
+    expect(els.clockSeconds).toMatchObject({ rect: [78, 26, 21, 13], font: "time", bind: "elapsedSeconds" });
     // The two the play order drives, which the classic had and this app
     // gained at v0.4b (D97).
     expect(els.shuffleButton).toMatchObject({ action: "shuffle", bind: "shuffle", when: "on" });
     expect(els.repeatButton).toMatchObject({ action: "repeat", bind: "repeatOn", when: "on" });
+  });
+
+  it("declares its fonts as glyph grids, the clock's digits 3 apart", () => {
+    const { skin } = parseSkin(make().manifest);
+    expect(skin.fonts.time).toMatchObject({ type: "bitmap", sheet: "numbers", glyphSize: [9, 13], tracking: 3 });
+    expect(skin.fonts.chrome).toMatchObject({ type: "bitmap", sheet: "text", glyphSize: [5, 6], tracking: 0 });
+    const chrome = skin.fonts.chrome;
+    if (chrome.type !== "bitmap") throw new Error("chrome font is not a bitmap font");
+    // Three rows of 31, the classic sheet's own grid: letters, then digits
+    // and punctuation, then the three Nordic vowels and two marks.
+    expect(chrome.map).toHaveLength(93);
+    expect(chrome.map.slice(0, 26)).toBe("abcdefghijklmnopqrstuvwxyz");
+    expect(chrome.map.slice(31, 41)).toBe("0123456789");
   });
 
   it("hides the state lamps it is not showing behind the window's own pixels", () => {
@@ -132,6 +148,39 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     const band2 = els.find((e: Element) => e.name === "eqBand2")!;
     expect(band2.rect[0] - band1.rect[0]).toBe(18);
     expect(els.find((e: Element) => e.name === "eqOnButton")).toMatchObject({ action: "eqOn", bind: "eqOn" });
+  });
+
+  it("gives the playlist its tiled frame, its bar and the corner that holds both edges", () => {
+    const { skin } = parseSkin(make().manifest);
+    const els = skin.windows.playlist.full.elements;
+    const by = (n: string) => els.find((e: Element) => e.name === n);
+    // The frame: corners at their size, the title and the edges tiling, and
+    // the bottom-right block on the corner rather than an edge (D103).
+    expect(by("topRight")).toMatchObject({ rect: [250, 0, 25, 20], anchor: "right" });
+    expect(by("titlebar")).toMatchObject({ rect: [25, 0, 225, 20], stretch: "x", role: "drag" });
+    expect(by("leftTile")).toMatchObject({ rect: [0, 20, 12, 58], stretch: "y" });
+    expect(by("rightTile")).toMatchObject({ anchor: "right", stretch: "y" });
+    expect(by("bottomLeft")).toMatchObject({ rect: [0, 78, 125, 38], anchor: "bottom" });
+    expect(by("bottomRight")).toMatchObject({ rect: [125, 78, 150, 38], anchor: "bottom-right" });
+    // The rows sit between the two tiled edges.
+    expect(by("list")).toMatchObject({ rect: [12, 20, 243, 58], stretch: "xy", rowHeight: 13 });
+
+    // The classic's menu buttons become the one thing each menu was for; at
+    // rest they are the window's own pixels, and a press shows the menu
+    // item's glyph.
+    expect(by("addButton")).toMatchObject({ rect: [14, 86, 22, 18], anchor: "bottom", action: "add" });
+    expect(by("removeButton")).toMatchObject({ rect: [43, 86, 22, 18], anchor: "bottom", action: "remove" });
+    expect(by("libraryButton")).toMatchObject({ anchor: "bottom-right", action: "library" });
+    const add = by("addButton")!;
+    if (add.type !== "button") throw new Error("addButton is not a button");
+    expect(add.sprite).toEqual({ sheet: "pledit", rect: [14, 80, 22, 18], tint: "filament" });
+
+    // Widened and heightened on the D30 grid, the corner pieces stay in their
+    // corners and the rows take the slack.
+    const grown: [number, number] = [325, 174];
+    expect(placeRect(by("bottomRight")!, [275, 116], grown)).toMatchObject({ x: 175, y: 136 });
+    expect(placeRect(by("libraryButton")!, [275, 116], grown)).toMatchObject({ x: 281, y: 144 });
+    expect(placeRect(by("list")!, [275, 116], grown)).toMatchObject({ x: 12, y: 20, w: 293, h: 116 });
   });
 
   it("takes the playlist's colours from PLEDIT.TXT and the ramp from VISCOLOR.TXT", () => {
@@ -175,6 +224,81 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     expect(pl).toEqual(expect.arrayContaining(["titlebar", "list", "listStatus", "urlField"]));
   });
 
+  it("leaves out the art a skin's sheets stop short of (D106)", () => {
+    // Real skins ship short sheets: no volume thumb, an equalizer that stops
+    // above the sliders, a seek bar five pixels tall. The manifest must not
+    // claim what is not there, or the renderer refuses the whole skin.
+    const { manifest, warnings } = wszManifest({
+      files: FULL.map((f) => f.split("/").pop()!.toLowerCase()),
+      name: "Short Sheets",
+      sizes: {
+        "main.bmp": [275, 116],
+        "titlebar.bmp": [344, 87],
+        "cbuttons.bmp": [136, 36],
+        // No thumb art (the real Pip-Boy skins), and a seek bar half height
+        // (Super Mario Land): the volume keeps its fill, the seek goes.
+        "volume.bmp": [68, 422],
+        "posbar.bmp": [308, 5],
+        // An equalizer that stops above its sliders (Disgaea, Etna).
+        "eqmain.bmp": [275, 163],
+        "playpaus.bmp": [48, 9],
+        "shufrep.bmp": [92, 85],
+        "text.bmp": [155, 18],
+        "numbers.bmp": [108, 13],
+        "pledit.bmp": [280, 186],
+      },
+    });
+    const { skin, warnings: parseWarnings } = parseSkin(manifest);
+    expect(parseWarnings).toEqual([]);
+
+    const main = skin.windows.main.full.elements;
+    const byName = (els: Element[], n: string) => els.find((e) => e.name === n);
+    // The volume keeps its fill and loses only the thumb.
+    const volume = byName(main, "volume")!;
+    if (volume.type !== "slider") throw new Error("volume is not a slider");
+    expect(volume.fill).toBeDefined();
+    expect(volume.thumb).toBeUndefined();
+    // The seek bar had nothing left, so it is not there at all.
+    expect(byName(main, "seek")).toBeUndefined();
+    // Everything whose art is where the format says is untouched.
+    expect(byName(main, "play")).toBeDefined();
+    expect(byName(main, "titlebar")).toBeDefined();
+
+    // The equalizer keeps its background, title bar and switch, and loses the
+    // controls the sheet stops short of.
+    const eq = skin.windows.equalizer.full.elements;
+    expect(byName(eq, "backdrop")).toBeDefined();
+    expect(byName(eq, "eqOnButton")).toBeDefined();
+    expect(byName(eq, "eqPresetButton")).toBeUndefined();
+    expect(byName(eq, "eqBand1")).toBeUndefined();
+    // The curve's box is required (D99), so it stays as a box with no art.
+    expect(byName(eq, "eqCurveWell")).toMatchObject({ type: "slot", rect: [86, 17, 113, 19] });
+
+    // And it says what it left out, per window.
+    expect(warnings.join(" ")).toMatch(/main: this skin's sheets stop short of .*seek/);
+    expect(warnings.join(" ")).toMatch(/equalizer: this skin's sheets stop short of/);
+  });
+
+  it("keeps every rectangle when the sheets have not been measured", () => {
+    // The pure mapping is still pure: with no sizes, nothing is dropped.
+    const { manifest } = make();
+    const main = (manifest.windows as any).main.elements;
+    expect(main.seek).toBeDefined();
+    expect(main.volume.thumb).toBeDefined();
+  });
+
+  it("refuses a skin whose title bar art is not in the sheet", () => {
+    // Every element set needs its drag handle (skin-manifest.md), so this one
+    // is a refusal rather than a window nobody can move.
+    expect(() =>
+      wszManifest({
+        files: ["main.bmp", "titlebar.bmp", "cbuttons.bmp"],
+        name: "No Title Bar",
+        sizes: { "main.bmp": [275, 116], "titlebar.bmp": [344, 10], "cbuttons.bmp": [136, 36] },
+      }),
+    ).toThrow(/title bar/);
+  });
+
   it("refuses a zip that is not a skin", () => {
     expect(() => make(["readme.txt", "cover.jpg"])).toThrow(SkinError);
     expect(() => make(["main.bmp", "titlebar.bmp"])).toThrow(/CBUTTONS\.BMP/);
@@ -205,7 +329,18 @@ describe("the two text files", () => {
     expect(ramp![23]).toBe(hexOf(rampStep(23)));
   });
 
-  it("is not a ramp with 23 colours", () => {
-    expect(parseViscolor(Array.from({ length: 23 }, () => "1,2,3").join("\n"))).toBeNull();
+  it("fills a short ramp with its own last colour, and trims a long one", () => {
+    // Of thirteen real skins, seven did not ship 24 (D106): 23 and 25 are
+    // both normal, and a ramp is too visible to throw away over one line.
+    const short = parseViscolor(Array.from({ length: 23 }, (_, i) => `${i},0,0`).join("\n"))!;
+    expect(short).toHaveLength(24);
+    expect(short[23]).toBe(short[22]);
+    const long = parseViscolor(Array.from({ length: 25 }, (_, i) => `${i},0,0`).join("\n"))!;
+    expect(long).toHaveLength(24);
+    expect(long[0]).toBe(hexOf([0, 0, 0]));
+  });
+
+  it("is not a ramp with no colours at all", () => {
+    expect(parseViscolor("// just a comment\nand some words")).toBeNull();
   });
 });

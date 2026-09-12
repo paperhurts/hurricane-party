@@ -4,6 +4,9 @@
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
+  import { parseSkin } from "./lib/skin";
+  import { measureSheets } from "./lib/skins";
+  import { wszManifest } from "./lib/wsz";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
@@ -46,6 +49,17 @@
   // the row no longer exists to say so (#78).
   type Removed = { id: number; title: string; path: string };
 
+  // What came out of a skin's zip (#107): where it went, and the two text
+  // files, which are colours rather than art and so travel as strings.
+  type Unpacked = {
+    id: string;
+    name: string;
+    dir: string;
+    files: string[];
+    pledit: string | null;
+    viscolor: string | null;
+  };
+
   let url = $state("");
   let error = $state<string | null>(null);
   let jobs = $state<Job[]>([]);
@@ -86,6 +100,10 @@
   // setting until there is a settings window; Rust saves it and tells the
   // three classic windows.
   let glow = $state(true);
+  // The skin the classic windows wear, and the ones there are to pick (#107).
+  // Eyewall ships and is always first (D90); the rest were imported here.
+  let skin = $state("eyewall");
+  let skins = $state<string[]>(["eyewall"]);
   let wantVideo = $state(false);
   let roots = $state<Root[]>([]);
   let scanning = $state(false);
@@ -149,6 +167,8 @@
     invoke<string>("library_path").then((p) => (libraryPath = p));
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
+    invoke<string>("get_skin").then((s) => (skin = s));
+    invoke<string[]>("list_skins").then((s) => (skins = s));
     // The switches as they were left (#115). Tell the playlist window once
     // they are known, since it may already have asked.
     invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
@@ -187,6 +207,16 @@
       // offer to remove the row (#78).
       listen<{ id: number; title: string }>("player:missing", (e) => {
         missing = e.payload;
+      }),
+      // A skin that will not load (#107). The classic windows fall back to
+      // Eyewall so they are never bare; this is the window that can say why,
+      // and the one the skin was chosen from. All three report the same
+      // failure, so the first one to arrive sets the picker straight.
+      listen<{ id: string; reason: string }>("skin:failed", (e) => {
+        if (skin === "eyewall") return;
+        notice = `${e.payload.id} could not be worn, so the windows kept Eyewall: ${e.payload.reason}`;
+        skin = "eyewall";
+        invoke("set_skin", { id: "eyewall" }).catch(() => {});
       }),
       // The classic playlist window mirrors the list showing here. It asks
       // once on mount, in case the first broadcast went out before it had a
@@ -640,6 +670,52 @@
     glow = on;
     await invoke("set_glow", { on });
   }
+
+  async function setSkin(id: string) {
+    skin = id;
+    await invoke("set_skin", { id });
+  }
+
+  /**
+   * Import a skin (#107, D91): a click and the OS dialog, never a watched
+   * folder. Rust unpacks the zip, this window maps it into `hp-skin/1` and
+   * validates it, and a skin that will not load is thrown away with the
+   * reason in front of the person who chose it — never half-loaded
+   * (skin-manifest.md).
+   */
+  async function importSkin() {
+    const picked = await openDialog({
+      multiple: false,
+      title: "Import a skin",
+      filters: [{ name: "Winamp skin", extensions: ["wsz", "zip"] }],
+    });
+    if (typeof picked !== "string") return;
+    notice = null;
+    let unpacked: Unpacked | null = null;
+    try {
+      unpacked = await invoke<Unpacked>("import_skin", { path: picked });
+      // Look at the sheets before mapping them (D106): a classic skin often
+      // stops a file short, and a manifest must not claim art that is not
+      // there.
+      const sizes = await measureSheets(unpacked.dir, unpacked.files);
+      const built = wszManifest({
+        files: unpacked.files,
+        name: unpacked.name,
+        pledit: unpacked.pledit ?? undefined,
+        viscolor: unpacked.viscolor ?? undefined,
+        sizes,
+      });
+      // The same validator the shipped skin goes through.
+      parseSkin(built.manifest);
+      await invoke("write_skin_manifest", { id: unpacked.id, json: JSON.stringify(built.manifest, null, 1) });
+      skins = await invoke<string[]>("list_skins");
+      await setSkin(unpacked.id);
+      notice = `${unpacked.name} is on.` + (built.warnings.length ? ` ${built.warnings.join(" ")}` : "");
+    } catch (e) {
+      if (unpacked) await invoke("discard_skin", { id: unpacked.id }).catch(() => {});
+      notice = `That skin was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
 </script>
 
 <svelte:window
@@ -666,6 +742,13 @@
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
     </label>
+    <label class="conc skinpick" title="What the three classic windows wear">
+      skin
+      <select value={skin} onchange={(e) => setSkin(e.currentTarget.value)}>
+        {#each skins as s (s)}<option value={s}>{s}</option>{/each}
+      </select>
+    </label>
+    <button class="mini" onclick={importSkin} title="A .wsz, or a zip of one">Import skin…</button>
   </header>
 
   <form onsubmit={(e) => { e.preventDefault(); add(); }}>
@@ -890,6 +973,8 @@
   .conc { margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--filament) 45%, transparent); }
   .glow { font-size: 11px; display: flex; align-items: center; gap: 4px;
           color: color-mix(in srgb, var(--filament) 45%, transparent); }
+  /* The skin picker sits with the other settings, not at the far right. */
+  .skinpick { margin-left: 0; }
   select { font: inherit; font-size: 11px; background: var(--well); color: var(--filament);
            border: 1px solid color-mix(in srgb, var(--arc) 30%, transparent); padding: 2px 4px; }
 
