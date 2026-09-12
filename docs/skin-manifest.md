@@ -271,7 +271,9 @@ Both importers are mappings *into* the above. That is the entire justification f
 | `VISCOLOR.TXT` | `viscolor` (24 entries — the format's own count) |
 | `REGION.TXT` | `regions`, best-effort |
 
-Sprite coordinates in `.wsz` are **conventional, not declared** — the offsets live in the importer as a constant table, which is exactly why the format is bounded and a weekend-to-a-fortnight problem rather than an open-ended one.
+Sprite coordinates in `.wsz` are **conventional, not declared** — the offsets live in the importer as a constant table, which is exactly why the format is bounded and a weekend-to-a-fortnight problem rather than an open-ended one. That table is `src/lib/wsz.ts`, transcribed from Webamp with its notice in `THIRD-PARTY.md` (D102), beside the classic window positions. `wszManifest()` turns a zip's file list and its two text files into a manifest this document's own validator then accepts or refuses, so an import that would half-load is refused before anything is written.
+
+**Colour comes from the theme, except where it cannot** (D101). An imported skin is `art: final`, and pixels cannot be tinted, so its `PLEDIT.TXT` becomes the palette the three classic windows use and its `VISCOLOR.TXT` becomes the analyser's ramp. A native `art: mask` skin declares a palette that is validated and ignored: the theme paints it.
 
 Classic skins set `resizable: false` on all three windows (except playlist), so on a `.wsz` most edges offer the move cursor and the interaction degrades gracefully. Same engine, fewer capabilities.
 
@@ -301,5 +303,5 @@ The asymmetry is deliberate: structural errors fail loudly at load time, missing
 
 ## Open
 
-- **The conventional `.wsz` sprite offset table** hasn't been transcribed yet. It's mechanical, it's public in Webamp's source, and it's a v0.5 task — but it's the thing that makes the mapping table above real rather than aspirational
+- ~~**The conventional `.wsz` sprite offset table** hasn't been transcribed yet~~ **Done** (D102): `src/lib/wsz.ts`. Mapped so far: Main in full, the equalizer's switch, preset button, curve box and eleven sliders, and the playlist's frame, rows and the boxes the window fills. Still to come, one PR each: the playlist's bottom bar and its `bottom-right` anchor, **bitmap fonts drawn as glyphs** (a `.wsz`'s clock and title are art, and until then they are the theme's face at the glyph height), and the zip, the import button and the refusal in front of the person who chose the file (#107)
 - ~~**Fixed rectangles for the Eyewall default skin** still have to be derived from the Pass 1 prototypes, which are flexbox. That's a v0.4 task and the first real test of whether this schema is expressive enough~~ **Done for the shell chrome in #3's first PR** (D90, D92): `skins/eyewall/` is derived from the CSS chrome that shipped, and it is the template a person copies. The interiors follow, one window per PR
