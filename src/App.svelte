@@ -813,16 +813,23 @@
     reading = true;
     notice = `Reading cookies from ${browser}…`;
     try {
-      const made = await invoke<{ path: string; count: number; youtube: boolean }>(
-        "export_cookies_from_browser",
-        { browser: spec },
-      );
+      const made = await invoke<{
+        path: string;
+        count: number;
+        youtube: boolean;
+        elsewhere: string[];
+      }>("export_cookies_from_browser", { browser: spec });
       cookies = made.path;
       // A jar with no YouTube sign-in in it fails every age gate, and saying
       // so here beats saying it once per download (D113).
+      // Where the sign-in actually is beats telling someone to make one
+      // they may already have, in a profile the export never looked at.
+      const found = made.elsewhere.length
+        ? ` These do have one: ${made.elsewhere.join(", ")}. Try one of those instead — a Chromium profile may still refuse to decrypt, Firefox will not.`
+        : ` Sign in to YouTube in ${browser}, then read them again.`;
       notice = made.youtube
         ? `Read ${made.count} cookies from ${browser}, with a YouTube sign-in among them. Videos that want one will import now; read them again when they stop.`
-        : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused. Sign in to YouTube in ${browser}, then read them again.`;
+        : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused.${found}`;
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
     } finally {

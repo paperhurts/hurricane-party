@@ -341,6 +341,75 @@ fn firefox_profiles() -> Vec<CookieSource> {
     out
 }
 
+/// The cookie database behind one source, and the query that lists the names
+/// in it for youtube.com. Firefox and Chromium keep different schemas.
+fn store_db(s: &CookieSource) -> Option<(PathBuf, &'static str)> {
+    if s.browser == "firefox" {
+        let dir = PathBuf::from(s.profile.as_deref()?);
+        let db = dir.join("cookies.sqlite");
+        return db.is_file().then_some((
+            db,
+            "SELECT name FROM moz_cookies WHERE host LIKE '%youtube.com'",
+        ));
+    }
+    let root = chromium_root(&s.browser)?;
+    let prof = root.join(s.profile.as_deref()?);
+    // Chromium moved the file under `Network/` and older profiles still have
+    // it beside the rest.
+    for p in [prof.join("Network").join("Cookies"), prof.join("Cookies")] {
+        if p.is_file() {
+            return Some((
+                p,
+                "SELECT name FROM cookies WHERE host_key LIKE '%youtube.com'",
+            ));
+        }
+    }
+    None
+}
+
+/// Which stores on this machine hold a YouTube sign-in (D115).
+///
+/// Called at exactly one moment: an export came back with no session in it,
+/// which is when "where is the sign-in, then?" is the only useful thing left
+/// to say. It copies each cookie database to a temporary file (the browser
+/// keeps the original locked), reads cookie **names** for youtube.com, and
+/// deletes the copy. No cookie value is read, nothing is kept, and a store
+/// that will not copy is skipped rather than guessed at.
+pub fn stores_with_session() -> Vec<String> {
+    const SESSION: [&str; 3] = ["SID", "__Secure-1PSID", "LOGIN_INFO"];
+    let tmp = std::env::temp_dir();
+    let mut out = Vec::new();
+    for (i, s) in cookie_sources().into_iter().enumerate() {
+        let Some((db, query)) = store_db(&s) else {
+            continue;
+        };
+        let copy = tmp.join(format!("hp-cookie-peek-{}-{i}.db", std::process::id()));
+        if std::fs::copy(&db, &copy).is_err() {
+            continue;
+        }
+        let found = rusqlite::Connection::open(&copy)
+            .and_then(|conn| {
+                let mut st = conn.prepare(query)?;
+                let mut rows = st.query([])?;
+                let mut hit = false;
+                while let Some(r) = rows.next()? {
+                    let name: String = r.get(0)?;
+                    if SESSION.contains(&name.as_str()) {
+                        hit = true;
+                        break;
+                    }
+                }
+                Ok(hit)
+            })
+            .unwrap_or(false);
+        let _ = std::fs::remove_file(&copy);
+        if found {
+            out.push(s.label);
+        }
+    }
+    out
+}
+
 /// What an export produced: where the jar landed, and how many cookies are in
 /// it — the count is what tells a person it worked, and it is all this app
 /// ever says about the contents.
@@ -352,6 +421,10 @@ pub struct CookieExport {
     /// browser's ordinary cookies still fails every age gate, and finding
     /// that out at the export beats finding it out per download.
     pub youtube: bool,
+    /// When it has none: the stores on this machine that do (D115). The
+    /// owner read three browsers in turn and the app never said "that one" —
+    /// which it can, since it already knows what the stores are.
+    pub elsewhere: Vec<String>,
 }
 
 /// Read a browser's cookie store with yt-dlp and write the jar into the app's
@@ -417,10 +490,20 @@ pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport>
         let _ = std::fs::remove_file(&out);
         return Err(PipelineError::Io(explain_export(browser, &tail.text())));
     }
+    let youtube = jar_has_youtube_session(&out);
     Ok(CookieExport {
         path: out.to_string_lossy().into_owned(),
         count,
-        youtube: jar_has_youtube_session(&out),
+        youtube,
+        // Only when there is bad news to explain: see `stores_with_session`.
+        elsewhere: if youtube {
+            Vec::new()
+        } else {
+            stores_with_session()
+                .into_iter()
+                .filter(|l| *l != source.label)
+                .collect()
+        },
     })
 }
 
@@ -1814,6 +1897,28 @@ mod tests {
         assert_eq!(probe.items[1].title, "bbbbbbbbbbb");
         assert_eq!(probe.items[1].duration_s, None);
         assert!(!probe.items[1].have);
+    }
+
+    #[test]
+    fn looking_for_a_sign_in_elsewhere_names_only_known_stores() {
+        // Whatever this machine holds, every answer is the label of a store
+        // `cookie_sources` offers — never a path, never a cookie (D115).
+        let labels: Vec<String> = cookie_sources().into_iter().map(|s| s.label).collect();
+        let found = stores_with_session();
+        for l in &found {
+            assert!(labels.contains(l), "{l}");
+        }
+        // And it leaves nothing behind in the temporary directory.
+        let left = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(&format!("hp-cookie-peek-{}-", std::process::id()))
+            })
+            .count();
+        assert_eq!(left, 0);
     }
 
     #[test]
