@@ -224,6 +224,81 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     expect(pl).toEqual(expect.arrayContaining(["titlebar", "list", "listStatus", "urlField"]));
   });
 
+  it("leaves out the art a skin's sheets stop short of (D106)", () => {
+    // Real skins ship short sheets: no volume thumb, an equalizer that stops
+    // above the sliders, a seek bar five pixels tall. The manifest must not
+    // claim what is not there, or the renderer refuses the whole skin.
+    const { manifest, warnings } = wszManifest({
+      files: FULL.map((f) => f.split("/").pop()!.toLowerCase()),
+      name: "Short Sheets",
+      sizes: {
+        "main.bmp": [275, 116],
+        "titlebar.bmp": [344, 87],
+        "cbuttons.bmp": [136, 36],
+        // No thumb art (the real Pip-Boy skins), and a seek bar half height
+        // (Super Mario Land): the volume keeps its fill, the seek goes.
+        "volume.bmp": [68, 422],
+        "posbar.bmp": [308, 5],
+        // An equalizer that stops above its sliders (Disgaea, Etna).
+        "eqmain.bmp": [275, 163],
+        "playpaus.bmp": [48, 9],
+        "shufrep.bmp": [92, 85],
+        "text.bmp": [155, 18],
+        "numbers.bmp": [108, 13],
+        "pledit.bmp": [280, 186],
+      },
+    });
+    const { skin, warnings: parseWarnings } = parseSkin(manifest);
+    expect(parseWarnings).toEqual([]);
+
+    const main = skin.windows.main.full.elements;
+    const byName = (els: Element[], n: string) => els.find((e) => e.name === n);
+    // The volume keeps its fill and loses only the thumb.
+    const volume = byName(main, "volume")!;
+    if (volume.type !== "slider") throw new Error("volume is not a slider");
+    expect(volume.fill).toBeDefined();
+    expect(volume.thumb).toBeUndefined();
+    // The seek bar had nothing left, so it is not there at all.
+    expect(byName(main, "seek")).toBeUndefined();
+    // Everything whose art is where the format says is untouched.
+    expect(byName(main, "play")).toBeDefined();
+    expect(byName(main, "titlebar")).toBeDefined();
+
+    // The equalizer keeps its background, title bar and switch, and loses the
+    // controls the sheet stops short of.
+    const eq = skin.windows.equalizer.full.elements;
+    expect(byName(eq, "backdrop")).toBeDefined();
+    expect(byName(eq, "eqOnButton")).toBeDefined();
+    expect(byName(eq, "eqPresetButton")).toBeUndefined();
+    expect(byName(eq, "eqBand1")).toBeUndefined();
+    // The curve's box is required (D99), so it stays as a box with no art.
+    expect(byName(eq, "eqCurveWell")).toMatchObject({ type: "slot", rect: [86, 17, 113, 19] });
+
+    // And it says what it left out, per window.
+    expect(warnings.join(" ")).toMatch(/main: this skin's sheets stop short of .*seek/);
+    expect(warnings.join(" ")).toMatch(/equalizer: this skin's sheets stop short of/);
+  });
+
+  it("keeps every rectangle when the sheets have not been measured", () => {
+    // The pure mapping is still pure: with no sizes, nothing is dropped.
+    const { manifest } = make();
+    const main = (manifest.windows as any).main.elements;
+    expect(main.seek).toBeDefined();
+    expect(main.volume.thumb).toBeDefined();
+  });
+
+  it("refuses a skin whose title bar art is not in the sheet", () => {
+    // Every element set needs its drag handle (skin-manifest.md), so this one
+    // is a refusal rather than a window nobody can move.
+    expect(() =>
+      wszManifest({
+        files: ["main.bmp", "titlebar.bmp", "cbuttons.bmp"],
+        name: "No Title Bar",
+        sizes: { "main.bmp": [275, 116], "titlebar.bmp": [344, 10], "cbuttons.bmp": [136, 36] },
+      }),
+    ).toThrow(/title bar/);
+  });
+
   it("refuses a zip that is not a skin", () => {
     expect(() => make(["readme.txt", "cover.jpg"])).toThrow(SkinError);
     expect(() => make(["main.bmp", "titlebar.bmp"])).toThrow(/CBUTTONS\.BMP/);
@@ -254,7 +329,18 @@ describe("the two text files", () => {
     expect(ramp![23]).toBe(hexOf(rampStep(23)));
   });
 
-  it("is not a ramp with 23 colours", () => {
-    expect(parseViscolor(Array.from({ length: 23 }, () => "1,2,3").join("\n"))).toBeNull();
+  it("fills a short ramp with its own last colour, and trims a long one", () => {
+    // Of thirteen real skins, seven did not ship 24 (D106): 23 and 25 are
+    // both normal, and a ramp is too visible to throw away over one line.
+    const short = parseViscolor(Array.from({ length: 23 }, (_, i) => `${i},0,0`).join("\n"))!;
+    expect(short).toHaveLength(24);
+    expect(short[23]).toBe(short[22]);
+    const long = parseViscolor(Array.from({ length: 25 }, (_, i) => `${i},0,0`).join("\n"))!;
+    expect(long).toHaveLength(24);
+    expect(long[0]).toBe(hexOf([0, 0, 0]));
+  });
+
+  it("is not a ramp with no colours at all", () => {
+    expect(parseViscolor("// just a comment\nand some words")).toBeNull();
   });
 });

@@ -248,9 +248,14 @@ export function parsePledit(text: string): Record<string, string> {
 }
 
 /**
- * `VISCOLOR.TXT`, the visualizer's ramp: 24 lines of `r,g,b`, anything after
- * them ignored, comments after `//`. Fewer than 24 usable lines is not a ramp,
- * and the caller falls back to the theme's.
+ * `VISCOLOR.TXT`, the visualizer's ramp: lines of `r,g,b`, anything after
+ * them ignored, comments after `//`.
+ *
+ * The format wants 24 and the skins in the wild ship 23, 24 or 25 - of
+ * thirteen real skins, seven were not 24 (D106). So take what is there: the
+ * first 24, and when the file is short, repeat its last colour to fill. Only
+ * a file with no colours at all is not a ramp, and then the caller keeps the
+ * theme's.
  */
 export function parseViscolor(text: string): string[] | null {
   const out: string[] = [];
@@ -263,7 +268,9 @@ export function parseViscolor(text: string): string[] | null {
     out.push(`#${hex}`);
     if (out.length === 24) break;
   }
-  return out.length === 24 ? out : null;
+  if (out.length === 0) return null;
+  while (out.length < 24) out.push(out[out.length - 1]);
+  return out;
 }
 
 /**
@@ -289,6 +296,14 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
 
 // ---- the manifest ----
 
+/**
+ * What this importer is up to. A manifest is not a skin, it is what this code
+ * made of one, so it carries the generation that wrote it and is rebuilt when
+ * this number moves on (D107). Bump it whenever the mapping changes what it
+ * writes for the same art.
+ */
+export const WSZ_GENERATION = 2;
+
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
   files: string[];
@@ -297,6 +312,12 @@ export type WszInput = {
   /** `PLEDIT.TXT` and `VISCOLOR.TXT`, when the zip has them. */
   pledit?: string;
   viscolor?: string;
+  /** Each sheet's real size in pixels, by file name, when they have been
+   * measured. A classic skin's sheets are conventionally sized and often are
+   * not: the format never declared a size, so an author who needed no volume
+   * thumb simply stopped the file short. Given sizes, the art that is not
+   * there is left out of the manifest rather than refusing the skin (D106). */
+  sizes?: Record<string, [number, number]>;
 };
 
 /** A sprite reference in the manifest's shape. Tint is the renderer's word for
@@ -334,7 +355,7 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
   const pledit = input.pledit ? parsePledit(input.pledit) : {};
   if (!input.pledit) warnings.push("no PLEDIT.TXT: the playlist's colours come from the theme");
   const ramp = input.viscolor ? parseViscolor(input.viscolor) : null;
-  if (input.viscolor && !ramp) warnings.push("VISCOLOR.TXT is not 24 colours: the analyser keeps the theme's ramp");
+  if (input.viscolor && !ramp) warnings.push("VISCOLOR.TXT has no colours in it: the analyser keeps the theme's ramp");
 
   const fonts: Record<string, unknown> = {};
   if (has("text")) fonts.chrome = { type: "bitmap", sheet: "text", glyphSize: [5, 6], map: TEXT_MAP };
@@ -342,13 +363,21 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
     fonts.time = { type: "bitmap", sheet: "numbers", glyphSize: [9, 13], map: NUMBERS_MAP, tracking: 3 };
   }
 
-  const main = mainWindow(sheets, fonts, warnings);
-  const equalizer = eqWindow(sheets, warnings);
-  const playlist = playlistWindow(sheets, fonts, warnings);
+  const windows: Record<string, WindowJson> = {
+    main: mainWindow(sheets, fonts, warnings),
+    equalizer: eqWindow(sheets, warnings),
+    playlist: playlistWindow(sheets, fonts, warnings),
+  };
+  if (input.sizes) prune(windows, sheets, input.sizes, warnings);
 
   return {
     manifest: {
       format: "hp-skin/1",
+      // Not part of hp-skin/1 - an unknown key is ignored by the validator -
+      // and the whole point of it: an imported skin's manifest is derived
+      // from its art, so a better importer rewrites it rather than leaving a
+      // person with what an older one could manage (D107).
+      generator: WSZ_GENERATION,
       name: input.name,
       author: "",
       authoredScale: 1,
@@ -359,10 +388,102 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
       viscolor: ramp ?? themeRamp("eyewall"),
       visualizer: { component: "spectrum-bars" },
       fonts,
-      windows: { main, equalizer, playlist },
+      windows,
     },
     warnings,
   };
+}
+
+// ---- what the sheets actually have (D106) ----
+
+type ElementJson = Record<string, unknown>;
+type SetJson = { size: number[]; elements: Record<string, ElementJson>; [k: string]: unknown };
+type WindowJson = { elements: Record<string, ElementJson>; shade: SetJson; [k: string]: unknown };
+
+/** Which keys of an element hold a sprite, and whether the element can go on
+ * without that one. A button with no art is nothing to look at; a slider with
+ * a track but no thumb is still a slider. */
+const SPRITE_KEYS: Record<string, { required: string[]; optional: string[] }> = {
+  image: { required: ["sprite"], optional: ["inactive"] },
+  nineslice: { required: ["sprite"], optional: [] },
+  button: { required: ["sprite"], optional: ["hover", "active", "inactive"] },
+  toggle: { required: ["sprite"], optional: ["hover", "active", "inactive"] },
+  slider: { required: [], optional: ["track", "fill", "thumb"] },
+};
+
+const fitsIn = (size: [number, number] | undefined, rect: Rect) =>
+  !size || (rect[0] >= 0 && rect[1] >= 0 && rect[0] + rect[2] <= size[0] && rect[1] + rect[3] <= size[1]);
+
+/**
+ * Drop the art a skin's sheets do not actually have (D106).
+ *
+ * Every rectangle in the table is where the classic format puts a sprite, but
+ * plenty of skins ship a shorter file: no volume thumb, an equalizer sheet
+ * that stops above the sliders, a seek bar five pixels tall. The renderer
+ * refuses a manifest whose rect leaves its sheet, and rightly — so the
+ * manifest must not claim what is not there. An element that loses art it
+ * cannot do without is left out, and the window carries on with the rest.
+ */
+function prune(
+  windows: Record<string, WindowJson>,
+  sheets: Record<string, string>,
+  sizes: Record<string, [number, number]>,
+  warnings: string[],
+) {
+  const has = (ref: unknown) => {
+    const r = ref as { sheet: string; rect: Rect } | undefined;
+    if (!r) return true;
+    return fitsIn(sizes[sheets[r.sheet]], r.rect);
+  };
+
+  for (const [wname, win] of Object.entries(windows)) {
+    const lost: string[] = [];
+    for (const set of [win as unknown as SetJson, win.shade]) {
+      for (const [name, el] of Object.entries(set.elements)) {
+        const keys = SPRITE_KEYS[el.type as string];
+        if (!keys) continue;
+        for (const k of keys.optional) if (k in el && !has(el[k])) delete el[k];
+        const on = el.on as Record<string, unknown> | undefined;
+        if (on) {
+          for (const k of ["hover", "active", "inactive"]) if (k in on && !has(on[k])) delete on[k];
+          // A toggle with no `on` art cannot show its other state; it keeps
+          // the art it has and stops being a toggle, so a click still works.
+          if (!has(on.sprite)) {
+            delete el.on;
+            if (el.action) {
+              el.type = "button";
+              delete el.bind;
+              delete el.when;
+            }
+          }
+        }
+        const gone =
+          keys.required.some((k) => !has(el[k])) ||
+          (el.type === "slider" && !["track", "fill", "thumb"].some((k) => k in el)) ||
+          (el.type === "toggle" && !el.on);
+        if (gone) {
+          // The curve's box is required (D99); without art it is a plain box
+          // and the window draws the curve on the window's own ground.
+          if (name === "eqCurveWell") {
+            set.elements[name] = { type: "slot", rect: el.rect };
+          } else if (name === "titlebar") {
+            // Every set needs its drag handle, and a skin without one is not
+            // a skin this app can show (skin-manifest.md).
+            throw new SkinError(`${wname}: the title bar's art is not in the sheet`);
+          } else {
+            delete set.elements[name];
+            lost.push(name);
+          }
+        }
+      }
+    }
+    if (lost.length) {
+      const shown = lost.slice(0, 6).join(", ");
+      warnings.push(
+        `${wname}: this skin's sheets stop short of ${shown}${lost.length > 6 ? ` and ${lost.length - 6} more` : ""}`,
+      );
+    }
+  }
 }
 
 /** The title bar's four buttons, which every window set repeats. */
@@ -402,7 +523,7 @@ function lamp(state: string, rect: Rect) {
 function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknown>, warnings: string[]) {
   const has = (s: string) => s in sheets;
   const buttons = titleButtons(false);
-  const els: Record<string, unknown> = {
+  const els: Record<string, ElementJson> = {
     backdrop: { type: "image", rect: [0, 0, 275, 116], sprite: sp("main", MAIN_SP.background) },
     titlebar: {
       type: "image",
@@ -543,7 +664,7 @@ function eqWindow(sheets: Record<string, string>, warnings: string[]) {
   const sheet = "eqmain" in sheets ? "eqmain" : "titlebar";
   const bar = "eqmain" in sheets ? e.barActive : TITLEBAR_SP.barActive;
   const barIdle = "eqmain" in sheets ? e.bar : TITLEBAR_SP.bar;
-  const els: Record<string, unknown> = {};
+  const els: Record<string, ElementJson> = {};
   if ("eqmain" in sheets) {
     els.backdrop = { type: "image", rect: [0, 0, 275, 116], sprite: sp("eqmain", e.background) };
   }
@@ -613,7 +734,7 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
   const hasArt = "pledit" in sheets;
   if (!hasArt) warnings.push("no PLEDIT.BMP: the playlist wears Main's title bar over the theme's ground");
   const top = L.plTopHeight;
-  const els: Record<string, unknown> = {};
+  const els: Record<string, ElementJson> = {};
 
   if (hasArt) {
     els.topLeft = { type: "image", rect: [0, 0, 25, top], sprite: sp("pledit", p.topLeft) };
