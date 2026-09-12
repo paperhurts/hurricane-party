@@ -318,6 +318,8 @@ yt-dlp \
 
 **The trailing `[%(id)s]` is load-bearing, not decoration.** It's how a resumed job finds the file it was part-way through, without parsing yt-dlp's stdout for the name it chose — which is the same class of mistake as screen-scraping the progress bar.
 
+**Signing in, for the videos that need it (D112).** Some videos — age-restricted, members-only — are refused to a signed-out request, and yt-dlp says so in a wall of text about cookies. A person can point the app at a `cookies.txt` they exported from their own browser (*Cookies…* in the library header); the path is a setting, and `--cookies <path>` is then prepended to **every** yt-dlp call, probe included, since the probe is what fails first. The app stores the path and nothing else: the file is never read by this process, never copied into the library, never logged. Unset, which is the default, means no authentication at all. `--cookies-from-browser` is deliberately not offered: on Windows, Chromium's App-Bound Encryption stops yt-dlp decrypting Chrome and Edge cookies at all, and Brave's database is locked while the browser runs, so the flag would fail for most people who tried it.
+
 **Use `--progress-template`, not screen-scraping the progress bar.** Pipe-delimited or JSON, parse it in Rust, emit a Tauri event. The human-readable bar changes between releases; the template doesn't.
 
 ### Phase 3 — derive the MP3 locally

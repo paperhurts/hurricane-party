@@ -169,6 +169,7 @@
     invoke<boolean>("get_glow").then((on) => (glow = on));
     invoke<string>("get_skin").then((s) => (skin = s));
     invoke<string[]>("list_skins").then((s) => (skins = s));
+    invoke<string>("get_cookies_file").then((c) => (cookies = c));
     // The switches as they were left (#115). Tell the playlist window once
     // they are known, since it may already have asked.
     invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
@@ -671,6 +672,32 @@
     await invoke("set_glow", { on });
   }
 
+  /**
+   * The signed-in session yt-dlp uses for the videos that need one (D112).
+   * Here beside the other settings until there is a settings window, the same
+   * place the glow toggle went (D100). The app stores the path; the file is
+   * the person's own and stays where they put it.
+   */
+  let cookies = $state("");
+  async function pickCookies() {
+    const picked = await openDialog({
+      multiple: false,
+      title: "Pick a cookies.txt",
+      filters: [{ name: "Cookies", extensions: ["txt"] }],
+    });
+    if (typeof picked !== "string") return;
+    try {
+      cookies = await invoke<string>("set_cookies_file", { path: picked });
+      notice = "Cookies set. Age-restricted and members-only videos you can watch will now import.";
+    } catch (e) {
+      notice = `That cookies file was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  async function clearCookies() {
+    cookies = await invoke<string>("set_cookies_file", { path: "" });
+    notice = "Cookies cleared. Downloads are signed out again.";
+  }
+
   // Whether the line showing is the skin's, so a skin with nothing to say
   // clears the last skin's line without taking a delete offer with it.
   let skinSaid = false;
@@ -752,6 +779,18 @@
         {#each [1, 2, 3, 4] as n}<option value={n}>{n}</option>{/each}
       </select>
     </label>
+    <button
+      class="mini"
+      onclick={pickCookies}
+      title={cookies
+        ? `yt-dlp signs in with ${cookies}. Click to pick another.`
+        : "For age-restricted and members-only videos: a cookies.txt exported from a browser you are signed in with"}
+    >
+      {cookies ? "Cookies \u2713" : "Cookies\u2026"}
+    </button>
+    {#if cookies}
+      <button class="mini" onclick={clearCookies} title="Stop using that file">&times;</button>
+    {/if}
     <label class="glow" title="The halo on the player's buttons, clock and lit rows">
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
