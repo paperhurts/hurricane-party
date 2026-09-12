@@ -20,14 +20,13 @@ use tauri_plugin_shell::ShellExt;
 pub enum PipelineError {
     #[error("{0}")]
     Sidecar(String),
-    #[error("{}", ytdlp_message(*.code, .tail, *.cookies))]
+    #[error("{}", ytdlp_message(*.code, .tail, .cookies))]
     YtDlp {
         code: i32,
         tail: String,
-        /// Whether the app had a cookies file when this failed, which changes
-        /// what a sign-in refusal means: no file is "give me one", a file is
-        /// "the one you gave me has no session in it" (D113).
-        cookies: bool,
+        /// What the cookies in use were when this failed, which changes what a
+        /// sign-in refusal means (D113, D118).
+        cookies: Jar,
     },
     #[error("ffmpeg failed ({code}). Last output: {tail}")]
     Ffmpeg { code: i32, tail: String },
@@ -44,7 +43,50 @@ pub enum PipelineError {
 /// What a yt-dlp failure says to a person (D112). A failure we recognise leads
 /// with what to do about it and keeps yt-dlp's own words after, because the
 /// tail is what makes a bug report answerable.
-fn ytdlp_message(code: i32, tail: &str, cookies: bool) -> String {
+/// The cookies in use at the moment yt-dlp was refused (D118).
+///
+/// A sign-in refusal is three different problems, and only the jar says which.
+/// The owner had a signed-in Firefox profile and a jar with no sign-in in it,
+/// and the app said "read them again" without saying that the jar was the
+/// problem or which profile would fix it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Jar {
+    /// No cookies are set.
+    None,
+    /// The jar in use carries a YouTube sign-in, so the refusal is about the
+    /// account or an expired session, not about which cookies were read.
+    SignedIn,
+    /// The jar in use has no sign-in. `with_session` is every store on this
+    /// machine whose database does hold one — looked up only for a sign-in
+    /// refusal, since it copies each browser's cookie database to read names.
+    SignedOut { with_session: Vec<String> },
+}
+
+/// The failures that want a signed-in session, as `explain` recognises them.
+fn wants_sign_in(tail: &str) -> bool {
+    tail.contains("Sign in to confirm your age")
+        || (tail.contains("confirm you") && tail.contains("not a bot"))
+        || tail.contains("members-only")
+        || tail.contains("available to this channel's members")
+}
+
+/// The state of the cookies in use, for a failure's message (D118).
+fn jar_state(app: &AppHandle, tail: &str) -> Jar {
+    let Some(jar) = cookies_file(app) else {
+        return Jar::None;
+    };
+    if jar_has_youtube_session(&jar) {
+        return Jar::SignedIn;
+    }
+    let with_session = if wants_sign_in(tail) {
+        stores_with_session()
+    } else {
+        Vec::new()
+    };
+    Jar::SignedOut { with_session }
+}
+
+fn ytdlp_message(code: i32, tail: &str, cookies: &Jar) -> String {
     match explain(tail, cookies) {
         Some(why) => format!(
             "{why}
@@ -666,13 +708,29 @@ fn ytdlp_args(cookies: Option<&Path>, playlists: bool) -> Vec<String> {
 /// The yt-dlp failures a person can do something about, in a line rather than
 /// the wall of text yt-dlp writes (D112). Everything else keeps yt-dlp's own
 /// words: a message nobody has read yet beats a wrong guess at what it means.
-pub(crate) fn explain(tail: &str, cookies: bool) -> Option<String> {
-    // Two different problems wearing one error. Without a jar, the app needs
-    // one; with a jar, the jar is signed out — and telling someone to do the
-    // thing they have already done is the worst answer available (D113).
-    const GET: &str = "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.";
-    const STALE: &str = "The cookies this app has carry no YouTube sign-in, or no longer do. Sign in to YouTube in that browser, read them again with From a browser, and retry.";
-    let cookies_hint = if cookies { STALE } else { GET };
+pub(crate) fn explain(tail: &str, cookies: &Jar) -> Option<String> {
+    // Three different problems wearing one error, and the jar says which
+    // (D113, D118). Telling someone to do what they have already done is the
+    // worst answer available, so each case says what is actually wrong.
+    let cookies_hint = match cookies {
+        Jar::None => "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.".to_string(),
+        Jar::SignedIn => "The cookies this app is using do carry a YouTube sign-in, so YouTube refused that account: the session may have expired (read the browser again with From a browser), or the account may need to confirm its age on YouTube itself.".to_string(),
+        Jar::SignedOut { with_session } => {
+            // Firefox first: it is the store Windows never refuses to open.
+            let readable: Vec<&String> = with_session.iter().filter(|s| s.starts_with("firefox")).collect();
+            if let Some(first) = readable.first() {
+                format!("The cookies this app is using have no YouTube sign-in, but {first} has one right now. Read it with From a browser, then retry.")
+            } else if !with_session.is_empty() {
+                format!(
+                    "The cookies this app is using have no YouTube sign-in. {} {} one, but a Chromium browser keeps it encrypted where this app cannot open it: sign in to YouTube in Firefox, read firefox with From a browser, then retry.",
+                    with_session.join(", "),
+                    if with_session.len() == 1 { "has" } else { "have" },
+                )
+            } else {
+                "The cookies this app is using have no YouTube sign-in. Sign in to YouTube in Firefox, read firefox with From a browser, then retry.".to_string()
+            }
+        }
+    };
     let (why, needs_cookies) = if tail.contains("Sign in to confirm your age") {
         (
             "YouTube wants a signed-in session for this one: it is age-restricted.",
@@ -798,7 +856,7 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
-            cookies: cookies_file(app).is_some(),
+            cookies: jar_state(app, &tail.text()),
         });
     }
 
@@ -866,6 +924,12 @@ pub struct PlaylistItem {
     /// A file whose name already carries this id is in the library, so the
     /// picker can say so rather than queueing a second copy.
     pub have: bool,
+    /// Why YouTube told us nothing about it, when it did not (D119):
+    /// `"deleted"` or `"private"` when the list says so, `"no details"` when
+    /// the entry is a bare id. A bare id is usually a deleted or private video
+    /// and sometimes an age-restricted one, so the picker says it cannot tell
+    /// rather than guessing, and does not queue it unless asked.
+    pub missing: Option<String>,
 }
 
 /// The `list=` id in a URL, if there is one.
@@ -958,7 +1022,7 @@ pub async fn probe_playlist(app: &AppHandle, url: &str) -> Result<PlaylistProbe>
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
-            cookies: cookies_file(app).is_some(),
+            cookies: jar_state(app, &tail.text()),
         });
     }
     let v: serde_json::Value =
@@ -987,8 +1051,22 @@ fn playlist_from(
             a.iter()
                 .filter_map(|e| {
                     let id = str_of(e, "id")?;
+                    let title = str_of(e, "title");
+                    // YouTube marks the entries it will not show; a bare id
+                    // is the same thing unexplained (D119).
+                    let missing = match title.as_deref() {
+                        Some("[Deleted video]") => Some("deleted"),
+                        Some("[Private video]") => Some("private"),
+                        None => Some("no details"),
+                        Some(_) => None,
+                    }
+                    .map(str::to_string);
                     Some(PlaylistItem {
-                        title: str_of(e, "title").unwrap_or_else(|| id.clone()),
+                        title: match (&title, &missing) {
+                            (Some(t), None) => t.clone(),
+                            _ => "Unknown video".to_string(),
+                        },
+                        missing,
                         // Built from the id rather than taken from `url`: an
                         // entry's own URL can carry the list back with it, and
                         // a job must name one video and nothing else.
@@ -1151,7 +1229,7 @@ async fn download_media(
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
-            cookies: cookies_file(app).is_some(),
+            cookies: jar_state(app, &tail.text()),
         });
     }
 
@@ -1938,6 +2016,8 @@ mod tests {
                 {"id": "aaaaaaaaaaa", "title": "One", "duration": 213.0,
                  "url": "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PL123"},
                 {"id": "bbbbbbbbbbb", "duration": null},
+                {"id": "ccccccccccc", "title": "[Deleted video]"},
+                {"id": "ddddddddddd", "title": "[Private video]"},
                 {"title": "no id at all"}
               ]
             }"#,
@@ -1947,7 +2027,10 @@ mod tests {
         assert_eq!(probe.title, "Storm Prep");
         assert_eq!(probe.uploader.as_deref(), Some("paperhurts"));
         // An entry with no id is not something that can be queued.
-        assert_eq!(probe.items.len(), 2);
+        assert_eq!(probe.items.len(), 4);
+        assert_eq!(probe.items[2].missing.as_deref(), Some("deleted"));
+        assert_eq!(probe.items[3].missing.as_deref(), Some("private"));
+        assert_eq!(probe.items[3].title, "Unknown video");
         // The URL is rebuilt from the id: an entry's own URL carries the list
         // back with it, and a job must name one video and nothing else.
         assert_eq!(
@@ -1956,8 +2039,11 @@ mod tests {
         );
         assert_eq!(probe.items[0].duration_s, Some(213.0));
         assert!(probe.items[0].have, "the library already has this one");
-        // A flat entry often has no title and no duration; the id stands in.
-        assert_eq!(probe.items[1].title, "bbbbbbbbbbb");
+        // A bare id is an entry YouTube gave no details for (D119): it is
+        // named for what it is, and says why, rather than showing the id.
+        assert_eq!(probe.items[1].title, "Unknown video");
+        assert_eq!(probe.items[1].missing.as_deref(), Some("no details"));
+        assert_eq!(probe.items[0].missing, None);
         assert_eq!(probe.items[1].duration_s, None);
         assert!(!probe.items[1].have);
     }
@@ -2118,7 +2204,7 @@ mod tests {
     #[test]
     fn a_failure_a_person_can_act_on_says_what_to_do_first() {
         let tail = "ERROR: [youtube] aAkI4EKKHMw: Sign in to confirm your age. Use --cookies-from-browser or --cookies";
-        let said = ytdlp_message(1, tail, false);
+        let said = ytdlp_message(1, tail, &Jar::None);
         assert!(
             said.starts_with("YouTube wants a signed-in session"),
             "{said}"
@@ -2132,19 +2218,67 @@ mod tests {
     }
 
     #[test]
-    fn a_sign_in_refusal_says_something_different_once_cookies_are_set() {
-        let tail = "ERROR: [youtube] DgYSM91vJko: Sign in to confirm your age.";
+    fn a_sign_in_refusal_says_what_is_wrong_with_the_cookies_in_use() {
+        let tail = "ERROR: [youtube] abc: Sign in to confirm your age.";
         // Nothing set: ask for a jar.
-        let without = ytdlp_message(1, tail, false);
-        assert!(
-            without.contains("Point the app at a cookies.txt"),
-            "{without}"
+        let none = ytdlp_message(1, tail, &Jar::None);
+        assert!(none.contains("Point the app at a cookies.txt"), "{none}");
+        // A signed-out jar, and Firefox has a sign-in: name it (D118). This is
+        // the owner's case, and "read them again" alone did not say which.
+        let firefox = ytdlp_message(
+            1,
+            tail,
+            &Jar::SignedOut {
+                with_session: vec![
+                    "edge — Profile 1".into(),
+                    "firefox — default-release".into(),
+                ],
+            },
         );
-        // A jar set and still refused: the jar is the problem, and telling
-        // someone to do what they have already done is the worst answer.
-        let with = ytdlp_message(1, tail, true);
-        assert!(with.contains("carry no YouTube sign-in"), "{with}");
-        assert!(!with.contains("Point the app at a cookies.txt"), "{with}");
+        assert!(
+            firefox.contains("but firefox — default-release has one right now"),
+            "{firefox}"
+        );
+        assert!(
+            !firefox.contains("Point the app at a cookies.txt"),
+            "{firefox}"
+        );
+        // Only Chromium profiles have one: say they are encrypted.
+        let chromium = ytdlp_message(
+            1,
+            tail,
+            &Jar::SignedOut {
+                with_session: vec!["edge — Profile 1".into()],
+            },
+        );
+        assert!(chromium.contains("encrypted"), "{chromium}");
+        // No store has one.
+        let nowhere = ytdlp_message(
+            1,
+            tail,
+            &Jar::SignedOut {
+                with_session: vec![],
+            },
+        );
+        assert!(
+            nowhere.contains("Sign in to YouTube in Firefox"),
+            "{nowhere}"
+        );
+        // Signed in and still refused: the account, not the cookies.
+        let signed = ytdlp_message(1, tail, &Jar::SignedIn);
+        assert!(signed.contains("do carry a YouTube sign-in"), "{signed}");
+        // Every one still carries yt-dlp's own words.
+        for m in [&none, &firefox, &chromium, &nowhere, &signed] {
+            assert!(m.contains(tail), "{m}");
+        }
+    }
+
+    #[test]
+    fn only_a_sign_in_refusal_looks_for_a_sign_in_elsewhere() {
+        assert!(wants_sign_in("Sign in to confirm your age"));
+        assert!(wants_sign_in("Sign in to confirm you're not a bot"));
+        assert!(!wants_sign_in("ERROR: [youtube] x: Video unavailable"));
+        assert!(!wants_sign_in("unable to rename file: [WinError 32]"));
     }
 
     #[test]
@@ -2186,7 +2320,7 @@ mod tests {
 
     #[test]
     fn a_failure_we_do_not_know_keeps_yt_dlps_words() {
-        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]", false);
+        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]", &Jar::None);
         assert!(said.starts_with("yt-dlp failed (2)"), "{said}");
         assert!(said.contains("WinError 32"), "{said}");
     }

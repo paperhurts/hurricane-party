@@ -135,6 +135,124 @@
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let shown = $derived(selectedList == null ? tracks : listItems);
 
+  // The list playback belongs to (D120): what the classic playlist window
+  // shows, and what Next, Previous and a track ending walk. It used to be
+  // whatever list the library was showing, so opening Library to look for
+  // something replaced the playlist in the other window and changed what
+  // played next. Now browsing moves nothing; playing a row from a list makes
+  // that list the queue. Until anything has been played it follows the list
+  // showing, so a cold start still plays what is on screen.
+  //   undefined — not chosen yet, follow the list showing
+  //   null      — the whole library
+  //   a number  — that playlist
+  const QUEUE_KEY = "hp.queueFrom";
+  let queueFrom = $state<number | null | undefined>(loadQueueFrom());
+  let queueItems = $state<MediaRow[]>([]);
+  let queue = $derived(queueFrom === undefined ? shown : queueFrom === null ? tracks : queueItems);
+  let queueListId = $derived(queueFrom === undefined ? selectedList : queueFrom);
+
+  function loadQueueFrom(): number | null | undefined {
+    try {
+      const raw = localStorage.getItem(QUEUE_KEY);
+      if (raw === null) return undefined;
+      return raw === "library" ? null : Number(raw) || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // ---- finding things in the list showing (D121) ----
+  //
+  // Search, a type filter and, in the library, a sort. They change what the
+  // list shows and nothing else: the queue is still the whole list (D120), so
+  // playing a row from a search plays on through its list, not through the
+  // search. A playlist keeps the order a person arranged, so only the library
+  // sorts; and a grip cannot reorder a list it is not seeing all of, so
+  // dragging waits until the search is clear.
+  type Kind = "all" | "audio" | "video";
+  type Sort = "added" | "title" | "artist" | "longest";
+  const VIEW_KEY = "hp.libraryView";
+  let search = $state("");
+  let kind = $state<Kind>("all");
+  let sort = $state<Sort>("added");
+  let searchEl = $state<HTMLInputElement | null>(null);
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "{}");
+    if (["all", "audio", "video"].includes(v.kind)) kind = v.kind;
+    if (["added", "title", "artist", "longest"].includes(v.sort)) sort = v.sort;
+  } catch {
+    // No stored view, or no storage: the defaults stand.
+  }
+  $effect(() => {
+    const v = JSON.stringify({ kind, sort });
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // as above
+    }
+  });
+
+  /** Case- and accent-blind, so "beyonce" finds "Beyoncé". */
+  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  let terms = $derived(fold(search).split(/\s+/).filter(Boolean));
+  let searched = $derived(
+    terms.length === 0
+      ? shown
+      : shown.filter((t) => {
+          const hay = fold(`${t.title} ${t.uploader ?? ""}`);
+          return terms.every((w) => hay.includes(w));
+        }),
+  );
+  let kindCounts = $derived({
+    all: searched.length,
+    audio: searched.filter((t) => t.kind === "audio").length,
+    video: searched.filter((t) => t.kind === "video").length,
+  });
+  let visible = $derived.by(() => {
+    const rows = kind === "all" ? searched : searched.filter((t) => t.kind === kind);
+    if (selectedList != null || sort === "added") return rows;
+    const by = [...rows];
+    const text = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+    if (sort === "title") by.sort((a, b) => text(a.title, b.title));
+    else if (sort === "artist") by.sort((a, b) => text(a.uploader ?? "\uffff", b.uploader ?? "\uffff") || text(a.title, b.title));
+    else if (sort === "longest") by.sort((a, b) => (b.duration_s ?? -1) - (a.duration_s ?? -1));
+    return by;
+  });
+  /** Whether the list shows less than all of itself, or in another order. */
+  let narrowed = $derived(terms.length > 0 || kind !== "all");
+
+  function clearFind() {
+    search = "";
+    kind = "all";
+  }
+
+  /** Make the list showing the queue, because a row of it was just played. */
+  function adoptShowingAsQueue() {
+    queueFrom = selectedList;
+    queueItems = selectedList == null ? [] : listItems;
+    try {
+      localStorage.setItem(QUEUE_KEY, selectedList == null ? "library" : String(selectedList));
+    } catch {
+      // A private window or a blocked store: the queue still works this session.
+    }
+  }
+
+  /** Re-read the queue's own list, or let go of a playlist that is gone. */
+  async function refreshQueue() {
+    if (queueFrom === undefined || queueFrom === null) return;
+    if (!playlists.some((p) => p.id === queueFrom)) {
+      queueFrom = undefined;
+      queueItems = [];
+      try {
+        localStorage.removeItem(QUEUE_KEY);
+      } catch {
+        // as above
+      }
+      return;
+    }
+    queueItems = await invoke<MediaRow[]>("playlist_items", { id: queueFrom });
+  }
+
   const mb = (n: number | null) => (n == null ? "—" : (n / 1_048_576).toFixed(1) + " MB");
 
   function duration(s: number | null) {
@@ -161,6 +279,7 @@
     playlists = await invoke<Playlist[]>("list_playlists");
     roots = await invoke<Root[]>("list_roots");
     if (selectedList != null) await openList(selectedList);
+    await refreshQueue();
   }
 
   onMount(() => {
@@ -229,11 +348,15 @@
       // stays in one place.
       listen("queue:hello", announceQueue),
       listen<number>("queue:play", (e) => {
-        const t = shown.find((x) => x.id === e.payload);
+        const t = queue.find((x) => x.id === e.payload);
+        // Playing from the playlist window fixes the queue it shows (D120).
+        if (queueFrom === undefined) adoptShowingAsQueue();
         if (t) play(t);
       }),
-      listen<number>("queue:remove", (e) => removeAt(e.payload)),
-      listen<{ from: number; to: number }>("queue:move", (e) => move(e.payload.from, e.payload.to)),
+      // The playlist window edits the list it shows, which is the queue, not
+      // whatever the library happens to be showing (D120).
+      listen<number>("queue:remove", (e) => removeFrom(queueListId, e.payload)),
+      listen<{ from: number; to: number }>("queue:move", (e) => moveIn(queueListId, e.payload.from, e.payload.to)),
     ];
     // The DB is the source of truth for progress, and it's written throttled
     // to ~4Hz. Polling it while work is in flight beats trying to reconcile a
@@ -282,6 +405,7 @@
     url: string;
     duration_s: number | null;
     have: boolean;
+    missing: string | null;
   };
   type ListProbe = { id: string; title: string; uploader: string | null; items: ListItem[] };
   let list = $state<ListProbe | null>(null);
@@ -314,7 +438,9 @@
       list = probe;
       // Everything the library does not already have, which is what a second
       // import of the same list should offer.
-      listPick = new SvelteSet(probe.items.filter((i) => !i.have).map((i) => i.id));
+      // What is new and what YouTube described; an entry it gave no details
+      // for is usually gone, and queueing it only makes a failed row (D119).
+      listPick = new SvelteSet(probe.items.filter((i) => !i.have && !i.missing).map((i) => i.id));
       notice = null;
     } catch (e) {
       // A mix YouTube makes up as it goes, or a list that cannot be read.
@@ -366,16 +492,16 @@
       which === "all"
         ? list.items
         : which === "new"
-          ? list.items.filter((i) => !i.have)
+          ? list.items.filter((i) => !i.have && !i.missing)
           : [];
     listPick = new SvelteSet(keep.map((i) => i.id));
   }
 
-  /** Broadcast the play queue: whatever list is showing, as the playlist window sees it. */
+  /** Broadcast the play queue, as the playlist window sees it (D120). */
   function announceQueue() {
     const name =
-      selectedList == null ? "Library" : (playlists.find((p) => p.id === selectedList)?.name ?? "Playlist");
-    const items = shown.map((t) => ({
+      queueListId == null ? "Library" : (playlists.find((p) => p.id === queueListId)?.name ?? "Playlist");
+    const items = queue.map((t) => ({
       id: t.id,
       title: t.title,
       uploader: t.uploader,
@@ -383,7 +509,7 @@
       kind: t.kind,
       position: t.position,
     }));
-    emit("queue:set", { name, listId: selectedList, items }).catch(() => {});
+    emit("queue:set", { name, listId: queueListId, items }).catch(() => {});
   }
 
   // Re-broadcast whenever the queue changes: a list switch, a scan, a
@@ -612,16 +738,26 @@
     refreshLibrary();
   }
 
-  async function removeAt(position: number) {
-    if (selectedList == null) return;
-    await invoke("remove_from_playlist", { playlistId: selectedList, position });
+  async function removeFrom(listId: number | null, position: number) {
+    if (listId == null) return;
+    await invoke("remove_from_playlist", { playlistId: listId, position });
     refreshLibrary();
   }
 
-  async function move(from: number, to: number) {
-    if (selectedList == null) return;
-    await invoke("reorder_playlist", { playlistId: selectedList, from, to });
+  async function moveIn(listId: number | null, from: number, to: number) {
+    if (listId == null) return;
+    await invoke("reorder_playlist", { playlistId: listId, from, to });
     refreshLibrary();
+  }
+
+  // The library's own rows act on the list showing.
+  const removeAt = (position: number) => removeFrom(selectedList, position);
+  const move = (from: number, to: number) => moveIn(selectedList, from, to);
+
+  /** A row's own play button: play it, and make its list the queue (D120). */
+  function playFromView(t: MediaRow) {
+    adoptShowingAsQueue();
+    play(t);
   }
 
   function play(t: MediaRow) {
@@ -662,19 +798,19 @@
 
   /** The sequence the transport walks right now. */
   function order(): number[] {
-    return shuffle ? shuffleOrder : shown.map((t) => t.id);
+    return shuffle ? shuffleOrder : queue.map((t) => t.id);
   }
 
   function playId(id: number | null) {
     if (id == null) return;
-    const t = shown.find((x) => x.id === id);
+    const t = queue.find((x) => x.id === id);
     if (t) play(t);
   }
 
   /** A fresh shuffle of the showing list, `first` leading when it is in it. */
   function reshuffle(first: number | null) {
     shuffleOrder = shuffled(
-      shown.map((t) => t.id),
+      queue.map((t) => t.id),
       first,
     );
   }
@@ -711,19 +847,22 @@
    * pipe's `play` all land here.
    */
   function start(stoppedOn: number | null) {
-    const pick = picked !== null && shown.some((t) => t.id === picked) ? picked : null;
+    // The first thing played, from anywhere, fixes the queue (D120); until then
+    // it followed the list showing, and browsing would have swapped it.
+    if (queueFrom === undefined) adoptShowingAsQueue();
+    const pick = picked !== null && queue.some((t) => t.id === picked) ? picked : null;
     // From cold, a shuffle is a fresh lap led by the pick. Stopped, the lap
     // already running stands, as it would for a double-click: Previous still
     // walks back through what played.
     if (shuffle && stoppedOn === null) reshuffle(pick);
     const id = startId(order(), pick, stoppedOn);
     if (id === null) {
-      notice = "Nothing to play: the list showing is empty.";
+      notice = "Nothing to play: the playlist is empty.";
       return;
     }
     // The stopped track can be from a list no longer showing; it is still in
     // the library.
-    const t = shown.find((x) => x.id === id) ?? tracks.find((x) => x.id === id);
+    const t = queue.find((x) => x.id === id) ?? tracks.find((x) => x.id === id);
     if (t) play(t);
   }
 
@@ -744,7 +883,7 @@
 
   // A different list, or rows in and out: a shuffle of the old list would walk
   // ids that are no longer there. Reshuffle around whatever is playing.
-  let shownKey = $derived(shown.map((t) => t.id).join(","));
+  let shownKey = $derived(queue.map((t) => t.id).join(","));
   $effect(() => {
     void shownKey;
     // Only the list is a dependency. Reading `shuffle` or `current` tracked
@@ -1086,6 +1225,12 @@
       listMenuFor = null;
       selected = [];
     }
+    // Ctrl+F is where anyone looks for find (D121).
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      searchEl?.focus();
+      searchEl?.select();
+    }
   }}
 />
 
@@ -1170,7 +1315,7 @@
     </header>
     <ul>
       {#each list.items as item, i (item.id)}
-        <li class:have={item.have}>
+        <li class:have={item.have} class:gone={!!item.missing}>
           <input
             class="tick"
             type="checkbox"
@@ -1182,6 +1327,14 @@
           />
           <span class="num">{String(i + 1).padStart(2, "0")}</span>
           <span class="what">{item.title}</span>
+          {#if item.missing}
+            <span
+              class="tag gonetag"
+              title={item.missing === "no details"
+                ? `YouTube gave no title for ${item.id}. It is usually deleted or private, and sometimes age-restricted — check it to try anyway.`
+                : `${item.id} is ${item.missing} on YouTube.`}
+            >{item.missing}</span>
+          {/if}
           {#if item.have}<span class="tag">in the library</span>{/if}
           <span class="dur">{dur(item.duration_s)}</span>
         </li>
@@ -1365,6 +1518,37 @@
     </nav>
 
     <div class="listcol">
+      <!-- Search, type and sort (D121). -->
+      <div class="findbar">
+        <input
+          class="find"
+          type="search"
+          placeholder="Search titles and artists"
+          bind:value={search}
+          bind:this={searchEl}
+          onkeydown={(e) => {
+            if (e.key === "Escape") search = "";
+          }}
+        />
+        <div class="kinds" role="group" aria-label="Type">
+          {#each [["all", "All"], ["audio", "Audio"], ["video", "Video"]] as [k, label] (k)}
+            <button
+              class="mini"
+              class:sel={kind === k}
+              aria-pressed={kind === k}
+              onclick={() => (kind = k as Kind)}
+            >{label} <span class="n">{kindCounts[k as Kind]}</span></button>
+          {/each}
+        </div>
+        {#if selectedList == null}
+          <select class="sort" bind:value={sort} title="Sort the library">
+            <option value="added">Recently added</option>
+            <option value="title">Title</option>
+            <option value="artist">Artist</option>
+            <option value="longest">Longest</option>
+          </select>
+        {/if}
+      </div>
       <!-- The selection bar (D84): only while something is checked, so the
            list is quiet until it is asked for something. Removal here keeps
            the files; the delete offer follows on the notice, as before. -->
@@ -1376,17 +1560,26 @@
         </div>
       {/if}
     <ul class="tracks" bind:this={rowsEl}>
-      {#each shown as t, i (t.id + ":" + (t.position ?? "l"))}
+      {#each visible as t, i (t.id + ":" + (t.position ?? "l"))}
         <li
           class:current={current?.id === t.id}
           class:lifted={dragId === t.id}
           class:drop-before={dragId != null && dropAt === i}
-          class:drop-after={dragId != null && dropAt === shown.length && i === shown.length - 1}
+          class:drop-after={dragId != null && dropAt === visible.length && i === visible.length - 1}
           data-idx={i}
         >
           {#if selectedList != null}
+            <!-- A grip reorders the whole list, so it waits for the search to
+                 clear rather than dropping a row between two it cannot see. -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <span class="grip" onpointerdown={(e) => gripDown(e, i)} title="Drag to reorder">⋮⋮</span>
+            <span
+              class="grip"
+              class:off={narrowed}
+              onpointerdown={(e) => {
+                if (!narrowed) gripDown(e, i);
+              }}
+              title={narrowed ? "Clear the search to reorder" : "Drag to reorder"}
+            >⋮⋮</span>
           {:else}
             <!-- Check to select; the bar above does the removing (D84). -->
             <input
@@ -1398,11 +1591,11 @@
             />
           {/if}
           {#if t.kind === "video"}
-            <button class="play" onclick={() => play(t)}>▣</button>
+            <button class="play" onclick={() => playFromView(t)}>▣</button>
           {:else if nowId === t.id}
             <button class="play" onclick={toggle}>{isPlaying ? "‖" : "▶"}</button>
           {:else}
-            <button class="play" onclick={() => play(t)}>▶</button>
+            <button class="play" onclick={() => playFromView(t)}>▶</button>
           {/if}
           <span class="title">{t.title}</span>
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
@@ -1434,7 +1627,12 @@
           {/if}
         </li>
       {:else}
-        {#if selectedList == null}
+        {#if narrowed && shown.length}
+          <li class="empty">
+            Nothing here matches{terms.length ? ` "${search.trim()}"` : ""}{kind !== "all" ? ` in ${kind}` : ""}.
+            <button class="mini" onclick={clearFind}>Clear</button>
+          </li>
+        {:else if selectedList == null}
           <!-- First run. An invitation, not an apology (design brief), and
                the surfer's home (#62). -->
           <li class="empty hangten">
@@ -1582,11 +1780,23 @@
   .listpick ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
   .listpick li { display: flex; align-items: center; gap: 8px; padding: 3px 9px; font-size: 12px; }
   .listpick li.have { color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .listpick li.gone { color: color-mix(in srgb, var(--text) 35%, transparent); font-style: italic; }
+  .listpick .gonetag { color: color-mix(in srgb, var(--text) 45%, transparent); font-style: normal; }
   .listpick .num { font-size: 10px; color: color-mix(in srgb, var(--text) 40%, transparent); }
   .listpick .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .listpick .tag { flex: 0 0 auto; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
                    color: var(--warn); }
   .listpick .dur { flex: 0 0 auto; font-size: 11px; color: color-mix(in srgb, var(--text) 55%, transparent); }
+  /* Search, type and sort above the list (D121). */
+  .findbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .findbar .find { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; padding: 4px 8px;
+                   background: var(--surface); color: var(--text);
+                   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .findbar .find:focus { outline: none; border-color: var(--accent); }
+  .findbar .kinds { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+  .findbar .kinds .sel { border-color: var(--accent); color: var(--accent); }
+  .findbar .sort { flex: 0 0 auto; font-size: 11px; }
+  .grip.off { opacity: 0.25; cursor: not-allowed; }
   /* The right column: the selection bar, when there is one, sits on the list. */
   .listcol { display: flex; flex-direction: column; min-width: 0; }
   .selbar { display: flex; align-items: center; gap: 10px; padding: 5px 9px; font-size: 12px;
