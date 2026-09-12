@@ -259,13 +259,13 @@ Animate `opacity` on a pre-composited glow layer. Never animate `box-shadow`.
 
 Both importers are mappings *into* the above. That is the entire justification for locking this schema before either one is written.
 
-### `.wsz` — full support, v0.5
+### `.wsz` — supported to a degree, v0.5 (D110)
 
 | Classic file | Maps to |
 |---|---|
 | `MAIN.BMP` | `windows.main.elements.frame` + backdrop |
 | `CBUTTONS.BMP` | The five transport `button` elements, at conventional offsets |
-| `TITLEBAR.BMP` | `titlebar` sprite + `inactive` variant, plus the shade-mode strips |
+| `TITLEBAR.BMP` | `titlebar` sprite + `inactive` variant; the shade-mode strips, and the controls painted into them (D111) |
 | `NUMBERS.BMP` / `NUMS_EX.BMP` | `fonts.time` |
 | `TEXT.BMP` | `fonts.chrome` |
 | `VOLUME.BMP` / `BALANCE.BMP` | The volume and balance `slider` elements |
@@ -281,7 +281,11 @@ Sprite coordinates in `.wsz` are **conventional, not declared** — the offsets 
 
 Classic skins set `resizable: false` on all three windows (except playlist), so on a `.wsz` most edges offer the move cursor and the interaction degrades gracefully. Same engine, fewer capabilities.
 
-### `.wal` — partial, explicitly, v0.5+
+**The windowshade strip's controls are painted into its art** (D111). The classic gave the shade transport no sprites of its own and no pressed state; Winamp hit-tested fixed rectangles over the picture, and so does the importer — six `button` elements whose sprite is the strip's own pixels at the same offset, in the focused and the idle strip both. The seek bar there does have four small sprites of its own, the time is two `text` elements either side of the colon painted into the strip (D104's split, at 5 × 6), and the analyser is a 38 × 5 `visualizer` box.
+
+**What an imported skin does not get, and why it is said out loud** (D110). A classic skin also draws balance, mono/stereo, the playlist's own transport row, and its SEL and MISC menus. This app has one transport (D81), no balance and no menus, so in an imported skin those stay pictures. The importer writes what it could not use into the manifest as `notes` — an unknown key, ignored by the validator, beside `generator` (D107) — and the library repeats it every time that skin is picked, rather than once at import where a person reads it and forgets. The promise is that a skin wears and that anything making the app *unusable* is a bug; a control this app has no feature for is not.
+
+### `.wal` — partial, explicitly, and not v0.5 (D110)
 
 Parse the XML layout, map what corresponds to native concepts, render the PNGs, **ignore the `.maki` bytecode entirely** (D17, and `windows.md` argues it at length).
 

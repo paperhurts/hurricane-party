@@ -146,6 +146,23 @@ export async function measureSheets(dir: string, files: string[]): Promise<Recor
   return sizes;
 }
 
+/**
+ * What the importer said about a skin when it wrote its manifest (D110): the
+ * art it could not find, and the classic controls this app does not use. Read
+ * from the manifest rather than recomputed, so the library can say it when a
+ * person picks the skin and not only the once at import. Eyewall has none.
+ */
+export async function skinNotes(id: string): Promise<string[]> {
+  if (id === "eyewall") return [];
+  try {
+    const on = await invoke<SkinOnDisk>("read_skin", { id });
+    const notes = (JSON.parse(on.manifest) as { notes?: unknown }).notes;
+    return Array.isArray(notes) ? notes.filter((n): n is string => typeof n === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** The three classic windows' labels are not the manifest's names. */
 export function windowNameOf(label: string): WindowName {
   switch (label) {

@@ -5,7 +5,7 @@
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
   import { parseSkin } from "./lib/skin";
-  import { measureSheets } from "./lib/skins";
+  import { measureSheets, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
@@ -671,9 +671,21 @@
     await invoke("set_glow", { on });
   }
 
-  async function setSkin(id: string) {
+  // Whether the line showing is the skin's, so a skin with nothing to say
+  // clears the last skin's line without taking a delete offer with it.
+  let skinSaid = false;
+  async function setSkin(id: string, name = id) {
     skin = id;
     await invoke("set_skin", { id });
+    // What this app could not use of it, every time it is worn (D110).
+    const notes = await skinNotes(id);
+    if (notes.length) {
+      notice = `${name} is on. ${notes.join(" ")}`;
+      skinSaid = true;
+    } else if (skinSaid) {
+      notice = null;
+      skinSaid = false;
+    }
   }
 
   /**
@@ -709,8 +721,10 @@
       parseSkin(built.manifest);
       await invoke("write_skin_manifest", { id: unpacked.id, json: JSON.stringify(built.manifest, null, 1) });
       skins = await invoke<string[]>("list_skins");
-      await setSkin(unpacked.id);
-      notice = `${unpacked.name} is on.` + (built.warnings.length ? ` ${built.warnings.join(" ")}` : "");
+      // The notice is `setSkin`'s: what it says here is what it will say
+      // every later time this skin is picked, rather than a better line a
+      // person sees once and never again.
+      await setSkin(unpacked.id, unpacked.name);
     } catch (e) {
       if (unpacked) await invoke("discard_skin", { id: unpacked.id }).catch(() => {});
       notice = `That skin was refused: ${e instanceof Error ? e.message : String(e)}`;
