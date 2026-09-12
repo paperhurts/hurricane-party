@@ -188,6 +188,159 @@ pub const BROWSERS: [&str; 7] = [
     "firefox", "brave", "chrome", "chromium", "edge", "opera", "vivaldi",
 ];
 
+/// One cookie store a person can read from: a browser, and which of its
+/// profiles (D115).
+///
+/// `--cookies-from-browser chrome` means `chrome:Default`, which is the trap
+/// this type exists to remove: a second Chrome profile is where a YouTube
+/// sign-in often lives, and reading the first one returns a jar full of real
+/// cookies with no session in it.
+#[derive(Debug, Clone, Serialize)]
+pub struct CookieSource {
+    /// The browser, always one of `BROWSERS`.
+    pub browser: String,
+    /// The profile directory (Chromium) or profile name (Firefox), when the
+    /// browser has more than the one.
+    pub profile: Option<String>,
+    /// What the picker shows: the browser, and the profile's own name when it
+    /// has one worth reading.
+    pub label: String,
+    /// What goes to `--cookies-from-browser`, built here so nothing a person
+    /// types ever reaches argv.
+    pub spec: String,
+}
+
+/// Every profile of every browser installed, in the order `BROWSERS` lists
+/// them (D115). Directory listings and one small JSON file: no cookie
+/// database is opened, and no cookie is read.
+pub fn cookie_sources() -> Vec<CookieSource> {
+    let mut out = Vec::new();
+    for browser in BROWSERS {
+        match browser {
+            "firefox" => out.extend(firefox_profiles()),
+            _ => out.extend(chromium_profiles(browser)),
+        }
+    }
+    out
+}
+
+fn source(browser: &str, profile: Option<String>, name: Option<String>) -> CookieSource {
+    let label = match (&profile, &name) {
+        (Some(_), Some(n)) => format!("{browser} — {n}"),
+        (Some(p), None) => format!("{browser} — {p}"),
+        _ => browser.to_string(),
+    };
+    let spec = match &profile {
+        Some(p) => format!("{browser}:{p}"),
+        None => browser.to_string(),
+    };
+    CookieSource {
+        browser: browser.to_string(),
+        profile,
+        label,
+        spec,
+    }
+}
+
+/// Chromium keeps one folder per profile under `User Data`, and the display
+/// names in `Local State`. A profile with no `Cookies` file has never stored
+/// one, so it is not a source.
+fn chromium_profiles(browser: &str) -> Vec<CookieSource> {
+    let Some(root) = chromium_root(browser) else {
+        return Vec::new();
+    };
+    let names: std::collections::HashMap<String, String> =
+        std::fs::read_to_string(root.join("Local State"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| {
+                v.get("profile")?.get("info_cache")?.as_object().map(|o| {
+                    o.iter()
+                        .filter_map(|(dir, info)| {
+                            Some((dir.clone(), info.get("name")?.as_str()?.to_string()))
+                        })
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+
+    let mut found: Vec<CookieSource> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return found;
+    };
+    for e in entries.filter_map(|e| e.ok()) {
+        if !e.path().is_dir() {
+            continue;
+        }
+        let dir = e.file_name().to_string_lossy().into_owned();
+        // Chromium moved the file under `Network/` and still reads the old
+        // place on older profiles.
+        let has_cookies = e.path().join("Cookies").is_file()
+            || e.path().join("Network").join("Cookies").is_file();
+        if !has_cookies {
+            continue;
+        }
+        found.push(source(browser, Some(dir.clone()), names.get(&dir).cloned()));
+    }
+    found.sort_by(|a, b| a.spec.cmp(&b.spec));
+    found
+}
+
+fn chromium_root(browser: &str) -> Option<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    let rel = match browser {
+        "chrome" => r"Google\Chrome\User Data",
+        "chromium" => r"Chromium\User Data",
+        "brave" => r"BraveSoftware\Brave-Browser\User Data",
+        "edge" => r"Microsoft\Edge\User Data",
+        "vivaldi" => r"Vivaldi\User Data",
+        "opera" => r"Opera Software\Opera Stable",
+        _ => return None,
+    };
+    let p = local.join(rel);
+    p.is_dir().then_some(p)
+}
+
+/// Firefox lists its profiles in `profiles.ini`, by name and path. yt-dlp
+/// takes either; the name is what a person recognises.
+fn firefox_profiles() -> Vec<CookieSource> {
+    let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+        return Vec::new();
+    };
+    let root = appdata.join(r"Mozilla\Firefox");
+    let Ok(ini) = std::fs::read_to_string(root.join("profiles.ini")) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut name: Option<String> = None;
+    let mut path: Option<String> = None;
+    let flush =
+        |name: &mut Option<String>, path: &mut Option<String>, out: &mut Vec<CookieSource>| {
+            if let (Some(n), Some(p)) = (name.take(), path.take()) {
+                let dir = root.join(p.replace('/', "\\"));
+                if dir.join("cookies.sqlite").is_file() {
+                    out.push(source(
+                        "firefox",
+                        Some(dir.to_string_lossy().into_owned()),
+                        Some(n),
+                    ));
+                }
+            }
+        };
+    for line in ini.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            flush(&mut name, &mut path, &mut out);
+        } else if let Some(v) = line.strip_prefix("Name=") {
+            name = Some(v.to_string());
+        } else if let Some(v) = line.strip_prefix("Path=") {
+            path = Some(v.to_string());
+        }
+    }
+    flush(&mut name, &mut path, &mut out);
+    out
+}
+
 /// What an export produced: where the jar landed, and how many cookies are in
 /// it — the count is what tells a person it worked, and it is all this app
 /// ever says about the contents.
@@ -210,12 +363,17 @@ pub struct CookieExport {
 /// reserved by RFC 2606 and can never resolve, so the run cannot reach anyone
 /// — the extraction fails, the jar is written anyway, and the exit code is
 /// ignored on purpose. What counts as success is a file with cookies in it.
-pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExport> {
-    if !BROWSERS.contains(&browser) {
+pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport> {
+    // A spec, not a browser: `chrome:Profile 1` (D115). Checked against what
+    // `cookie_sources` found rather than parsed permissively — the value
+    // reaches argv, so it may only ever be one this machine offered.
+    let known = cookie_sources();
+    let Some(source) = known.into_iter().find(|s| s.spec == spec) else {
         return Err(PipelineError::BadUrl(format!(
-            "{browser} is not a browser this can read"
+            "{spec} is not a cookie store this machine offers"
         )));
-    }
+    };
+    let browser = source.browser.as_str();
     let dir = app
         .path()
         .app_data_dir()
@@ -226,7 +384,7 @@ pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExpo
 
     let args: Vec<String> = vec![
         "--cookies-from-browser".into(),
-        browser.to_string(),
+        source.spec.clone(),
         "--cookies".into(),
         out.to_string_lossy().into_owned(),
         "--simulate".into(),
@@ -1656,6 +1814,35 @@ mod tests {
         assert_eq!(probe.items[1].title, "bbbbbbbbbbb");
         assert_eq!(probe.items[1].duration_s, None);
         assert!(!probe.items[1].have);
+    }
+
+    #[test]
+    fn a_cookie_source_builds_its_own_spec_and_label() {
+        let plain = source("firefox", None, None);
+        assert_eq!(plain.spec, "firefox");
+        assert_eq!(plain.label, "firefox");
+        // A Chromium profile directory with a display name shows the name and
+        // sends the directory, which is what yt-dlp takes.
+        let named = source("chrome", Some("Profile 1".into()), Some("Kiddo".into()));
+        assert_eq!(named.spec, "chrome:Profile 1");
+        assert_eq!(named.label, "chrome — Kiddo");
+        // No display name: the directory is the label too.
+        let bare = source("chrome", Some("Profile 2".into()), None);
+        assert_eq!(bare.label, "chrome — Profile 2");
+        assert_eq!(bare.spec, "chrome:Profile 2");
+    }
+
+    #[test]
+    fn every_source_this_machine_offers_names_a_browser_on_the_list() {
+        // Whatever is installed here, nothing invented reaches argv: a spec is
+        // always "<browser>" or "<browser>:<profile>" with the browser on the
+        // allowlist (D115).
+        for s in cookie_sources() {
+            assert!(BROWSERS.contains(&s.browser.as_str()), "{}", s.browser);
+            let head = s.spec.split(':').next().unwrap();
+            assert_eq!(head, s.browser);
+            assert!(!s.label.is_empty());
+        }
     }
 
     #[test]
