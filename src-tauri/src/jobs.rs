@@ -18,6 +18,7 @@ use serde::Serialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_shell::process::CommandChild;
 use tokio::sync::Notify;
 
 #[derive(Debug, Clone, Serialize)]
@@ -38,6 +39,8 @@ pub struct Job {
     /// the finished track is added to it, so closing the app mid-queue does
     /// not lose which playlist forty downloads were for.
     pub playlist_id: Option<i64>,
+    /// That list's name, for the Downloads header that controls it (D117).
+    pub playlist_name: Option<String>,
     pub created_at: i64,
 }
 
@@ -56,6 +59,8 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
         attempts: r.get("attempts")?,
         want_video: r.get::<_, i64>("want_video")? != 0,
         playlist_id: r.get("playlist_id")?,
+        // Only `list` joins the name in; a claimed job does not need it.
+        playlist_name: r.get("playlist_name").unwrap_or(None),
         created_at: r.get("created_at")?,
     })
 }
@@ -101,10 +106,16 @@ pub fn enqueue(
 
 pub fn list(conn: &Connection) -> Result<Vec<Job>, DbError> {
     let mut st = conn.prepare(
-        "SELECT * FROM jobs
-         WHERE status != 'done' OR updated_at > ?1
-         ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1
-                              WHEN 'failed' THEN 2 ELSE 3 END, created_at DESC
+        "SELECT j.*, p.name AS playlist_name FROM jobs j
+         LEFT JOIN playlists p ON p.id = j.playlist_id
+         WHERE j.status != 'done' OR j.updated_at > ?1
+         -- A paused job keeps a running job's place (D117): pressing Pause
+         -- must not move the row out from under the pointer, or the Resume
+         -- that replaces the button is somewhere else by the time anyone
+         -- reaches for it.
+         ORDER BY CASE j.status WHEN 'running' THEN 0 WHEN 'paused' THEN 0
+                                WHEN 'queued' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END,
+                  j.created_at DESC
          LIMIT 200",
     )?;
     // Finished jobs stay visible for a few minutes so a completed download
@@ -204,17 +215,134 @@ pub fn retry(app: &AppHandle, id: i64) -> Result<(), DbError> {
     Ok(())
 }
 
-pub fn cancel(app: &AppHandle, id: i64) -> Result<(), DbError> {
+/// The child process each running job is waiting on (D117).
+///
+/// A job runs one child at a time — yt-dlp to probe, yt-dlp to download,
+/// ffmpeg to extract — and each stage puts its child here as it starts, so
+/// Pause and Cancel have something to stop. Before this existed, "Pause" only
+/// wrote a status: the download carried on underneath it and then marked
+/// itself done.
+#[derive(Default)]
+pub struct Running(pub std::sync::Mutex<std::collections::HashMap<i64, CommandChild>>);
+
+/// Stop a job's child and everything it started (D117). The whole tree, not
+/// the one process: see `WindowPlatform::kill_tree` for the orphan that
+/// `kill` alone leaves behind. Killing a child that has already exited is an
+/// error nobody needs to see.
+fn stop_child(app: &AppHandle, id: i64) {
+    let child = app.state::<Running>().0.lock().unwrap().remove(&id);
+    if let Some(c) = child {
+        crate::platform::platform().kill_tree(c.pid());
+        let _ = c.kill();
+    }
+}
+
+/// Pause: stop the child and park the row (D117). The `.part` file stays
+/// exactly where it is, which is the whole point — `resume` hands the job back
+/// to the runner and `--continue` picks up the bytes (D26).
+pub fn pause(app: &AppHandle, id: i64) -> Result<(), DbError> {
     {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
         conn.execute(
-            "UPDATE jobs SET status = 'paused', updated_at = ?2 WHERE id = ?1",
+            "UPDATE jobs SET status = 'paused', updated_at = ?2
+             WHERE id = ?1 AND status IN ('queued', 'running')",
             params![id, db::now()],
         )?;
     }
+    stop_child(app, id);
     let _ = app.emit("jobs-changed", ());
     Ok(())
+}
+
+/// Resume a paused job where it stopped: its stage is kept, as a retry's is.
+pub fn resume(app: &AppHandle, id: i64) -> Result<(), DbError> {
+    {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET status = 'queued', error = NULL, updated_at = ?2
+             WHERE id = ?1 AND status = 'paused'",
+            params![id, db::now()],
+        )?;
+    }
+    app.state::<RunnerHandle>().notify.notify_one();
+    let _ = app.emit("jobs-changed", ());
+    Ok(())
+}
+
+/// Cancel: stop the child and drop the row (D117). A finished job is not
+/// cancellable — it already happened. Any `.part` stays on disk; the file name
+/// carries the video id, so importing the same video again resumes those
+/// bytes rather than orphaning them for good.
+pub fn cancel(app: &AppHandle, id: i64) -> Result<(), DbError> {
+    stop_child(app, id);
+    {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        conn.execute("DELETE FROM jobs WHERE id = ?1 AND status != 'done'", [id])?;
+    }
+    let _ = app.emit("jobs-changed", ());
+    Ok(())
+}
+
+/// What a list-wide action applies to (D117).
+#[derive(Clone, Copy)]
+pub enum ListAction {
+    Pause,
+    Resume,
+    Cancel,
+}
+
+/// The ids a list-wide action touches: everything of that import that has not
+/// finished and that the action can change.
+fn list_ids(conn: &Connection, playlist_id: i64, action: ListAction) -> Result<Vec<i64>, DbError> {
+    let statuses = match action {
+        ListAction::Pause => "('queued', 'running')",
+        ListAction::Resume => "('paused')",
+        ListAction::Cancel => "('queued', 'running', 'paused', 'failed')",
+    };
+    let mut st = conn.prepare(&format!(
+        "SELECT id FROM jobs WHERE playlist_id = ?1 AND status IN {statuses} ORDER BY id"
+    ))?;
+    let rows = st.query_map([playlist_id], |r| r.get::<_, i64>(0))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Pause, resume or cancel every unfinished job of one playlist import in one
+/// press (D117). A 40-video list is 40 rows, and a Pause button that flickers
+/// past while each one runs is not a way to stop an import. Returns how many
+/// jobs it changed.
+pub fn apply_to_list(
+    app: &AppHandle,
+    playlist_id: i64,
+    action: ListAction,
+) -> Result<usize, DbError> {
+    let ids = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        list_ids(&conn, playlist_id, action)?
+    };
+    for id in &ids {
+        match action {
+            ListAction::Pause => pause(app, *id)?,
+            ListAction::Resume => resume(app, *id)?,
+            ListAction::Cancel => cancel(app, *id)?,
+        }
+    }
+    Ok(ids.len())
+}
+
+/// Whether a job that just ended was stopped on purpose rather than failing:
+/// its row is gone (cancelled) or parked (paused). Either way the runner must
+/// not write "failed" over what a person asked for.
+fn stopped_on_purpose(conn: &Connection, id: i64) -> bool {
+    match conn.query_row("SELECT status FROM jobs WHERE id = ?1", [id], |r| {
+        r.get::<_, String>(0)
+    }) {
+        Ok(status) => status == "paused",
+        Err(_) => true,
+    }
 }
 
 /// Record a finished download in the library.
@@ -296,9 +424,14 @@ async fn run_one(app: AppHandle, job: Job) {
         }
         Err(e) => {
             let conn = db.0.lock().unwrap();
-            let _ = fail(&conn, job.id, &e.to_string());
+            // A killed child fails its stage; if a person paused or cancelled
+            // the job, that is what happened, not an error (D117).
+            if !stopped_on_purpose(&conn, job.id) {
+                let _ = fail(&conn, job.id, &e.to_string());
+            }
         }
     }
+    app.state::<Running>().0.lock().unwrap().remove(&job.id);
     let _ = app.emit("jobs-changed", ());
 }
 
@@ -350,4 +483,63 @@ pub fn spawn_runner(app: AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        conn.execute(
+            "INSERT INTO playlists (id, name, created_at, position) VALUES (7, 'import', 0, 0)",
+            [],
+        )
+        .unwrap();
+        // One import in every state a job can be in, plus a stranger.
+        for (id, status, pid) in [
+            (1, "queued", Some(7)),
+            (2, "running", Some(7)),
+            (3, "paused", Some(7)),
+            (4, "failed", Some(7)),
+            (5, "done", Some(7)),
+            (6, "queued", None),
+        ] {
+            conn.execute(
+                "INSERT INTO jobs (id, url, status, stage, playlist_id, created_at, updated_at)
+                 VALUES (?1, 'https://x', ?2, 'download', ?3, 0, 0)",
+                params![id, status, pid],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn a_list_action_touches_only_what_it_can_change_in_that_import() {
+        let conn = fixture();
+        assert_eq!(list_ids(&conn, 7, ListAction::Pause).unwrap(), [1, 2]);
+        assert_eq!(list_ids(&conn, 7, ListAction::Resume).unwrap(), [3]);
+        // Cancel clears everything unfinished, failed included; a finished
+        // job already happened, and job 6 belongs to no list.
+        assert_eq!(
+            list_ids(&conn, 7, ListAction::Cancel).unwrap(),
+            [1, 2, 3, 4]
+        );
+        assert!(list_ids(&conn, 99, ListAction::Cancel).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_paused_or_cancelled_job_is_not_a_failure() {
+        let conn = fixture();
+        assert!(stopped_on_purpose(&conn, 3), "paused");
+        conn.execute("DELETE FROM jobs WHERE id = 1", []).unwrap();
+        assert!(stopped_on_purpose(&conn, 1), "cancelled: the row is gone");
+        assert!(
+            !stopped_on_purpose(&conn, 2),
+            "still running means it really failed"
+        );
+        assert!(!stopped_on_purpose(&conn, 6));
+    }
 }

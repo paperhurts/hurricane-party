@@ -102,6 +102,18 @@ pub trait WindowPlatform: Send + Sync {
     /// minimized is unrecoverable by the user, and the classic windows are
     /// undecorated by design, so the constraint is permanent.
     fn restore_no_activate(&self, w: NativeWindow);
+
+    /// D117: end a process **and every process it started**.
+    ///
+    /// The one call here that is not about a window, and it is here for the
+    /// same reason the others are: the portable answer is wrong on Windows.
+    /// The bundled yt-dlp is a PyInstaller one-file build, so the process the
+    /// app spawns is a bootloader whose child does the downloading.
+    /// `CommandChild::kill` ends the bootloader and orphans the child, which
+    /// keeps writing the `.part` file — and a Resume then starts a second
+    /// writer on the same file. Measured on the real binary before this
+    /// existed: Pause ended one of the two processes and not the other.
+    fn kill_tree(&self, pid: u32);
 }
 
 /// The native handle behind a Tauri window.

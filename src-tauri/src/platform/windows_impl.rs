@@ -123,6 +123,20 @@ impl WindowPlatform for Win32Platform {
         unsafe { IsIconic(hwnd(w)) }.as_bool()
     }
 
+    fn kill_tree(&self, pid: u32) {
+        use std::os::windows::process::CommandExt;
+        // `taskkill /T` walks the tree the way the process table records it,
+        // which is the thing `CommandChild::kill` does not do. No window: a
+        // console flashing up on every Pause would be a bug of its own.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
     fn restore_no_activate(&self, w: NativeWindow) {
         // SW_SHOWNOACTIVATE rather than SW_RESTORE: the rescue runs from a
         // WM_DISPLAYCHANGE handler, and stealing focus because a monitor was
