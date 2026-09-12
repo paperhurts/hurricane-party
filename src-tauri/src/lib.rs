@@ -607,6 +607,11 @@ fn set_skin(app: AppHandle, id: String) -> Result<(), db::DbError> {
 struct SkinOnDisk {
     manifest: String,
     dir: String,
+    /// Everything the importer needs to build the manifest again: the art it
+    /// maps and the two text files it reads (D107).
+    files: Vec<String>,
+    pledit: Option<String>,
+    viscolor: Option<String>,
 }
 
 #[tauri::command]
@@ -614,9 +619,13 @@ fn read_skin(app: AppHandle, id: String) -> Result<SkinOnDisk, skins::SkinError>
     let dir = skins_dir(&app).join(&id);
     let manifest = std::fs::read_to_string(dir.join("manifest.json"))
         .map_err(|e| skins::SkinError::Io(format!("{id}: {e}")))?;
+    let art = skins::contents(&dir);
     Ok(SkinOnDisk {
         manifest,
         dir: dir.to_string_lossy().to_string(),
+        files: art.files,
+        pledit: art.pledit,
+        viscolor: art.viscolor,
     })
 }
 

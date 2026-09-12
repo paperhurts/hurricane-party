@@ -296,6 +296,14 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
 
 // ---- the manifest ----
 
+/**
+ * What this importer is up to. A manifest is not a skin, it is what this code
+ * made of one, so it carries the generation that wrote it and is rebuilt when
+ * this number moves on (D107). Bump it whenever the mapping changes what it
+ * writes for the same art.
+ */
+export const WSZ_GENERATION = 2;
+
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
   files: string[];
@@ -365,6 +373,11 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
   return {
     manifest: {
       format: "hp-skin/1",
+      // Not part of hp-skin/1 - an unknown key is ignored by the validator -
+      // and the whole point of it: an imported skin's manifest is derived
+      // from its art, so a better importer rewrites it rather than leaving a
+      // person with what an older one could manage (D107).
+      generator: WSZ_GENERATION,
       name: input.name,
       author: "",
       authoredScale: 1,

@@ -198,6 +198,42 @@ pub fn unpack(zip_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> 
     Ok(out)
 }
 
+/// What a skin folder holds, for rebuilding its manifest (D107).
+pub struct Contents {
+    pub files: Vec<String>,
+    pub pledit: Option<String>,
+    pub viscolor: Option<String>,
+}
+
+/// Read back what was unpacked: the art's file names and the two text files.
+pub fn contents(dir: &Path) -> Contents {
+    let mut out = Contents {
+        files: Vec::new(),
+        pledit: None,
+        viscolor: None,
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let Some(name) = e.file_name().to_str().map(|n| n.to_lowercase()) else {
+            continue;
+        };
+        if name == "manifest.json" {
+            continue;
+        }
+        if name == "pledit.txt" {
+            out.pledit = fs::read(e.path()).ok().map(text_of);
+        }
+        if name == "viscolor.txt" {
+            out.viscolor = fs::read(e.path()).ok().map(text_of);
+        }
+        out.files.push(name);
+    }
+    out.files.sort();
+    out
+}
+
 /// Write the manifest the frontend built, beside the art it describes.
 pub fn write_manifest(skins_dir: &Path, id: &str, json: &str) -> Result<(), SkinError> {
     let dir = child_of(skins_dir, id)?;
@@ -374,6 +410,28 @@ mod tests {
         for bad in ["../escape", "a/b", "", "C:\\windows"] {
             assert!(child_of(&t, bad).is_err(), "{bad:?} should not be an id");
         }
+    }
+
+    #[test]
+    fn contents_reads_back_the_art_and_the_two_text_files() {
+        let t = temp();
+        let skins = t.join("skins");
+        let zip = write_zip(
+            &t,
+            "again.wsz",
+            &[
+                ("MAIN.BMP", b"BM"),
+                ("PLEDIT.TXT", b"[Text]\r\nNormal=#00FF00\r\n"),
+                ("VISCOLOR.TXT", b"1,2,3\r\n"),
+            ],
+        );
+        unpack(&zip, &skins).unwrap();
+        fs::write(skins.join("again/manifest.json"), "{}").unwrap();
+        let c = contents(&skins.join("again"));
+        // The manifest itself is not art, and everything else comes back.
+        assert_eq!(c.files, vec!["main.bmp", "pledit.txt", "viscolor.txt"]);
+        assert!(c.pledit.unwrap().contains("Normal"));
+        assert_eq!(c.viscolor.unwrap().trim(), "1,2,3");
     }
 
     #[test]
