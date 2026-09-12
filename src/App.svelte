@@ -395,6 +395,97 @@
     listItems = id == null ? [] : await invoke<MediaRow[]>("playlist_items", { id });
   }
 
+  // ---- managing the playlists themselves (D116) ----
+  //
+  // Rename in place, delete with a question, and drag to put them in order.
+  // The same pointer-capture drag the rows of a playlist use, for the same
+  // reason: HTML5 drag and drop is eaten by the webview's drop handler.
+  let renaming = $state<number | null>(null);
+  let renameTo = $state("");
+  let listMenuFor = $state<number | null>(null);
+  let listDragId = $state<number | null>(null);
+  let listDropAt = $state<number | null>(null);
+  let navEl: HTMLElement;
+
+  function startRename(p: Playlist) {
+    listMenuFor = null;
+    renaming = p.id;
+    renameTo = p.name;
+  }
+
+  async function finishRename(save: boolean) {
+    const id = renaming;
+    renaming = null;
+    if (!save || id == null) return;
+    const was = playlists.find((p) => p.id === id)?.name;
+    const name = renameTo.trim();
+    if (!name || name === was) return;
+    try {
+      await invoke("rename_playlist", { id, name });
+    } catch (e) {
+      notice = `That name was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    refreshLibrary();
+  }
+
+  async function deleteList(p: Playlist) {
+    listMenuFor = null;
+    const tracks = p.count === 1 ? "Its 1 track stays" : `Its ${p.count} tracks stay`;
+    const yes = await ask(`Delete the playlist "${p.name}"?\n\n${tracks} in the library.`, {
+      title: "Delete playlist",
+      kind: "warning",
+      okLabel: "Delete playlist",
+    });
+    if (!yes) return;
+    try {
+      await invoke("delete_playlist", { id: p.id });
+      if (selectedList === p.id) await openList(null);
+      notice = `Deleted "${p.name}". ${tracks} in the library.`;
+    } catch (e) {
+      notice = `Couldn't delete "${p.name}": ${e instanceof Error ? e.message : String(e)}`;
+    }
+    refreshLibrary();
+  }
+
+  function listGripDown(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const p = playlists[i];
+    const grip = e.currentTarget as HTMLElement;
+    grip.setPointerCapture(e.pointerId);
+    listDragId = p.id;
+    listDropAt = i;
+    const onMove = (ev: PointerEvent) => {
+      const rows = Array.from(navEl.querySelectorAll<HTMLElement>(".plrow[data-idx]"));
+      let at = rows.length;
+      for (const r of rows) {
+        const b = r.getBoundingClientRect();
+        if (ev.clientY < b.top + b.height / 2) {
+          at = Number(r.dataset.idx);
+          break;
+        }
+      }
+      listDropAt = at;
+    };
+    const onUp = async () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.removeEventListener("pointercancel", onUp);
+      const at = listDropAt ?? i;
+      listDragId = null;
+      listDropAt = null;
+      // An index among the rows as they stand; the row leaves first, so a
+      // target below it shifts up by one.
+      const dest = at > i ? at - 1 : at;
+      if (dest === i) return;
+      await invoke("move_playlist", { id: p.id, to: dest });
+      refreshLibrary();
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+    grip.addEventListener("pointercancel", onUp);
+  }
+
   async function newList() {
     const name = prompt("Playlist name")?.trim();
     if (!name) return;
@@ -904,10 +995,14 @@
 </script>
 
 <svelte:window
-  onpointerdown={() => (addMenuFor = null)}
+  onpointerdown={() => {
+    addMenuFor = null;
+    listMenuFor = null;
+  }}
   onkeydown={(e) => {
     if (e.key === "Escape") {
       addMenuFor = null;
+      listMenuFor = null;
       selected = [];
     }
   }}
@@ -1080,14 +1175,58 @@
   {/if}
 
   <section class="body">
-    <nav>
+    <nav bind:this={navEl}>
       <button class="lib" class:sel={selectedList == null} onclick={() => openList(null)}>
         Library <span class="n">{tracks.length}</span>
       </button>
-      {#each playlists as p (p.id)}
-        <button class:sel={selectedList === p.id} onclick={() => openList(p.id)}>
-          {p.name} <span class="n">{p.count}</span>
-        </button>
+      {#each playlists as p, i (p.id)}
+        <!-- A playlist a person can rename, delete and put in order (D116). -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="plrow"
+          data-idx={i}
+          class:lifted={listDragId === p.id}
+          class:dropabove={listDropAt === i && listDragId !== null && listDragId !== p.id}
+          class:dropbelow={listDropAt === playlists.length && i === playlists.length - 1 && listDragId !== null}
+          onpointerdown={(e) => e.stopPropagation()}
+        >
+          <span class="plgrip" title="Drag to reorder" onpointerdown={(e) => listGripDown(e, i)}>⋮⋮</span>
+          {#if renaming === p.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="rename"
+              bind:value={renameTo}
+              autofocus
+              onkeydown={(e) => {
+                if (e.key === "Enter") finishRename(true);
+                else if (e.key === "Escape") finishRename(false);
+              }}
+              onblur={() => finishRename(true)}
+            />
+          {:else}
+            <button
+              class="plname"
+              class:sel={selectedList === p.id}
+              onclick={() => openList(p.id)}
+              ondblclick={() => startRename(p)}
+              title={`${p.name} — double-click to rename`}
+            >
+              <span class="plt">{p.name}</span> <span class="n">{p.count}</span>
+            </button>
+            <button
+              class="plmore"
+              class:open={listMenuFor === p.id}
+              onclick={() => (listMenuFor = listMenuFor === p.id ? null : p.id)}
+              title="Rename or delete"
+            >⋯</button>
+            {#if listMenuFor === p.id}
+              <div class="menu plmenu" role="menu">
+                <button role="menuitem" onclick={() => startRename(p)}>Rename</button>
+                <button role="menuitem" class="danger" onclick={() => deleteList(p)}>Delete playlist…</button>
+              </div>
+            {/if}
+          {/if}
+        </div>
       {/each}
       <button class="new" onclick={newList}>+ New playlist</button>
       <!-- Every root, even a lone one: a click rescans it, and the one folder
@@ -1359,6 +1498,28 @@
   .menu .new { color: color-mix(in srgb, var(--text) 55%, transparent); margin-top: 2px;
                border-top: 1px solid color-mix(in srgb, var(--accent) 15%, transparent); }
   .menu .none { padding: 6px 10px; font-size: 11px; color: color-mix(in srgb, var(--text) 40%, transparent); }
+  /* A playlist in the sidebar: grip, name, and a menu, the grip and menu
+     quiet until the row is under the pointer (D116). */
+  .plrow { position: relative; display: flex; align-items: stretch; gap: 2px; }
+  /* The name gives way, the count does not: a long imported title used to
+     push the number out of sight. */
+  .plrow .plname { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+  .plrow .plt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plrow .plname .n { flex: 0 0 auto; }
+  .plgrip { flex: 0 0 auto; display: flex; align-items: center; padding: 0 2px; font-size: 11px;
+            letter-spacing: -3px; cursor: grab; touch-action: none; user-select: none;
+            color: color-mix(in srgb, var(--text) 30%, transparent); opacity: 0; }
+  .plmore { flex: 0 0 auto; padding: 0 6px; border-color: transparent;
+            color: color-mix(in srgb, var(--text) 45%, transparent); opacity: 0; }
+  .plrow:hover .plgrip, .plrow:hover .plmore, .plmore.open { opacity: 1; }
+  .plmore:hover, .plmore.open { color: var(--accent); }
+  .plrow.lifted { opacity: 0.45; }
+  .plrow.dropabove { box-shadow: inset 0 2px 0 var(--accent); }
+  .plrow.dropbelow { box-shadow: inset 0 -2px 0 var(--accent); }
+  .plrow .rename { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; padding: 3px 6px;
+                   background: var(--surface); color: var(--text); border: 1px solid var(--accent); }
+  .plmenu { right: 0; top: 24px; min-width: 150px; }
+  .menu .danger { color: var(--warn); }
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { font-size: 11px; color: color-mix(in srgb, var(--text) 45%, transparent); flex: 0 0 auto; }
 
