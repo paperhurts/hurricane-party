@@ -104,6 +104,32 @@ describe("the Eyewall manifest", () => {
     expect(skin.visualizer.component).toBe(eye.visualizer.component);
   });
 
+  // The six used to be named after Eyewall's materials (D108). A manifest
+  // someone wrote back then still wears, keys and tints both, so nobody has to
+  // rewrite a skin they made to keep it.
+  it("still reads a manifest written in the old names (D108)", () => {
+    const was: Record<string, string> = {
+      ground: "void",
+      surface: "well",
+      text: "filament",
+      accent: "arc",
+      alert: "strike",
+      warn: "ember",
+    };
+    const { skin, warnings } = parseSkin(
+      broken((m) => {
+        m.palette = Object.fromEntries(Object.entries(m.palette).map(([k, v]) => [was[k], v]));
+        m.windows.main.elements.titlebar.sprite.tint = "filament";
+        m.seam.color = "arc";
+      }),
+    );
+    expect(warnings).toEqual([]);
+    expect(skin.palette.text).toBe((tokens.themes.eyewall.colors as Record<string, string>).text);
+    expect(skin.seam.color).toBe("accent");
+    const titlebar = elementsOf(skin, "main", false).elements.find((e) => e.name === "titlebar");
+    expect((titlebar as { sprite: { tint: string } }).sprite.tint).toBe("text");
+  });
+
   it("describes all three windows with a shade strip each", () => {
     const { skin } = parseSkin(eyewall);
     for (const w of WINDOWS) {
@@ -171,8 +197,8 @@ describe("the Eyewall manifest", () => {
       expect(by(name)).toMatchObject({ type: "toggle", bind: "playState", when });
     }
     // The tags light on the same state, and STOP lights a different colour.
-    expect(by("tagPlay")).toMatchObject({ value: "PLAY", lit: { bind: "playState", when: "playing", tint: "arc" } });
-    expect(by("tagStop")).toMatchObject({ lit: { when: "stopped", tint: "strike" } });
+    expect(by("tagPlay")).toMatchObject({ value: "PLAY", lit: { bind: "playState", when: "playing", tint: "accent" } });
+    expect(by("tagStop")).toMatchObject({ lit: { when: "stopped", tint: "alert" } });
     // A literal with a hole in it, so "VOL" and the number are one element.
     expect(by("volLabel")).toMatchObject({ value: "VOL {}", bind: "volumePercent" });
   });
@@ -228,14 +254,14 @@ describe("the Eyewall manifest", () => {
       expect(s).toMatchObject({ orientation: "vertical", origin: 0.5 });
       // Past 8 dB either way the thumb turns strike; while the EQ is off
       // the whole slider dims, and the dim wins.
-      expect(s.hot).toEqual({ beyond: 0.34, tint: "strike" });
+      expect(s.hot).toEqual({ beyond: 0.34, tint: "alert" });
       // Past 8 dB, not at it: a band at exactly 8 (two presets have one)
       // stays arc, as the CSS thumb did with `Math.abs(db) > 8`.
       expect(8 / 24).toBeLessThan(s.hot!.beyond);
       expect(8.5 / 24).toBeGreaterThan(s.hot!.beyond);
       // An odd height too, so 0 dB lands on a pixel's middle, where the tick is.
       expect(s.rect[3] % 2).toBe(1);
-      expect(s.lit).toMatchObject({ bind: "eqOn", when: "off", tint: "filament" });
+      expect(s.lit).toMatchObject({ bind: "eqOn", when: "off", tint: "text" });
       // An odd width, so a 9-pixel thumb sits on whole pixels at 1x.
       expect(s.rect[2] % 2).toBe(1);
     }
@@ -267,10 +293,10 @@ describe("the Eyewall manifest", () => {
       type: "list",
       rowHeight: 10,
       font: "row",
-      tint: "filament",
+      tint: "text",
       opacity: 0.72,
-      current: "strike",
-      selected: "arc",
+      current: "alert",
+      selected: "accent",
     });
     // Six buttons on the bottom edge, one box between them, each with its words.
     const buttons = ["addButton", "urlButton", "removeButton", "libraryButton", "shuffleButton", "repeatButton"];
@@ -295,7 +321,7 @@ describe("the Eyewall manifest", () => {
     expect(by("removeButton")).toMatchObject({
       action: "remove",
       disabled: { bind: "plCanRemove", when: "no" },
-      label: { hover: "strike" },
+      label: { hover: "alert" },
     });
     expect(by("libraryButton")).toMatchObject({ action: "library" });
     // The play order's switches light from what the library says (#115).
@@ -305,7 +331,7 @@ describe("the Eyewall manifest", () => {
       action: "repeat",
       bind: "repeatOn",
       when: "on",
-      label: { bind: "repeatLabel", value: null, on: "arc" },
+      label: { bind: "repeatLabel", value: null, on: "accent" },
     });
     // The count takes the rest of the bar and follows the right edge; the
     // link field lies over the whole bar, last, so it is on top while open.
@@ -346,7 +372,7 @@ describe("the Eyewall manifest", () => {
       strip?.type === "nineslice" && strip.sprite.rect,
     );
     for (const name of ["stripWell", "seekWell", "volWell"]) {
-      expect(els.find((e) => e.name === name)).toMatchObject({ type: "image", sprite: { tint: "well" } });
+      expect(els.find((e) => e.name === name)).toMatchObject({ type: "image", sprite: { tint: "surface" } });
     }
   });
 
@@ -390,8 +416,8 @@ describe("parseSkin refuses rather than half-loads", () => {
   it("a rect with a zero size", () =>
     refuse((m) => (m.windows.main.elements.shade.sprite.rect = [0, 0, 0, 9]), /rect\[2\]/));
   it("a text naming no font", () => refuse((m) => (m.windows.main.elements.title.font = "serif"), /names no font/));
-  it("a missing token", () => refuse((m) => delete m.palette.ember, /palette\.ember/));
-  it("a colour that is not a hex", () => refuse((m) => (m.palette.arc = "cyan"), /RRGGBB/));
+  it("a missing token", () => refuse((m) => delete m.palette.warn, /palette\.warn/));
+  it("a colour that is not a hex", () => refuse((m) => (m.palette.accent = "cyan"), /RRGGBB/));
   it("a ramp of the wrong length", () => refuse((m) => m.viscolor.pop(), /24/));
   it("a title bar that is not the drag handle", () =>
     refuse((m) => delete m.windows.main.elements.titlebar.role, /titlebar.*drag/));
@@ -510,10 +536,10 @@ describe("parseSkin warns on the soft cases", () => {
     expect(rows).toMatchObject({
       type: "list",
       rowHeight: 12,
-      tint: "filament",
+      tint: "text",
       opacity: 1,
-      current: "strike",
-      selected: "arc",
+      current: "alert",
+      selected: "accent",
     });
   });
 
@@ -522,7 +548,7 @@ describe("parseSkin warns on the soft cases", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("defaults tint to filament and art to final", () => {
+  it("defaults tint to text and art to final", () => {
     const { skin } = parseSkin(
       broken((m) => {
         delete m.art;
@@ -533,7 +559,7 @@ describe("parseSkin warns on the soft cases", () => {
     expect(skin.art).toBe("final");
     expect(skin.glow).toBe("baked");
     const bar = elementsOf(skin, "main", false).elements.find((e) => e.name === "titlebar");
-    expect(bar?.type === "image" && bar.sprite.tint).toBe("filament");
+    expect(bar?.type === "image" && bar.sprite.tint).toBe("text");
   });
 });
 

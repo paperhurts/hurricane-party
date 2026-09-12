@@ -18,14 +18,19 @@ Which makes your light-mode policy coherent instead of stubborn: **no light mode
 
 Anchored on the paperhurts.dev base (`#0c0a14` — near-black with a violet cast, pulled from the live site's theme color).
 
-| Token | Hex | Role |
-|---|---|---|
-| `--void` | `#0C0A14` | Window fill. The paperhurts base |
-| `--well` | `#05040A` | Insets — list backgrounds, seek trough, EQ bed |
-| `--filament` | `#E8F4FF` | Bright text. Near-white, cold cast so it reads as emission not paint |
-| `--arc` | `#6FE3FF` | **Primary glow.** Outlines, borders, active edges |
-| `--strike` | `#FF4FD8` | Magenta. Now-playing, current row, peak indicator |
-| `--ember` | `#FFB347` | Amber. Storage pressure, failed jobs, warnings |
+The six are named for the **role** a colour plays, not for what Eyewall's
+happens to look like (D108). Eyewall's own words for them are kept in
+`design/tokens.json` under `names`, and they are the words the rest of this
+document is written in; nothing reads them.
+
+| Token | Eyewall calls it | Hex | Role |
+|---|---|---|---|
+| `--ground` | void | `#0C0A14` | Window fill. The paperhurts base |
+| `--surface` | well | `#05040A` | Insets — list backgrounds, seek trough, EQ bed |
+| `--text` | filament | `#E8F4FF` | Bright text. Near-white, cold cast so it reads as emission not paint |
+| `--accent` | arc | `#6FE3FF` | **Primary glow.** Outlines, borders, active edges |
+| `--alert` | strike | `#FF4FD8` | Magenta. Now-playing, current row, peak indicator |
+| `--warn` | ember | `#FFB347` | Amber. Storage pressure, failed jobs, warnings |
 
 Amber rather than red for warnings — red on violet-black muddies into brown at low brightness, and the whole palette is low brightness by construction.
 
@@ -57,15 +62,15 @@ Charter and Crimson Pro are lovely and wrong here — serifs at 11px on dark wit
 
 This matters for performance, and the answer differs by window type.
 
-**Classic chrome (main, EQ, playlist): the sprites carry the shape; the renderer paints the glow from `--arc`** (D73). That is what lets a committed PNG sheet follow the theme instead of freezing one palette into its pixels. A skin whose halo is already in the art says `"glow": "baked"` in its manifest and gets no second one — every imported `.wsz` is that, so native and imported skins still take one path. The one hard rule is scoped to the 60 Hz path: **no CSS filter on the visualizer surface or any ancestor of it**, whatever the skin declares, because a filter on a parent runs the child through it every frame. The analyser's own glow stays pre-rendered in its ramp art for the same reason.
+**Classic chrome (main, EQ, playlist): the sprites carry the shape; the renderer paints the glow from `--accent`** (D73). That is what lets a committed PNG sheet follow the theme instead of freezing one palette into its pixels. A skin whose halo is already in the art says `"glow": "baked"` in its manifest and gets no second one — every imported `.wsz` is that, so native and imported skins still take one path. The one hard rule is scoped to the 60 Hz path: **no CSS filter on the visualizer surface or any ancestor of it**, whatever the skin declares, because a filter on a parent runs the child through it every frame. The analyser's own glow stays pre-rendered in its ramp art for the same reason.
 
 **Modern windows (library, settings, import): compute it in CSS**, but sparingly:
 
 ```css
 .edge-active {
-  border: 1px solid var(--arc);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--arc) 40%, transparent),
-              0 0 12px color-mix(in srgb, var(--arc) 25%, transparent);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
+              0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 ```
 
@@ -79,7 +84,7 @@ A crisp 1px stroke at full brightness with a soft halo underneath. Not a blurry 
 
 Your Excel-splitter model is the thing no other player has. Make it the thing people remember.
 
-When two windows magnetize, **the shared edge lights up** — a hairline `--arc` seam running the length of the bond, brighter than any other edge in the interface. You can see at a glance which windows are joined.
+When two windows magnetize, **the shared edge lights up** — a hairline `--accent` seam running the length of the bond, brighter than any other edge in the interface. You can see at a glance which windows are joined.
 
 - Hover a live splitter: the seam brightens and thickens by a pixel
 - Drag it: the seam tracks, both neighbors resize
@@ -151,7 +156,7 @@ The radar backdrop and the spectrum analyzer aren't merely coordinated — they'
 Someone glancing at this during a storm must not mistake a six-hour-old loop for a live one. Concretely:
 
 - Age is always visible in the chrome, not buried in a tooltip: `RADAR · 14:32 EDT · 4h 12m old · OFFLINE`
-- Past a staleness threshold, desaturate the backdrop and switch the age readout to `--ember`
+- Past a staleness threshold, desaturate the backdrop and switch the age readout to `--warn`
 - Active alerts always render with their issue time, and go struck-through when the data behind them is stale
 - The theme never displays a "current conditions" claim of any kind
 

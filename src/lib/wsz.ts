@@ -285,12 +285,12 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
   const fallback = colorsFor("eyewall");
   const pick = (key: string, role: string) => pledit[key] ?? fallback[role];
   return {
-    void: pick("normalbg", "void"),
-    well: pick("normalbg", "well"),
-    filament: pick("normal", "filament"),
-    arc: pick("selectedbg", "arc"),
-    strike: pick("current", "strike"),
-    ember: pick("current", "ember"),
+    ground: pick("normalbg", "ground"),
+    surface: pick("normalbg", "surface"),
+    text: pick("normal", "text"),
+    accent: pick("selectedbg", "accent"),
+    alert: pick("current", "alert"),
+    warn: pick("current", "warn"),
   };
 }
 
@@ -302,7 +302,7 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
  * this number moves on (D107). Bump it whenever the mapping changes what it
  * writes for the same art.
  */
-export const WSZ_GENERATION = 2;
+export const WSZ_GENERATION = 3;
 
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
@@ -786,9 +786,9 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
     stretch: "xy",
     rowHeight: 13,
     font: fonts.chrome ? "chrome" : "system",
-    tint: "filament",
-    current: "strike",
-    selected: "arc",
+    tint: "text",
+    current: "alert",
+    selected: "accent",
   };
   if (!fonts.chrome && !fonts.system) fonts.system = { type: "system", size: 6, case: "none", tracking: 0 };
 
