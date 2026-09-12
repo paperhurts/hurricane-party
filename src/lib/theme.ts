@@ -39,6 +39,21 @@ export function applyTheme(name: ThemeName = "eyewall") {
   }
 }
 
+/**
+ * The six a classic window paints while it wears this skin (D101). The theme
+ * owns the app's palette; **a skin whose art is `final` is the exception**,
+ * because its pixels cannot be tinted, so the colours that sit beside them —
+ * the playlist's rows, the seam, the words these windows draw — are its own.
+ * A `mask` skin's palette stays validated and ignored, which is what lets one
+ * grey sheet wear whichever theme is on.
+ */
+export function colorsWorn(
+  skin: { art: string; palette: Record<string, string> },
+  name: ThemeName = "eyewall",
+): Record<string, string> {
+  return skin.art === "final" ? { ...skin.palette } : colorsFor(name);
+}
+
 /** The 24-step radar reflectivity ramp. One array, several consumers. */
 export function viscolor(name: ThemeName = "eyewall"): string[] {
   const themes = tokens.themes as Record<string, any>;
