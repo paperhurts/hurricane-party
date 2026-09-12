@@ -313,6 +313,15 @@ export type Skin = {
    * `authoredScale`; an object lists one per scale. */
   sheets: Record<string, Partial<Record<Scale, string>>>;
   art: "final" | "mask";
+  /** Sheets drawn as the pixels they are, whatever `art` says (D122): a
+   * made skin's picture sits among mask sheets and must not be tinted into a
+   * silhouette of itself. D73 deferred this until a skin mixed the two. */
+  finalSheets: string[];
+  /** Whose colours the windows paint (D122): `theme` follows whichever theme
+   * is on, `own` is this skin's palette. Defaults from `art`, which is D101
+   * exactly: a final skin brings its own, a mask skin follows the theme. A
+   * made skin is mask art that asks for its own. */
+  colors: "own" | "theme";
   glow: "baked" | "renderer";
   palette: Record<Token, string>;
   viscolor: string[];
@@ -725,7 +734,8 @@ function sheetsOf(v: unknown, authored: Scale, path: string): Skin["sheets"] {
     } else if (isObj(f)) {
       const per: Partial<Record<Scale, string>> = {};
       for (const [k, file] of Object.entries(f)) {
-        if (k !== "1" && k !== "2") fail(`${path}.${name}`, 'scales are "1" and "2"');
+        if (k === "art") continue; // read by `finalSheetsOf`
+        if (k !== "1" && k !== "2") fail(`${path}.${name}`, 'scales are "1" and "2", and a sheet may say its "art"');
         if (typeof file !== "string" || file === "") fail(`${path}.${name}.${k}`, "must be a file name");
         per[k === "1" ? 1 : 2] = file;
       }
@@ -734,6 +744,18 @@ function sheetsOf(v: unknown, authored: Scale, path: string): Skin["sheets"] {
     } else {
       fail(`${path}.${name}`, 'must be a file name or {"1": file, "2": file}');
     }
+  }
+  return out;
+}
+
+/** The sheets that say `"art": "final"` (D122). Only the object form can:
+ * a sheet named by a bare file name follows the skin's `art`. */
+function finalSheetsOf(v: unknown, path: string): string[] {
+  if (!isObj(v)) return [];
+  const out: string[] = [];
+  for (const [name, f] of Object.entries(v)) {
+    if (!isObj(f) || f.art === undefined) continue;
+    if (oneOf(f.art, ["final", "mask"] as const, `${path}.${name}.art`) === "final") out.push(name);
   }
   return out;
 }
@@ -798,6 +820,9 @@ export function parseSkin(json: unknown): { skin: Skin; warnings: string[] } {
   const sheets = sheetsOf(m.sheets, authoredScale, "sheets");
   const art = m.art === undefined ? "final" : oneOf(m.art, ["final", "mask"] as const, "art");
   const glow = m.glow === undefined ? "baked" : oneOf(m.glow, ["baked", "renderer"] as const, "glow");
+  const finalSheets = finalSheetsOf(m.sheets, "sheets");
+  const colors =
+    m.colors === undefined ? (art === "final" ? "own" : "theme") : oneOf(m.colors, ["own", "theme"] as const, "colors");
 
   if (!isObj(m.palette)) fail("palette", "must declare all six tokens (D71)");
   const palette = {} as Record<Token, string>;
@@ -848,7 +873,22 @@ export function parseSkin(json: unknown): { skin: Skin; warnings: string[] } {
   }
 
   return {
-    skin: { name, author, authoredScale, sheets, art, glow, palette, viscolor, visualizer, fonts, windows, seam },
+    skin: {
+      name,
+      author,
+      authoredScale,
+      sheets,
+      art,
+      finalSheets,
+      colors,
+      glow,
+      palette,
+      viscolor,
+      visualizer,
+      fonts,
+      windows,
+      seam,
+    },
     warnings,
   };
 }

@@ -48,10 +48,12 @@ export function applyTheme(name: ThemeName = "eyewall") {
  * grey sheet wear whichever theme is on.
  */
 export function colorsWorn(
-  skin: { art: string; palette: Record<string, string> },
+  skin: { art: string; colors?: "own" | "theme"; palette: Record<string, string> },
   name: ThemeName = "eyewall",
 ): Record<string, string> {
-  return skin.art === "final" ? { ...skin.palette } : colorsFor(name);
+  // `colors` says it outright (D122); without it, D101's rule is the answer.
+  const own = skin.colors ? skin.colors === "own" : skin.art === "final";
+  return own ? { ...skin.palette } : colorsFor(name);
 }
 
 /** The 24-step radar reflectivity ramp. One array, several consumers. */
