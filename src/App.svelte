@@ -282,6 +282,7 @@
     url: string;
     duration_s: number | null;
     have: boolean;
+    missing: string | null;
   };
   type ListProbe = { id: string; title: string; uploader: string | null; items: ListItem[] };
   let list = $state<ListProbe | null>(null);
@@ -314,7 +315,9 @@
       list = probe;
       // Everything the library does not already have, which is what a second
       // import of the same list should offer.
-      listPick = new SvelteSet(probe.items.filter((i) => !i.have).map((i) => i.id));
+      // What is new and what YouTube described; an entry it gave no details
+      // for is usually gone, and queueing it only makes a failed row (D119).
+      listPick = new SvelteSet(probe.items.filter((i) => !i.have && !i.missing).map((i) => i.id));
       notice = null;
     } catch (e) {
       // A mix YouTube makes up as it goes, or a list that cannot be read.
@@ -366,7 +369,7 @@
       which === "all"
         ? list.items
         : which === "new"
-          ? list.items.filter((i) => !i.have)
+          ? list.items.filter((i) => !i.have && !i.missing)
           : [];
     listPick = new SvelteSet(keep.map((i) => i.id));
   }
@@ -1170,7 +1173,7 @@
     </header>
     <ul>
       {#each list.items as item, i (item.id)}
-        <li class:have={item.have}>
+        <li class:have={item.have} class:gone={!!item.missing}>
           <input
             class="tick"
             type="checkbox"
@@ -1182,6 +1185,14 @@
           />
           <span class="num">{String(i + 1).padStart(2, "0")}</span>
           <span class="what">{item.title}</span>
+          {#if item.missing}
+            <span
+              class="tag gonetag"
+              title={item.missing === "no details"
+                ? `YouTube gave no title for ${item.id}. It is usually deleted or private, and sometimes age-restricted — check it to try anyway.`
+                : `${item.id} is ${item.missing} on YouTube.`}
+            >{item.missing}</span>
+          {/if}
           {#if item.have}<span class="tag">in the library</span>{/if}
           <span class="dur">{dur(item.duration_s)}</span>
         </li>
@@ -1582,6 +1593,8 @@
   .listpick ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
   .listpick li { display: flex; align-items: center; gap: 8px; padding: 3px 9px; font-size: 12px; }
   .listpick li.have { color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .listpick li.gone { color: color-mix(in srgb, var(--text) 35%, transparent); font-style: italic; }
+  .listpick .gonetag { color: color-mix(in srgb, var(--text) 45%, transparent); font-style: normal; }
   .listpick .num { font-size: 10px; color: color-mix(in srgb, var(--text) 40%, transparent); }
   .listpick .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .listpick .tag { flex: 0 0 auto; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;

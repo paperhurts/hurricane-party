@@ -924,6 +924,12 @@ pub struct PlaylistItem {
     /// A file whose name already carries this id is in the library, so the
     /// picker can say so rather than queueing a second copy.
     pub have: bool,
+    /// Why YouTube told us nothing about it, when it did not (D119):
+    /// `"deleted"` or `"private"` when the list says so, `"no details"` when
+    /// the entry is a bare id. A bare id is usually a deleted or private video
+    /// and sometimes an age-restricted one, so the picker says it cannot tell
+    /// rather than guessing, and does not queue it unless asked.
+    pub missing: Option<String>,
 }
 
 /// The `list=` id in a URL, if there is one.
@@ -1045,8 +1051,22 @@ fn playlist_from(
             a.iter()
                 .filter_map(|e| {
                     let id = str_of(e, "id")?;
+                    let title = str_of(e, "title");
+                    // YouTube marks the entries it will not show; a bare id
+                    // is the same thing unexplained (D119).
+                    let missing = match title.as_deref() {
+                        Some("[Deleted video]") => Some("deleted"),
+                        Some("[Private video]") => Some("private"),
+                        None => Some("no details"),
+                        Some(_) => None,
+                    }
+                    .map(str::to_string);
                     Some(PlaylistItem {
-                        title: str_of(e, "title").unwrap_or_else(|| id.clone()),
+                        title: match (&title, &missing) {
+                            (Some(t), None) => t.clone(),
+                            _ => "Unknown video".to_string(),
+                        },
+                        missing,
                         // Built from the id rather than taken from `url`: an
                         // entry's own URL can carry the list back with it, and
                         // a job must name one video and nothing else.
@@ -1996,6 +2016,8 @@ mod tests {
                 {"id": "aaaaaaaaaaa", "title": "One", "duration": 213.0,
                  "url": "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PL123"},
                 {"id": "bbbbbbbbbbb", "duration": null},
+                {"id": "ccccccccccc", "title": "[Deleted video]"},
+                {"id": "ddddddddddd", "title": "[Private video]"},
                 {"title": "no id at all"}
               ]
             }"#,
@@ -2005,7 +2027,10 @@ mod tests {
         assert_eq!(probe.title, "Storm Prep");
         assert_eq!(probe.uploader.as_deref(), Some("paperhurts"));
         // An entry with no id is not something that can be queued.
-        assert_eq!(probe.items.len(), 2);
+        assert_eq!(probe.items.len(), 4);
+        assert_eq!(probe.items[2].missing.as_deref(), Some("deleted"));
+        assert_eq!(probe.items[3].missing.as_deref(), Some("private"));
+        assert_eq!(probe.items[3].title, "Unknown video");
         // The URL is rebuilt from the id: an entry's own URL carries the list
         // back with it, and a job must name one video and nothing else.
         assert_eq!(
@@ -2014,8 +2039,11 @@ mod tests {
         );
         assert_eq!(probe.items[0].duration_s, Some(213.0));
         assert!(probe.items[0].have, "the library already has this one");
-        // A flat entry often has no title and no duration; the id stands in.
-        assert_eq!(probe.items[1].title, "bbbbbbbbbbb");
+        // A bare id is an entry YouTube gave no details for (D119): it is
+        // named for what it is, and says why, rather than showing the id.
+        assert_eq!(probe.items[1].title, "Unknown video");
+        assert_eq!(probe.items[1].missing.as_deref(), Some("no details"));
+        assert_eq!(probe.items[0].missing, None);
         assert_eq!(probe.items[1].duration_s, None);
         assert!(!probe.items[1].have);
     }
