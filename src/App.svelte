@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -170,7 +171,7 @@
     invoke<string>("get_skin").then((s) => (skin = s));
     invoke<string[]>("list_skins").then((s) => (skins = s));
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
-    invoke<string[]>("cookie_browsers").then((b) => (browsers = b));
+    invoke<CookieSource[]>("cookie_browsers").then((b) => (browsers = b));
     // The switches as they were left (#115). Tell the playlist window once
     // they are known, since it may already have asked.
     invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
@@ -260,6 +261,71 @@
     const u = url.trim();
     if (!u) return;
     error = null;
+    // A URL carrying a list is read first and downloaded second (#137).
+    if (isList(u)) {
+      await readList(u);
+      return;
+    }
+    await queueOne(u);
+  }
+  /**
+   * A pasted playlist, read before anything downloads (#137, architecture.md
+   * phase 1: "a 200-video playlist that starts downloading on paste is
+   * hostile"). One probe gets the whole list; nothing is fetched until a
+   * person says which of it they want.
+   */
+  type ListItem = {
+    id: string;
+    title: string;
+    url: string;
+    duration_s: number | null;
+    have: boolean;
+  };
+  type ListProbe = { id: string; title: string; uploader: string | null; items: ListItem[] };
+  let list = $state<ListProbe | null>(null);
+  let listPick = $state(new SvelteSet<string>());
+  let listBusy = $state(false);
+
+  const isList = (u: string) => /[?&]list=/.test(u);
+  let listTotal = $derived(
+    (list?.items ?? [])
+      .filter((i) => listPick.has(i.id))
+      .reduce((n, i) => n + (i.duration_s ?? 0), 0),
+  );
+  let listHave = $derived((list?.items ?? []).filter((i) => i.have).length);
+
+  /** mm:ss, or a dash for an entry yt-dlp gave no duration. */
+  const dur = (s: number | null) =>
+    s == null ? "—" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  /** The same total, long enough to need hours. */
+  function runtime(s: number): string {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return h ? `${h}h ${m}m` : `${m}m ${Math.floor(s % 60)}s`;
+  }
+
+  async function readList(u: string) {
+    listBusy = true;
+    notice = "Reading the list\u2026";
+    try {
+      const probe = await invoke<ListProbe>("probe_playlist", { url: u });
+      list = probe;
+      // Everything the library does not already have, which is what a second
+      // import of the same list should offer.
+      listPick = new SvelteSet(probe.items.filter((i) => !i.have).map((i) => i.id));
+      notice = null;
+    } catch (e) {
+      // A mix YouTube makes up as it goes, or a list that cannot be read.
+      // The video itself is still worth queueing — unless the URL is nothing
+      // but a list, in which case there is no video to fall back to (#137).
+      notice = e instanceof Error ? e.message : String(e);
+      if (/[?&]v=[^&]/.test(u)) await queueOne(u);
+    } finally {
+      listBusy = false;
+    }
+  }
+
+  async function queueOne(u: string) {
     try {
       await invoke<number>("enqueue_url", { url: u, wantVideo });
       url = "";
@@ -267,6 +333,40 @@
     } catch (e) {
       error = String(e);
     }
+  }
+
+  async function queueList() {
+    if (!list) return;
+    const picked = list.items.filter((i) => listPick.has(i.id));
+    if (picked.length === 0) return;
+    listBusy = true;
+    try {
+      const made = await invoke<{ playlist_id: number; queued: number }>("enqueue_playlist", {
+        name: list.title,
+        urls: picked.map((i) => i.url),
+        wantVideo,
+      });
+      notice = `Queued ${made.queued} of ${list.items.length} into "${list.title}". They land in that playlist as each one finishes.`;
+      list = null;
+      url = "";
+      refreshJobs();
+      refreshLibrary();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      listBusy = false;
+    }
+  }
+
+  function pickAll(which: "all" | "none" | "new") {
+    if (!list) return;
+    const keep =
+      which === "all"
+        ? list.items
+        : which === "new"
+          ? list.items.filter((i) => !i.have)
+          : [];
+    listPick = new SvelteSet(keep.map((i) => i.id));
   }
 
   /** Broadcast the play queue: whatever list is showing, as the playlist window sees it. */
@@ -704,18 +804,37 @@
    * own cookie store and writes the jar into this app's folder. The list comes
    * from Rust so the picker cannot offer something the allowlist refuses.
    */
-  let browsers = $state<string[]>([]);
+  type CookieSource = { browser: string; profile: string | null; label: string; spec: string };
+  let browsers = $state<CookieSource[]>([]);
   let reading = $state(false);
-  async function fromBrowser(browser: string) {
-    if (!browser || reading) return;
+  async function fromBrowser(spec: string) {
+    if (!spec || reading) return;
+    const browser = browsers.find((b) => b.spec === spec)?.label ?? spec;
     reading = true;
     notice = `Reading cookies from ${browser}…`;
     try {
-      const made = await invoke<{ path: string; count: number }>("export_cookies_from_browser", {
-        browser,
-      });
+      const made = await invoke<{
+        path: string;
+        count: number;
+        youtube: boolean;
+        elsewhere: string[];
+        kept: boolean;
+      }>("export_cookies_from_browser", { browser: spec });
+      const from = await invoke<string>("get_cookies_from").catch(() => "");
       cookies = made.path;
-      notice = `Read ${made.count} cookies from ${browser}. Videos that want a signed-in session will import now; do it again when they stop.`;
+      // A jar with no YouTube sign-in in it fails every age gate, and saying
+      // so here beats saying it once per download (D113).
+      // Where the sign-in actually is beats telling someone to make one
+      // they may already have, in a profile the export never looked at.
+      const found = made.elsewhere.length
+        ? ` These do have one: ${made.elsewhere.join(", ")}. Try one of those instead — a Chromium profile may still refuse to decrypt, Firefox will not.`
+        : ` Sign in to YouTube in ${browser}, then read them again.`;
+      notice = made.youtube
+        ? `Read ${made.count} cookies from ${browser}, with a YouTube sign-in among them. Videos that want one will import now; read them again when they stop.`
+        : made.kept
+          ? // A read with no sign-in never replaces one that has it (D115).
+            `${browser} has no YouTube sign-in, so the app kept the cookies it already had${from ? ` from ${from}` : ""}. Nothing changed; age-restricted videos still import.`
+          : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused.${found}`;
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
     } finally {
@@ -827,7 +946,7 @@
         <option value="" disabled selected>{reading ? "Reading…" : "From a browser…"}</option>
         <!-- Windows lets another program read Firefox's cookie store and not
            Chromium's, so the list says which is which before a click (D113). -->
-        {#each browsers as b (b)}<option value={b}>{b === "firefox" ? b : `${b} — encrypted`}</option>{/each}
+        {#each browsers as b (b.spec)}<option value={b.spec}>{b.label}</option>{/each}
       </select>
       {#if cookies}
         <button class="mini" onclick={clearCookies} title="Stop using that file">&times;</button>
@@ -854,6 +973,54 @@
       {scanning ? "Scanning…" : "Add folder"}
     </button>
   </form>
+
+<!-- A pasted list, before anything downloads (#137). Everything new is kept;
+     what the library already has is offered but unchecked. -->
+{#if list}
+  <section class="listpick">
+    <header>
+      <strong>{list.title}</strong>
+      <span class="dim">
+        {list.items.length} {list.items.length === 1 ? "video" : "videos"}
+        {#if listHave}· {listHave} already in the library{/if}
+        {#if list.uploader}· {list.uploader}{/if}
+      </span>
+      <span class="spacer"></span>
+      <span class="picks">
+        <button class="mini" onclick={() => pickAll("all")}>All</button>
+        <button class="mini" onclick={() => pickAll("new")}>New only</button>
+        <button class="mini" onclick={() => pickAll("none")}>None</button>
+      </span>
+    </header>
+    <ul>
+      {#each list.items as item, i (item.id)}
+        <li class:have={item.have}>
+          <input
+            class="tick"
+            type="checkbox"
+            checked={listPick.has(item.id)}
+            onchange={(e) => {
+              if (e.currentTarget.checked) listPick.add(item.id);
+              else listPick.delete(item.id);
+            }}
+          />
+          <span class="num">{String(i + 1).padStart(2, "0")}</span>
+          <span class="what">{item.title}</span>
+          {#if item.have}<span class="tag">in the library</span>{/if}
+          <span class="dur">{dur(item.duration_s)}</span>
+        </li>
+      {/each}
+    </ul>
+    <footer>
+      <button onclick={queueList} disabled={listBusy || listPick.size === 0}>
+        {listBusy ? "Queueing\u2026" : `Queue ${listPick.size}`}
+      </button>
+      <span class="dim">{runtime(listTotal)} of audio</span>
+      <span class="spacer"></span>
+      <button class="mini ghost" onclick={() => (list = null)}>Cancel</button>
+    </footer>
+  </section>
+{/if}
 
   {#if notice}
     <p class="notice">
@@ -1134,6 +1301,32 @@
   select.frombrowser { font-size: 10px; padding: 1px 4px; }
   /* Kept on one line: the button and the picker are one setting. */
   .cookiectl { display: inline-flex; align-items: center; gap: 4px; }
+  /* The list a person pasted, waiting to be picked from (#137). It sits where
+     the eye already is, under the URL field that produced it. */
+  .listpick { margin: 10px 0 0; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+              background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+  /* `header` wraps app-wide, which put these buttons on a second row — and a
+     different row per playlist, since it depended on the title's length. Here
+     the row holds and the title is what gives way. */
+  .listpick header, .listpick footer { display: flex; flex-wrap: nowrap; align-items: center;
+                                       gap: 8px; padding: 6px 9px; }
+  .listpick header strong, .listpick header .dim { min-width: 0; overflow: hidden;
+                                                   text-overflow: ellipsis; white-space: nowrap; }
+  .listpick header strong { flex: 0 1 auto; }
+  .listpick header .dim { flex: 0 4 auto; }
+  .listpick .picks { flex: 0 0 auto; display: inline-flex; gap: 6px; }
+  .listpick header { border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
+  .listpick footer { border-top: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
+  .listpick .spacer { flex: 1 1 auto; }
+  .listpick .dim { font-size: 11px; color: color-mix(in srgb, var(--text) 50%, transparent); }
+  .listpick ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+  .listpick li { display: flex; align-items: center; gap: 8px; padding: 3px 9px; font-size: 12px; }
+  .listpick li.have { color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .listpick .num { font-size: 10px; color: color-mix(in srgb, var(--text) 40%, transparent); }
+  .listpick .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .listpick .tag { flex: 0 0 auto; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+                   color: var(--warn); }
+  .listpick .dur { flex: 0 0 auto; font-size: 11px; color: color-mix(in srgb, var(--text) 55%, transparent); }
   /* The right column: the selection bar, when there is one, sits on the list. */
   .listcol { display: flex; flex-direction: column; min-width: 0; }
   .selbar { display: flex; align-items: center; gap: 10px; padding: 5px 9px; font-size: 12px;

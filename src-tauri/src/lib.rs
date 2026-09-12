@@ -33,8 +33,75 @@ async fn probe_url(
 fn enqueue_url(app: AppHandle, url: String, want_video: Option<bool>) -> Result<i64, String> {
     // Validate before it reaches the queue so a bad URL fails at the button,
     // not three seconds later inside a worker.
-    pipeline::validate_url(&url).map_err(|e| e.to_string())?;
-    jobs::enqueue(&app, url.trim(), want_video.unwrap_or(false)).map_err(|e| e.to_string())
+    let clean = pipeline::validate_url(&url).map_err(|e| e.to_string())?;
+    // A list with no video in it is not one job (#137): `--no-playlist` has
+    // nothing to reduce, so yt-dlp would download the entire list under a
+    // single queue row. It is read with `probe_playlist` instead.
+    if pipeline::list_id_of(&clean).is_some() && !pipeline::names_a_video(&clean) {
+        return Err(
+            "That link is a playlist, not a video. Paste it in the URL field to pick from it."
+                .to_string(),
+        );
+    }
+    jobs::enqueue(&app, url.trim(), want_video.unwrap_or(false), None).map_err(|e| e.to_string())
+}
+
+/// Read a pasted list without downloading anything (#137): its title, and
+/// every entry with whether the library already has it.
+#[tauri::command]
+async fn probe_playlist(
+    app: AppHandle,
+    url: String,
+) -> Result<pipeline::PlaylistProbe, pipeline::PipelineError> {
+    pipeline::probe_playlist(&app, url.trim()).await
+}
+
+/// Queue the entries a person kept, into a playlist named after the list
+/// (#137).
+///
+/// The playlist is made first and every job carries its id, so the association
+/// survives a kill: forty jobs that come back after a power cut still know
+/// which list they were for. Returns the playlist and how many jobs went in.
+#[tauri::command]
+fn enqueue_playlist(
+    app: AppHandle,
+    name: String,
+    urls: Vec<String>,
+    want_video: Option<bool>,
+) -> Result<QueuedList, String> {
+    for url in &urls {
+        pipeline::validate_url(url).map_err(|e| e.to_string())?;
+    }
+    let name = name.trim();
+    let name = if name.is_empty() { "Playlist" } else { name };
+    let playlist_id = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        playlist::create(&conn, name).map_err(|e| e.to_string())?
+    };
+    let mut queued = 0usize;
+    for url in urls {
+        jobs::enqueue(
+            &app,
+            url.trim(),
+            want_video.unwrap_or(false),
+            Some(playlist_id),
+        )
+        .map_err(|e| e.to_string())?;
+        queued += 1;
+    }
+    let _ = app.emit("library-changed", ());
+    Ok(QueuedList {
+        playlist_id,
+        queued,
+    })
+}
+
+/// What `enqueue_playlist` made.
+#[derive(serde::Serialize)]
+struct QueuedList {
+    playlist_id: i64,
+    queued: usize,
 }
 
 // ---- queue ------------------------------------------------------------------
@@ -453,6 +520,15 @@ fn wm_visible(app: AppHandle, label: String) -> bool {
         .unwrap_or(false)
 }
 
+/// Which store the jar in use was read from, or "" when it was picked as a
+/// file or never read (D115).
+#[tauri::command]
+fn get_cookies_from(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::get_setting(&conn, pipeline::COOKIES_FROM_SETTING).unwrap_or_default()
+}
+
 /// The `cookies.txt` this app hands yt-dlp, or "" when there is none (D112).
 #[tauri::command]
 fn get_cookies_file(app: AppHandle) -> String {
@@ -486,11 +562,13 @@ fn set_cookies_file(app: AppHandle, path: String) -> Result<String, String> {
     Ok(p.to_string())
 }
 
-/// The browsers a cookie export can read (D113). One list, in Rust, so the
-/// picker cannot offer something the allowlist would then refuse.
+/// Every browser profile a cookie export can read (D113, D115). Built in
+/// Rust, so the picker cannot offer a store the export would then refuse —
+/// and so a second Chrome profile, which is where a YouTube sign-in often
+/// lives, is offered by name instead of hidden behind "chrome".
 #[tauri::command]
-fn cookie_browsers() -> Vec<&'static str> {
-    pipeline::BROWSERS.to_vec()
+fn cookie_browsers() -> Vec<pipeline::CookieSource> {
+    pipeline::cookie_sources()
 }
 
 /// Read a browser's cookies with yt-dlp, keep the jar in the app's own folder
@@ -505,13 +583,25 @@ async fn export_cookies_from_browser(
     app: AppHandle,
     browser: String,
 ) -> Result<pipeline::CookieExport, String> {
-    let made = pipeline::export_cookies(&app, browser.trim())
+    let spec = browser.trim();
+    let made = pipeline::export_cookies(&app, spec)
         .await
         .map_err(|e| e.to_string())?;
     {
         let state = app.state::<Db>();
         let conn = state.0.lock().unwrap();
         db::set_setting(&conn, pipeline::COOKIES_SETTING, &made.path).map_err(|e| e.to_string())?;
+        // Which store the jar in use came from, so a read that is not kept
+        // can say what was kept instead. Unchanged when this one was not.
+        if !made.kept {
+            let label = pipeline::cookie_sources()
+                .into_iter()
+                .find(|s| s.spec == spec)
+                .map(|s| s.label)
+                .unwrap_or_else(|| spec.to_string());
+            db::set_setting(&conn, pipeline::COOKIES_FROM_SETTING, &label)
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(made)
 }
@@ -909,6 +999,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             probe_url,
             enqueue_url,
+            probe_playlist,
+            enqueue_playlist,
             list_jobs,
             retry_job,
             cancel_job,
@@ -962,6 +1054,7 @@ pub fn run() {
             cookie_browsers,
             export_cookies_from_browser,
             get_cookies_file,
+            get_cookies_from,
             set_cookies_file,
             show_library,
             wm_hello,
