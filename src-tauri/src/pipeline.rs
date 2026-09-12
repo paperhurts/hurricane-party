@@ -312,7 +312,13 @@ pub fn cookies_file(app: &AppHandle) -> Option<PathBuf> {
 /// Args every yt-dlp invocation needs, plus the person's cookies when they
 /// have set some (D112).
 fn ytdlp_base(app: &AppHandle) -> Vec<String> {
-    ytdlp_args(cookies_file(app).as_deref())
+    ytdlp_args_for(app, false)
+}
+
+/// The same, for the one call that wants a list expanded rather than reduced
+/// to its first video (#137).
+fn ytdlp_args_for(app: &AppHandle, playlists: bool) -> Vec<String> {
+    ytdlp_args(cookies_file(app).as_deref(), playlists)
 }
 
 /// The same list without the lookup, so its shape can be tested without an app.
@@ -320,13 +326,20 @@ fn ytdlp_base(app: &AppHandle) -> Vec<String> {
 /// `--js-runtimes deno` is D46. Without a JS runtime, yt-dlp warns that
 /// "YouTube extraction without a JS runtime has been deprecated" and silently
 /// returns fewer formats — a degradation that looks like success.
-fn ytdlp_args(cookies: Option<&Path>) -> Vec<String> {
+///
+/// `--no-playlist` is on every call but the list probe: a job downloads the one
+/// video it was queued for, so its file keeps the `[id]` a resume depends on
+/// (D49), and a pasted `watch?v=…&list=…` never turns into forty downloads
+/// nobody asked for.
+fn ytdlp_args(cookies: Option<&Path>, playlists: bool) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "--js-runtimes".into(),
         "deno".into(),
-        "--no-playlist".into(),
         "--no-warnings".into(),
     ];
+    if !playlists {
+        args.push("--no-playlist".into());
+    }
     if let Some(c) = cookies {
         args.push("--cookies".into());
         args.push(c.to_string_lossy().into_owned());
@@ -489,6 +502,172 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
             .or_else(|| node.get("filesize").and_then(|x| x.as_u64())),
         id,
     })
+}
+
+/// A list a person pasted, read without downloading anything (#137).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistProbe {
+    /// The `list=` id, which is also how a second import recognises it.
+    pub id: String,
+    pub title: String,
+    pub uploader: Option<String>,
+    pub items: Vec<PlaylistItem>,
+}
+
+/// One entry of a flat playlist. `duration_s` is missing more often than not —
+/// `--flat-playlist` is one request for the whole list and yt-dlp does not
+/// visit each video to fill it in, which is the entire point of using it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistItem {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub duration_s: Option<f64>,
+    /// A file whose name already carries this id is in the library, so the
+    /// picker can say so rather than queueing a second copy.
+    pub have: bool,
+}
+
+/// The `list=` id in a URL, if there is one.
+///
+/// Parsed rather than pattern-matched on the whole URL because the id is what
+/// everything else here keys on: whether the list is real, what the playlist
+/// gets named, and which entries to ask for.
+pub fn list_id_of(url: &str) -> Option<String> {
+    let (_, query) = url.split_once('?')?;
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == "list")
+        .map(|(_, v)| v.to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Whether a URL names one video rather than only a list (#137).
+///
+/// This matters because `--no-playlist` means "when the URL is a video *and* a
+/// list, take the video". Handed a bare `playlist?list=…` there is no video to
+/// take, and yt-dlp downloads the whole list — one queued job that quietly
+/// becomes forty downloads. So a URL with a list and no video is refused as a
+/// job and read as a list instead.
+pub fn names_a_video(url: &str) -> bool {
+    let Some((_, query)) = url.split_once('?') else {
+        return true;
+    };
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .any(|(k, v)| k == "v" && !v.is_empty())
+}
+
+/// Whether a list is one YouTube generates on the fly rather than one somebody
+/// made (#137).
+///
+/// `RD…` is radio: My Mix, a song radio, an artist radio. They are endless,
+/// personalised, and different the next time you ask — there is nothing to
+/// snapshot, so importing one is offering a person something this app cannot
+/// keep its side of.
+pub fn is_generated_list(list_id: &str) -> bool {
+    list_id.starts_with("RD")
+}
+
+/// Read a list with one yt-dlp call and no downloads (#137, architecture.md
+/// phase 1).
+///
+/// `--flat-playlist` is what makes this one request instead of one per video:
+/// yt-dlp returns the entries without visiting them. `--no-playlist` is
+/// dropped here and nowhere else — the per-item jobs keep it, so a job always
+/// downloads exactly the one video it was queued for (D49's `[id]` in the file
+/// name depends on that).
+pub async fn probe_playlist(app: &AppHandle, url: &str) -> Result<PlaylistProbe> {
+    let url = validate_url(url)?;
+    let list_id = list_id_of(&url).unwrap_or_default();
+    if is_generated_list(&list_id) {
+        return Err(PipelineError::BadUrl(format!(
+            "{list_id} is a mix YouTube makes up as it goes, not a list someone saved. There is nothing to snapshot; the video itself will import."
+        )));
+    }
+
+    let mut args = ytdlp_args_for(app, true);
+    args.extend([
+        "-J".to_string(),
+        "--flat-playlist".into(),
+        "--".into(),
+        url.clone(),
+    ]);
+    let (mut rx, _child) = app
+        .shell()
+        .sidecar("yt-dlp")
+        .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
+        .args(args)
+        .spawn()
+        .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+
+    let mut json = String::new();
+    let mut tail = Tail::new();
+    let mut code = 0;
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            CommandEvent::Stdout(b) => json.push_str(&String::from_utf8_lossy(&b)),
+            CommandEvent::Stderr(b) => tail.push(String::from_utf8_lossy(&b).trim().to_string()),
+            CommandEvent::Terminated(p) => code = p.code.unwrap_or(-1),
+            _ => {}
+        }
+    }
+    if code != 0 {
+        return Err(PipelineError::YtDlp {
+            code,
+            tail: tail.text(),
+        });
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(json.trim()).map_err(|e| PipelineError::Metadata(e.to_string()))?;
+    let have =
+        |id: &str| with_db(app, |conn| crate::library::have_video_id(conn, id)).unwrap_or(false);
+    Ok(playlist_from(&v, &list_id, have))
+}
+
+/// The mapping, split out so the shape of yt-dlp's answer can be tested
+/// without running it.
+fn playlist_from(
+    v: &serde_json::Value,
+    list_id: &str,
+    have: impl Fn(&str) -> bool,
+) -> PlaylistProbe {
+    let str_of = |node: &serde_json::Value, k: &str| {
+        node.get(k)
+            .and_then(|x| x.as_str())
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+    };
+    let entries = v.get("entries").and_then(|e| e.as_array());
+    let items = entries
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| {
+                    let id = str_of(e, "id")?;
+                    Some(PlaylistItem {
+                        title: str_of(e, "title").unwrap_or_else(|| id.clone()),
+                        // Built from the id rather than taken from `url`: an
+                        // entry's own URL can carry the list back with it, and
+                        // a job must name one video and nothing else.
+                        url: format!("https://www.youtube.com/watch?v={id}"),
+                        duration_s: e.get("duration").and_then(|x| x.as_f64()),
+                        have: have(&id),
+                        id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PlaylistProbe {
+        id: str_of(v, "id").unwrap_or_else(|| list_id.to_string()),
+        title: str_of(v, "title")
+            .or_else(|| str_of(v, "playlist_title"))
+            .unwrap_or_else(|| "Playlist".to_string()),
+        uploader: str_of(v, "uploader").or_else(|| str_of(v, "channel")),
+        items,
+    }
 }
 
 /// The five fields of one progress line, in template order: bytes downloaded,
@@ -1347,7 +1526,7 @@ mod tests {
     /// Every yt-dlp invocation must terminate option parsing before the URL.
     #[test]
     fn terminator_is_added_per_call_site_not_in_base() {
-        assert!(!ytdlp_args(None).contains(&"--".to_string()));
+        assert!(!ytdlp_args(None, false).contains(&"--".to_string()));
     }
 
     /// The progress template is pipe-delimited and parsed positionally — never
@@ -1361,6 +1540,80 @@ mod tests {
         assert!(speed.unwrap() > 52318.0);
         assert_eq!(eta, Some(3));
         assert_eq!(status, "downloading");
+    }
+
+    #[test]
+    fn a_list_is_found_by_its_query_parameter() {
+        assert_eq!(
+            list_id_of("https://www.youtube.com/watch?v=Hj_G0SYZMjE&list=PLWtysTk&index=3")
+                .as_deref(),
+            Some("PLWtysTk")
+        );
+        assert_eq!(
+            list_id_of("https://www.youtube.com/playlist?list=OLAK5uy_k").as_deref(),
+            Some("OLAK5uy_k")
+        );
+        assert_eq!(
+            list_id_of("https://www.youtube.com/watch?v=Hj_G0SYZMjE"),
+            None
+        );
+        assert_eq!(list_id_of("https://www.youtube.com/watch?v=x&list="), None);
+        assert_eq!(list_id_of("https://example.com/no-query"), None);
+    }
+
+    #[test]
+    fn a_bare_list_url_names_no_video() {
+        assert!(names_a_video("https://www.youtube.com/watch?v=x&list=PL1"));
+        assert!(!names_a_video("https://www.youtube.com/playlist?list=PL1"));
+        // No query at all is a plain URL, which is a job like any other.
+        assert!(names_a_video("https://example.com/song.mp3"));
+        assert!(!names_a_video("https://www.youtube.com/watch?v=&list=PL1"));
+    }
+
+    #[test]
+    fn a_mix_is_not_a_list_anyone_saved() {
+        // The case the owner hit first: watch?v=...&list=RDMM.
+        assert!(is_generated_list("RDMM"));
+        assert!(is_generated_list("RDCLAK5uy_k"));
+        assert!(!is_generated_list("PLWtysTkuEQDPa2kda8p6BYFQLCUz_cElx"));
+        assert!(!is_generated_list("OLAK5uy_k"));
+        assert!(!is_generated_list("UUabcdef"));
+    }
+
+    #[test]
+    fn a_flat_playlist_becomes_items_this_app_can_queue() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
+              "_type": "playlist",
+              "id": "PL123",
+              "title": "Storm Prep",
+              "uploader": "paperhurts",
+              "entries": [
+                {"id": "aaaaaaaaaaa", "title": "One", "duration": 213.0,
+                 "url": "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PL123"},
+                {"id": "bbbbbbbbbbb", "duration": null},
+                {"title": "no id at all"}
+              ]
+            }"#,
+        )
+        .unwrap();
+        let probe = playlist_from(&v, "PL123", |id| id == "aaaaaaaaaaa");
+        assert_eq!(probe.title, "Storm Prep");
+        assert_eq!(probe.uploader.as_deref(), Some("paperhurts"));
+        // An entry with no id is not something that can be queued.
+        assert_eq!(probe.items.len(), 2);
+        // The URL is rebuilt from the id: an entry's own URL carries the list
+        // back with it, and a job must name one video and nothing else.
+        assert_eq!(
+            probe.items[0].url,
+            "https://www.youtube.com/watch?v=aaaaaaaaaaa"
+        );
+        assert_eq!(probe.items[0].duration_s, Some(213.0));
+        assert!(probe.items[0].have, "the library already has this one");
+        // A flat entry often has no title and no duration; the id stands in.
+        assert_eq!(probe.items[1].title, "bbbbbbbbbbb");
+        assert_eq!(probe.items[1].duration_s, None);
+        assert!(!probe.items[1].have);
     }
 
     #[test]
@@ -1407,9 +1660,9 @@ mod tests {
 
     #[test]
     fn cookies_become_one_flag_and_its_path() {
-        let none = ytdlp_args(None);
+        let none = ytdlp_args(None, false);
         assert!(!none.contains(&"--cookies".to_string()));
-        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")));
+        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")), false);
         let at = with
             .iter()
             .position(|a| a == "--cookies")

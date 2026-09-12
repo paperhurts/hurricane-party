@@ -33,8 +33,75 @@ async fn probe_url(
 fn enqueue_url(app: AppHandle, url: String, want_video: Option<bool>) -> Result<i64, String> {
     // Validate before it reaches the queue so a bad URL fails at the button,
     // not three seconds later inside a worker.
-    pipeline::validate_url(&url).map_err(|e| e.to_string())?;
-    jobs::enqueue(&app, url.trim(), want_video.unwrap_or(false)).map_err(|e| e.to_string())
+    let clean = pipeline::validate_url(&url).map_err(|e| e.to_string())?;
+    // A list with no video in it is not one job (#137): `--no-playlist` has
+    // nothing to reduce, so yt-dlp would download the entire list under a
+    // single queue row. It is read with `probe_playlist` instead.
+    if pipeline::list_id_of(&clean).is_some() && !pipeline::names_a_video(&clean) {
+        return Err(
+            "That link is a playlist, not a video. Paste it in the URL field to pick from it."
+                .to_string(),
+        );
+    }
+    jobs::enqueue(&app, url.trim(), want_video.unwrap_or(false), None).map_err(|e| e.to_string())
+}
+
+/// Read a pasted list without downloading anything (#137): its title, and
+/// every entry with whether the library already has it.
+#[tauri::command]
+async fn probe_playlist(
+    app: AppHandle,
+    url: String,
+) -> Result<pipeline::PlaylistProbe, pipeline::PipelineError> {
+    pipeline::probe_playlist(&app, url.trim()).await
+}
+
+/// Queue the entries a person kept, into a playlist named after the list
+/// (#137).
+///
+/// The playlist is made first and every job carries its id, so the association
+/// survives a kill: forty jobs that come back after a power cut still know
+/// which list they were for. Returns the playlist and how many jobs went in.
+#[tauri::command]
+fn enqueue_playlist(
+    app: AppHandle,
+    name: String,
+    urls: Vec<String>,
+    want_video: Option<bool>,
+) -> Result<QueuedList, String> {
+    for url in &urls {
+        pipeline::validate_url(url).map_err(|e| e.to_string())?;
+    }
+    let name = name.trim();
+    let name = if name.is_empty() { "Playlist" } else { name };
+    let playlist_id = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        playlist::create(&conn, name).map_err(|e| e.to_string())?
+    };
+    let mut queued = 0usize;
+    for url in urls {
+        jobs::enqueue(
+            &app,
+            url.trim(),
+            want_video.unwrap_or(false),
+            Some(playlist_id),
+        )
+        .map_err(|e| e.to_string())?;
+        queued += 1;
+    }
+    let _ = app.emit("library-changed", ());
+    Ok(QueuedList {
+        playlist_id,
+        queued,
+    })
+}
+
+/// What `enqueue_playlist` made.
+#[derive(serde::Serialize)]
+struct QueuedList {
+    playlist_id: i64,
+    queued: usize,
 }
 
 // ---- queue ------------------------------------------------------------------
@@ -909,6 +976,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             probe_url,
             enqueue_url,
+            probe_playlist,
+            enqueue_playlist,
             list_jobs,
             retry_job,
             cancel_job,
