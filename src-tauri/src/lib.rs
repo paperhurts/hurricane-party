@@ -629,6 +629,30 @@ fn create_playlist(app: AppHandle, name: String) -> Result<i64, db::DbError> {
     playlist::create(&conn, name.trim())
 }
 
+/// Rename a playlist (D116).
+#[tauri::command]
+fn rename_playlist(app: AppHandle, id: i64, name: String) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::rename(&conn, id, &name)
+}
+
+/// Delete a playlist and keep every track in it (D116).
+#[tauri::command]
+fn delete_playlist(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let mut conn = state.0.lock().unwrap();
+    playlist::delete(&mut conn, id)
+}
+
+/// Put a playlist at index `to` in the list (D116).
+#[tauri::command]
+fn move_playlist(app: AppHandle, id: i64, to: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let mut conn = state.0.lock().unwrap();
+    playlist::move_to(&mut conn, id, to)
+}
+
 #[tauri::command]
 fn playlist_items(app: AppHandle, id: i64) -> Result<Vec<playlist::MediaRow>, db::DbError> {
     let state = app.state::<Db>();
@@ -1008,6 +1032,9 @@ pub fn run() {
             library_path,
             list_playlists,
             create_playlist,
+            rename_playlist,
+            delete_playlist,
+            move_playlist,
             playlist_items,
             add_to_playlist,
             remove_from_playlist,
