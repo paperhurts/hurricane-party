@@ -20,8 +20,15 @@ use tauri_plugin_shell::ShellExt;
 pub enum PipelineError {
     #[error("{0}")]
     Sidecar(String),
-    #[error("{}", ytdlp_message(*.code, .tail))]
-    YtDlp { code: i32, tail: String },
+    #[error("{}", ytdlp_message(*.code, .tail, *.cookies))]
+    YtDlp {
+        code: i32,
+        tail: String,
+        /// Whether the app had a cookies file when this failed, which changes
+        /// what a sign-in refusal means: no file is "give me one", a file is
+        /// "the one you gave me has no session in it" (D113).
+        cookies: bool,
+    },
     #[error("ffmpeg failed ({code}). Last output: {tail}")]
     Ffmpeg { code: i32, tail: String },
     #[error("couldn't understand yt-dlp's metadata: {0}")]
@@ -37,8 +44,8 @@ pub enum PipelineError {
 /// What a yt-dlp failure says to a person (D112). A failure we recognise leads
 /// with what to do about it and keeps yt-dlp's own words after, because the
 /// tail is what makes a bug report answerable.
-fn ytdlp_message(code: i32, tail: &str) -> String {
-    match explain(tail) {
+fn ytdlp_message(code: i32, tail: &str, cookies: bool) -> String {
+    match explain(tail, cookies) {
         Some(why) => format!(
             "{why}
 
@@ -181,6 +188,228 @@ pub const BROWSERS: [&str; 7] = [
     "firefox", "brave", "chrome", "chromium", "edge", "opera", "vivaldi",
 ];
 
+/// One cookie store a person can read from: a browser, and which of its
+/// profiles (D115).
+///
+/// `--cookies-from-browser chrome` means `chrome:Default`, which is the trap
+/// this type exists to remove: a second Chrome profile is where a YouTube
+/// sign-in often lives, and reading the first one returns a jar full of real
+/// cookies with no session in it.
+#[derive(Debug, Clone, Serialize)]
+pub struct CookieSource {
+    /// The browser, always one of `BROWSERS`.
+    pub browser: String,
+    /// The profile directory (Chromium) or profile name (Firefox), when the
+    /// browser has more than the one.
+    pub profile: Option<String>,
+    /// What the picker shows: the browser, and the profile's own name when it
+    /// has one worth reading.
+    pub label: String,
+    /// What goes to `--cookies-from-browser`, built here so nothing a person
+    /// types ever reaches argv.
+    pub spec: String,
+}
+
+/// Every profile of every browser installed, in the order `BROWSERS` lists
+/// them (D115). Directory listings and one small JSON file: no cookie
+/// database is opened, and no cookie is read.
+pub fn cookie_sources() -> Vec<CookieSource> {
+    let mut out = Vec::new();
+    for browser in BROWSERS {
+        match browser {
+            "firefox" => out.extend(firefox_profiles()),
+            _ => out.extend(chromium_profiles(browser)),
+        }
+    }
+    out
+}
+
+fn source(browser: &str, profile: Option<String>, name: Option<String>) -> CookieSource {
+    let label = match (&profile, &name) {
+        (Some(_), Some(n)) => format!("{browser} — {n}"),
+        (Some(p), None) => format!("{browser} — {p}"),
+        _ => browser.to_string(),
+    };
+    let spec = match &profile {
+        Some(p) => format!("{browser}:{p}"),
+        None => browser.to_string(),
+    };
+    CookieSource {
+        browser: browser.to_string(),
+        profile,
+        label,
+        spec,
+    }
+}
+
+/// Chromium keeps one folder per profile under `User Data`, and the display
+/// names in `Local State`. A profile with no `Cookies` file has never stored
+/// one, so it is not a source.
+fn chromium_profiles(browser: &str) -> Vec<CookieSource> {
+    let Some(root) = chromium_root(browser) else {
+        return Vec::new();
+    };
+    let names: std::collections::HashMap<String, String> =
+        std::fs::read_to_string(root.join("Local State"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| {
+                v.get("profile")?.get("info_cache")?.as_object().map(|o| {
+                    o.iter()
+                        .filter_map(|(dir, info)| {
+                            Some((dir.clone(), info.get("name")?.as_str()?.to_string()))
+                        })
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+
+    let mut found: Vec<CookieSource> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return found;
+    };
+    for e in entries.filter_map(|e| e.ok()) {
+        if !e.path().is_dir() {
+            continue;
+        }
+        let dir = e.file_name().to_string_lossy().into_owned();
+        // Chromium moved the file under `Network/` and still reads the old
+        // place on older profiles.
+        let has_cookies = e.path().join("Cookies").is_file()
+            || e.path().join("Network").join("Cookies").is_file();
+        if !has_cookies {
+            continue;
+        }
+        found.push(source(browser, Some(dir.clone()), names.get(&dir).cloned()));
+    }
+    found.sort_by(|a, b| a.spec.cmp(&b.spec));
+    found
+}
+
+fn chromium_root(browser: &str) -> Option<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    let rel = match browser {
+        "chrome" => r"Google\Chrome\User Data",
+        "chromium" => r"Chromium\User Data",
+        "brave" => r"BraveSoftware\Brave-Browser\User Data",
+        "edge" => r"Microsoft\Edge\User Data",
+        "vivaldi" => r"Vivaldi\User Data",
+        "opera" => r"Opera Software\Opera Stable",
+        _ => return None,
+    };
+    let p = local.join(rel);
+    p.is_dir().then_some(p)
+}
+
+/// Firefox lists its profiles in `profiles.ini`, by name and path. yt-dlp
+/// takes either; the name is what a person recognises.
+fn firefox_profiles() -> Vec<CookieSource> {
+    let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+        return Vec::new();
+    };
+    let root = appdata.join(r"Mozilla\Firefox");
+    let Ok(ini) = std::fs::read_to_string(root.join("profiles.ini")) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut name: Option<String> = None;
+    let mut path: Option<String> = None;
+    let flush =
+        |name: &mut Option<String>, path: &mut Option<String>, out: &mut Vec<CookieSource>| {
+            if let (Some(n), Some(p)) = (name.take(), path.take()) {
+                let dir = root.join(p.replace('/', "\\"));
+                if dir.join("cookies.sqlite").is_file() {
+                    out.push(source(
+                        "firefox",
+                        Some(dir.to_string_lossy().into_owned()),
+                        Some(n),
+                    ));
+                }
+            }
+        };
+    for line in ini.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            flush(&mut name, &mut path, &mut out);
+        } else if let Some(v) = line.strip_prefix("Name=") {
+            name = Some(v.to_string());
+        } else if let Some(v) = line.strip_prefix("Path=") {
+            path = Some(v.to_string());
+        }
+    }
+    flush(&mut name, &mut path, &mut out);
+    out
+}
+
+/// The cookie database behind one source, and the query that lists the names
+/// in it for youtube.com. Firefox and Chromium keep different schemas.
+fn store_db(s: &CookieSource) -> Option<(PathBuf, &'static str)> {
+    if s.browser == "firefox" {
+        let dir = PathBuf::from(s.profile.as_deref()?);
+        let db = dir.join("cookies.sqlite");
+        return db.is_file().then_some((
+            db,
+            "SELECT name FROM moz_cookies WHERE host LIKE '%youtube.com'",
+        ));
+    }
+    let root = chromium_root(&s.browser)?;
+    let prof = root.join(s.profile.as_deref()?);
+    // Chromium moved the file under `Network/` and older profiles still have
+    // it beside the rest.
+    for p in [prof.join("Network").join("Cookies"), prof.join("Cookies")] {
+        if p.is_file() {
+            return Some((
+                p,
+                "SELECT name FROM cookies WHERE host_key LIKE '%youtube.com'",
+            ));
+        }
+    }
+    None
+}
+
+/// Which stores on this machine hold a YouTube sign-in (D115).
+///
+/// Called at exactly one moment: an export came back with no session in it,
+/// which is when "where is the sign-in, then?" is the only useful thing left
+/// to say. It copies each cookie database to a temporary file (the browser
+/// keeps the original locked), reads cookie **names** for youtube.com, and
+/// deletes the copy. No cookie value is read, nothing is kept, and a store
+/// that will not copy is skipped rather than guessed at.
+pub fn stores_with_session() -> Vec<String> {
+    const SESSION: [&str; 3] = ["SID", "__Secure-1PSID", "LOGIN_INFO"];
+    let tmp = std::env::temp_dir();
+    let mut out = Vec::new();
+    for (i, s) in cookie_sources().into_iter().enumerate() {
+        let Some((db, query)) = store_db(&s) else {
+            continue;
+        };
+        let copy = tmp.join(format!("hp-cookie-peek-{}-{i}.db", std::process::id()));
+        if std::fs::copy(&db, &copy).is_err() {
+            continue;
+        }
+        let found = rusqlite::Connection::open(&copy)
+            .and_then(|conn| {
+                let mut st = conn.prepare(query)?;
+                let mut rows = st.query([])?;
+                let mut hit = false;
+                while let Some(r) = rows.next()? {
+                    let name: String = r.get(0)?;
+                    if SESSION.contains(&name.as_str()) {
+                        hit = true;
+                        break;
+                    }
+                }
+                Ok(hit)
+            })
+            .unwrap_or(false);
+        let _ = std::fs::remove_file(&copy);
+        if found {
+            out.push(s.label);
+        }
+    }
+    out
+}
+
 /// What an export produced: where the jar landed, and how many cookies are in
 /// it — the count is what tells a person it worked, and it is all this app
 /// ever says about the contents.
@@ -188,6 +417,17 @@ pub const BROWSERS: [&str; 7] = [
 pub struct CookieExport {
     pub path: String,
     pub count: usize,
+    /// Whether a YouTube sign-in is among them (D113). A jar full of a
+    /// browser's ordinary cookies still fails every age gate, and finding
+    /// that out at the export beats finding it out per download.
+    pub youtube: bool,
+    /// When it has none: the stores on this machine that do (D115). The
+    /// owner read three browsers in turn and the app never said "that one" —
+    /// which it can, since it already knows what the stores are.
+    pub elsewhere: Vec<String>,
+    /// This read had no sign-in and the jar already in use did, so the jar in
+    /// use stayed (D115). `path` is that jar either way.
+    pub kept: bool,
 }
 
 /// Read a browser's cookie store with yt-dlp and write the jar into the app's
@@ -199,23 +439,35 @@ pub struct CookieExport {
 /// reserved by RFC 2606 and can never resolve, so the run cannot reach anyone
 /// — the extraction fails, the jar is written anyway, and the exit code is
 /// ignored on purpose. What counts as success is a file with cookies in it.
-pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExport> {
-    if !BROWSERS.contains(&browser) {
+pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport> {
+    // A spec, not a browser: `chrome:Profile 1` (D115). Checked against what
+    // `cookie_sources` found rather than parsed permissively — the value
+    // reaches argv, so it may only ever be one this machine offered.
+    let known = cookie_sources();
+    let Some(source) = known.into_iter().find(|s| s.spec == spec) else {
         return Err(PipelineError::BadUrl(format!(
-            "{browser} is not a browser this can read"
+            "{spec} is not a cookie store this machine offers"
         )));
-    }
+    };
+    let browser = source.browser.as_str();
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| PipelineError::Io(format!("no app data dir: {e}")))?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| PipelineError::Io(format!("couldn't create {}: {e}", dir.display())))?;
-    let out = dir.join("cookies.txt");
+    // The live jar, and a scratch file the export writes first (D115). The
+    // owner read a signed-in Firefox profile, then a signed-out Chrome one,
+    // and the second read overwrote the first: every age gate failed again
+    // with a working session one click behind it. So a read lands beside the
+    // jar and replaces it only when that loses nothing.
+    let live = dir.join("cookies.txt");
+    let out = dir.join("cookies.reading.txt");
+    let _ = std::fs::remove_file(&out);
 
     let args: Vec<String> = vec![
         "--cookies-from-browser".into(),
-        browser.to_string(),
+        source.spec.clone(),
         "--cookies".into(),
         out.to_string_lossy().into_owned(),
         "--simulate".into(),
@@ -248,10 +500,40 @@ pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExpo
         let _ = std::fs::remove_file(&out);
         return Err(PipelineError::Io(explain_export(browser, &tail.text())));
     }
+    let youtube = jar_has_youtube_session(&out);
+    let kept = settle_read(&out, &live)
+        .map_err(|e| PipelineError::Io(format!("couldn't keep the cookies it read: {e}")))?;
     Ok(CookieExport {
-        path: out.to_string_lossy().into_owned(),
+        path: live.to_string_lossy().into_owned(),
         count,
+        youtube,
+        kept,
+        // Only when there is bad news to explain: see `stores_with_session`.
+        elsewhere: if youtube {
+            Vec::new()
+        } else {
+            stores_with_session()
+                .into_iter()
+                .filter(|l| *l != source.label)
+                .collect()
+        },
     })
+}
+
+/// Put a fresh read where yt-dlp will use it, unless that loses a sign-in
+/// (D115). Returns whether the jar already in use was kept instead.
+///
+/// The one case that keeps the old jar: it has a YouTube session and the read
+/// does not. A store with no session is still worth hearing about — the notice
+/// says so — but it is not a reason to throw away one that works.
+fn settle_read(read: &Path, live: &Path) -> std::io::Result<bool> {
+    let keep = !jar_has_youtube_session(read) && live.is_file() && jar_has_youtube_session(live);
+    if keep {
+        let _ = std::fs::remove_file(read);
+    } else {
+        std::fs::rename(read, live)?;
+    }
+    Ok(keep)
 }
 
 /// Cookies in a Netscape jar: every line that is not blank and not a comment.
@@ -264,6 +546,28 @@ fn count_cookies(path: &Path) -> usize {
     text.lines()
         .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
         .count()
+}
+
+/// Whether a jar carries a YouTube sign-in (D113).
+///
+/// By cookie **name**, never by value: the names below are the first-party
+/// session cookies YouTube treats as signed in, and the only thing this
+/// process wants to know is whether one of them is there. `__Secure-3PSID`
+/// deliberately does not count — it is the cross-site variant, and a jar that
+/// has it without the first-party set still gets the age gate, which is
+/// exactly what happened on the owner's machine.
+fn jar_has_youtube_session(path: &Path) -> bool {
+    const SESSION: [&str; 3] = ["SID", "__Secure-1PSID", "LOGIN_INFO"];
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            (f.len() >= 7 && f[0].contains("youtube.com")).then(|| f[5])
+        })
+        .any(|name| SESSION.contains(&name))
 }
 
 /// Why a browser would not give up its cookies, in words a person can act on
@@ -290,6 +594,9 @@ fn explain_export(browser: &str, tail: &str) -> String {
 /// default, means yt-dlp runs with no authentication at all.
 pub const COOKIES_SETTING: &str = "ytdlp.cookies";
 
+/// The store a read jar came from, for saying which one was kept (D115).
+pub const COOKIES_FROM_SETTING: &str = "ytdlp.cookies.from";
+
 /// That file, if it is set and still there.
 ///
 /// A path that has gone — an unplugged drive, a file they deleted — is no
@@ -312,7 +619,13 @@ pub fn cookies_file(app: &AppHandle) -> Option<PathBuf> {
 /// Args every yt-dlp invocation needs, plus the person's cookies when they
 /// have set some (D112).
 fn ytdlp_base(app: &AppHandle) -> Vec<String> {
-    ytdlp_args(cookies_file(app).as_deref())
+    ytdlp_args_for(app, false)
+}
+
+/// The same, for the one call that wants a list expanded rather than reduced
+/// to its first video (#137).
+fn ytdlp_args_for(app: &AppHandle, playlists: bool) -> Vec<String> {
+    ytdlp_args(cookies_file(app).as_deref(), playlists)
 }
 
 /// The same list without the lookup, so its shape can be tested without an app.
@@ -320,13 +633,20 @@ fn ytdlp_base(app: &AppHandle) -> Vec<String> {
 /// `--js-runtimes deno` is D46. Without a JS runtime, yt-dlp warns that
 /// "YouTube extraction without a JS runtime has been deprecated" and silently
 /// returns fewer formats — a degradation that looks like success.
-fn ytdlp_args(cookies: Option<&Path>) -> Vec<String> {
+///
+/// `--no-playlist` is on every call but the list probe: a job downloads the one
+/// video it was queued for, so its file keeps the `[id]` a resume depends on
+/// (D49), and a pasted `watch?v=…&list=…` never turns into forty downloads
+/// nobody asked for.
+fn ytdlp_args(cookies: Option<&Path>, playlists: bool) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "--js-runtimes".into(),
         "deno".into(),
-        "--no-playlist".into(),
         "--no-warnings".into(),
     ];
+    if !playlists {
+        args.push("--no-playlist".into());
+    }
     if let Some(c) = cookies {
         args.push("--cookies".into());
         args.push(c.to_string_lossy().into_owned());
@@ -337,8 +657,13 @@ fn ytdlp_args(cookies: Option<&Path>) -> Vec<String> {
 /// The yt-dlp failures a person can do something about, in a line rather than
 /// the wall of text yt-dlp writes (D112). Everything else keeps yt-dlp's own
 /// words: a message nobody has read yet beats a wrong guess at what it means.
-pub(crate) fn explain(tail: &str) -> Option<String> {
-    const COOKIES: &str = "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.";
+pub(crate) fn explain(tail: &str, cookies: bool) -> Option<String> {
+    // Two different problems wearing one error. Without a jar, the app needs
+    // one; with a jar, the jar is signed out — and telling someone to do the
+    // thing they have already done is the worst answer available (D113).
+    const GET: &str = "Point the app at a cookies.txt exported from a browser you are signed in with, with Cookies in the library header, then retry.";
+    const STALE: &str = "The cookies this app has carry no YouTube sign-in, or no longer do. Sign in to YouTube in that browser, read them again with From a browser, and retry.";
+    let cookies_hint = if cookies { STALE } else { GET };
     let (why, needs_cookies) = if tail.contains("Sign in to confirm your age") {
         (
             "YouTube wants a signed-in session for this one: it is age-restricted.",
@@ -363,7 +688,7 @@ pub(crate) fn explain(tail: &str) -> Option<String> {
         return None;
     };
     Some(if needs_cookies {
-        format!("{why} {COOKIES}")
+        format!("{why} {cookies_hint}")
     } else {
         why.to_string()
     })
@@ -446,6 +771,7 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
+            cookies: cookies_file(app).is_some(),
         });
     }
 
@@ -489,6 +815,173 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
             .or_else(|| node.get("filesize").and_then(|x| x.as_u64())),
         id,
     })
+}
+
+/// A list a person pasted, read without downloading anything (#137).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistProbe {
+    /// The `list=` id, which is also how a second import recognises it.
+    pub id: String,
+    pub title: String,
+    pub uploader: Option<String>,
+    pub items: Vec<PlaylistItem>,
+}
+
+/// One entry of a flat playlist. `duration_s` is missing more often than not —
+/// `--flat-playlist` is one request for the whole list and yt-dlp does not
+/// visit each video to fill it in, which is the entire point of using it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistItem {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub duration_s: Option<f64>,
+    /// A file whose name already carries this id is in the library, so the
+    /// picker can say so rather than queueing a second copy.
+    pub have: bool,
+}
+
+/// The `list=` id in a URL, if there is one.
+///
+/// Parsed rather than pattern-matched on the whole URL because the id is what
+/// everything else here keys on: whether the list is real, what the playlist
+/// gets named, and which entries to ask for.
+pub fn list_id_of(url: &str) -> Option<String> {
+    let (_, query) = url.split_once('?')?;
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == "list")
+        .map(|(_, v)| v.to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Whether a URL names one video rather than only a list (#137).
+///
+/// This matters because `--no-playlist` means "when the URL is a video *and* a
+/// list, take the video". Handed a bare `playlist?list=…` there is no video to
+/// take, and yt-dlp downloads the whole list — one queued job that quietly
+/// becomes forty downloads. So a URL with a list and no video is refused as a
+/// job and read as a list instead.
+pub fn names_a_video(url: &str) -> bool {
+    let Some((_, query)) = url.split_once('?') else {
+        return true;
+    };
+    query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .any(|(k, v)| k == "v" && !v.is_empty())
+}
+
+/// Whether a list is one YouTube generates on the fly rather than one somebody
+/// made (#137).
+///
+/// `RD…` is radio: My Mix, a song radio, an artist radio. They are endless,
+/// personalised, and different the next time you ask — there is nothing to
+/// snapshot, so importing one is offering a person something this app cannot
+/// keep its side of.
+pub fn is_generated_list(list_id: &str) -> bool {
+    list_id.starts_with("RD")
+}
+
+/// Read a list with one yt-dlp call and no downloads (#137, architecture.md
+/// phase 1).
+///
+/// `--flat-playlist` is what makes this one request instead of one per video:
+/// yt-dlp returns the entries without visiting them. `--no-playlist` is
+/// dropped here and nowhere else — the per-item jobs keep it, so a job always
+/// downloads exactly the one video it was queued for (D49's `[id]` in the file
+/// name depends on that).
+pub async fn probe_playlist(app: &AppHandle, url: &str) -> Result<PlaylistProbe> {
+    let url = validate_url(url)?;
+    let list_id = list_id_of(&url).unwrap_or_default();
+    if is_generated_list(&list_id) {
+        return Err(PipelineError::BadUrl(format!(
+            "{list_id} is a mix YouTube makes up as it goes, not a list someone saved. There is nothing to snapshot; the video itself will import."
+        )));
+    }
+
+    let mut args = ytdlp_args_for(app, true);
+    args.extend([
+        "-J".to_string(),
+        "--flat-playlist".into(),
+        "--".into(),
+        url.clone(),
+    ]);
+    let (mut rx, _child) = app
+        .shell()
+        .sidecar("yt-dlp")
+        .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
+        .args(args)
+        .spawn()
+        .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+
+    let mut json = String::new();
+    let mut tail = Tail::new();
+    let mut code = 0;
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            CommandEvent::Stdout(b) => json.push_str(&String::from_utf8_lossy(&b)),
+            CommandEvent::Stderr(b) => tail.push(String::from_utf8_lossy(&b).trim().to_string()),
+            CommandEvent::Terminated(p) => code = p.code.unwrap_or(-1),
+            _ => {}
+        }
+    }
+    if code != 0 {
+        return Err(PipelineError::YtDlp {
+            code,
+            tail: tail.text(),
+            cookies: cookies_file(app).is_some(),
+        });
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(json.trim()).map_err(|e| PipelineError::Metadata(e.to_string()))?;
+    let have =
+        |id: &str| with_db(app, |conn| crate::library::have_video_id(conn, id)).unwrap_or(false);
+    Ok(playlist_from(&v, &list_id, have))
+}
+
+/// The mapping, split out so the shape of yt-dlp's answer can be tested
+/// without running it.
+fn playlist_from(
+    v: &serde_json::Value,
+    list_id: &str,
+    have: impl Fn(&str) -> bool,
+) -> PlaylistProbe {
+    let str_of = |node: &serde_json::Value, k: &str| {
+        node.get(k)
+            .and_then(|x| x.as_str())
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+    };
+    let entries = v.get("entries").and_then(|e| e.as_array());
+    let items = entries
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| {
+                    let id = str_of(e, "id")?;
+                    Some(PlaylistItem {
+                        title: str_of(e, "title").unwrap_or_else(|| id.clone()),
+                        // Built from the id rather than taken from `url`: an
+                        // entry's own URL can carry the list back with it, and
+                        // a job must name one video and nothing else.
+                        url: format!("https://www.youtube.com/watch?v={id}"),
+                        duration_s: e.get("duration").and_then(|x| x.as_f64()),
+                        have: have(&id),
+                        id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PlaylistProbe {
+        id: str_of(v, "id").unwrap_or_else(|| list_id.to_string()),
+        title: str_of(v, "title")
+            .or_else(|| str_of(v, "playlist_title"))
+            .unwrap_or_else(|| "Playlist".to_string()),
+        uploader: str_of(v, "uploader").or_else(|| str_of(v, "channel")),
+        items,
+    }
 }
 
 /// The five fields of one progress line, in template order: bytes downloaded,
@@ -629,6 +1122,7 @@ async fn download_media(
         return Err(PipelineError::YtDlp {
             code,
             tail: tail.text(),
+            cookies: cookies_file(app).is_some(),
         });
     }
 
@@ -1347,7 +1841,7 @@ mod tests {
     /// Every yt-dlp invocation must terminate option parsing before the URL.
     #[test]
     fn terminator_is_added_per_call_site_not_in_base() {
-        assert!(!ytdlp_args(None).contains(&"--".to_string()));
+        assert!(!ytdlp_args(None, false).contains(&"--".to_string()));
     }
 
     /// The progress template is pipe-delimited and parsed positionally — never
@@ -1361,6 +1855,177 @@ mod tests {
         assert!(speed.unwrap() > 52318.0);
         assert_eq!(eta, Some(3));
         assert_eq!(status, "downloading");
+    }
+
+    #[test]
+    fn a_list_is_found_by_its_query_parameter() {
+        assert_eq!(
+            list_id_of("https://www.youtube.com/watch?v=Hj_G0SYZMjE&list=PLWtysTk&index=3")
+                .as_deref(),
+            Some("PLWtysTk")
+        );
+        assert_eq!(
+            list_id_of("https://www.youtube.com/playlist?list=OLAK5uy_k").as_deref(),
+            Some("OLAK5uy_k")
+        );
+        assert_eq!(
+            list_id_of("https://www.youtube.com/watch?v=Hj_G0SYZMjE"),
+            None
+        );
+        assert_eq!(list_id_of("https://www.youtube.com/watch?v=x&list="), None);
+        assert_eq!(list_id_of("https://example.com/no-query"), None);
+    }
+
+    #[test]
+    fn a_bare_list_url_names_no_video() {
+        assert!(names_a_video("https://www.youtube.com/watch?v=x&list=PL1"));
+        assert!(!names_a_video("https://www.youtube.com/playlist?list=PL1"));
+        // No query at all is a plain URL, which is a job like any other.
+        assert!(names_a_video("https://example.com/song.mp3"));
+        assert!(!names_a_video("https://www.youtube.com/watch?v=&list=PL1"));
+    }
+
+    #[test]
+    fn a_mix_is_not_a_list_anyone_saved() {
+        // The case the owner hit first: watch?v=...&list=RDMM.
+        assert!(is_generated_list("RDMM"));
+        assert!(is_generated_list("RDCLAK5uy_k"));
+        assert!(!is_generated_list("PLWtysTkuEQDPa2kda8p6BYFQLCUz_cElx"));
+        assert!(!is_generated_list("OLAK5uy_k"));
+        assert!(!is_generated_list("UUabcdef"));
+    }
+
+    #[test]
+    fn a_flat_playlist_becomes_items_this_app_can_queue() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
+              "_type": "playlist",
+              "id": "PL123",
+              "title": "Storm Prep",
+              "uploader": "paperhurts",
+              "entries": [
+                {"id": "aaaaaaaaaaa", "title": "One", "duration": 213.0,
+                 "url": "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PL123"},
+                {"id": "bbbbbbbbbbb", "duration": null},
+                {"title": "no id at all"}
+              ]
+            }"#,
+        )
+        .unwrap();
+        let probe = playlist_from(&v, "PL123", |id| id == "aaaaaaaaaaa");
+        assert_eq!(probe.title, "Storm Prep");
+        assert_eq!(probe.uploader.as_deref(), Some("paperhurts"));
+        // An entry with no id is not something that can be queued.
+        assert_eq!(probe.items.len(), 2);
+        // The URL is rebuilt from the id: an entry's own URL carries the list
+        // back with it, and a job must name one video and nothing else.
+        assert_eq!(
+            probe.items[0].url,
+            "https://www.youtube.com/watch?v=aaaaaaaaaaa"
+        );
+        assert_eq!(probe.items[0].duration_s, Some(213.0));
+        assert!(probe.items[0].have, "the library already has this one");
+        // A flat entry often has no title and no duration; the id stands in.
+        assert_eq!(probe.items[1].title, "bbbbbbbbbbb");
+        assert_eq!(probe.items[1].duration_s, None);
+        assert!(!probe.items[1].have);
+    }
+
+    #[test]
+    fn looking_for_a_sign_in_elsewhere_names_only_known_stores() {
+        // Whatever this machine holds, every answer is the label of a store
+        // `cookie_sources` offers — never a path, never a cookie (D115).
+        let labels: Vec<String> = cookie_sources().into_iter().map(|s| s.label).collect();
+        let found = stores_with_session();
+        for l in &found {
+            assert!(labels.contains(l), "{l}");
+        }
+        // And it leaves nothing behind in the temporary directory.
+        let left = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(&format!("hp-cookie-peek-{}-", std::process::id()))
+            })
+            .count();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_read_without_a_sign_in_never_replaces_one_with() {
+        let dir = std::env::temp_dir().join(format!("hp-settle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let live = dir.join("cookies.txt");
+        let read = dir.join("cookies.reading.txt");
+        let jar = |name: &str| {
+            format!(
+                ".youtube.com	TRUE	/	TRUE	0	{name}	x
+"
+            )
+        };
+
+        // What happened to the owner: Firefox signed in, then a Chrome profile
+        // signed out. The second read must not cost them the first.
+        std::fs::write(&live, jar("SID")).unwrap();
+        std::fs::write(&read, jar("VISITOR_INFO1_LIVE")).unwrap();
+        assert!(settle_read(&read, &live).unwrap(), "kept the signed-in jar");
+        assert!(jar_has_youtube_session(&live));
+        assert!(
+            !read.exists(),
+            "the signed-out read is not left lying about"
+        );
+
+        // A signed-in read always replaces, even a jar that was also signed in:
+        // newer is better when both work.
+        std::fs::write(&read, jar("__Secure-1PSID")).unwrap();
+        assert!(!settle_read(&read, &live).unwrap());
+        assert!(std::fs::read_to_string(&live)
+            .unwrap()
+            .contains("__Secure-1PSID"));
+
+        // Nothing signed in to lose: a signed-out read replaces a signed-out jar,
+        // and fills an empty place.
+        std::fs::write(&live, jar("PREF")).unwrap();
+        std::fs::write(&read, jar("YSC")).unwrap();
+        assert!(!settle_read(&read, &live).unwrap());
+        assert!(std::fs::read_to_string(&live).unwrap().contains("YSC"));
+        std::fs::remove_file(&live).unwrap();
+        std::fs::write(&read, jar("YSC")).unwrap();
+        assert!(!settle_read(&read, &live).unwrap());
+        assert!(live.exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_cookie_source_builds_its_own_spec_and_label() {
+        let plain = source("firefox", None, None);
+        assert_eq!(plain.spec, "firefox");
+        assert_eq!(plain.label, "firefox");
+        // A Chromium profile directory with a display name shows the name and
+        // sends the directory, which is what yt-dlp takes.
+        let named = source("chrome", Some("Profile 1".into()), Some("Kiddo".into()));
+        assert_eq!(named.spec, "chrome:Profile 1");
+        assert_eq!(named.label, "chrome — Kiddo");
+        // No display name: the directory is the label too.
+        let bare = source("chrome", Some("Profile 2".into()), None);
+        assert_eq!(bare.label, "chrome — Profile 2");
+        assert_eq!(bare.spec, "chrome:Profile 2");
+    }
+
+    #[test]
+    fn every_source_this_machine_offers_names_a_browser_on_the_list() {
+        // Whatever is installed here, nothing invented reaches argv: a spec is
+        // always "<browser>" or "<browser>:<profile>" with the browser on the
+        // allowlist (D115).
+        for s in cookie_sources() {
+            assert!(BROWSERS.contains(&s.browser.as_str()), "{}", s.browser);
+            let head = s.spec.split(':').next().unwrap();
+            assert_eq!(head, s.browser);
+            assert!(!s.label.is_empty());
+        }
     }
 
     #[test]
@@ -1407,9 +2072,9 @@ mod tests {
 
     #[test]
     fn cookies_become_one_flag_and_its_path() {
-        let none = ytdlp_args(None);
+        let none = ytdlp_args(None, false);
         assert!(!none.contains(&"--cookies".to_string()));
-        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")));
+        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")), false);
         let at = with
             .iter()
             .position(|a| a == "--cookies")
@@ -1422,7 +2087,7 @@ mod tests {
     #[test]
     fn a_failure_a_person_can_act_on_says_what_to_do_first() {
         let tail = "ERROR: [youtube] aAkI4EKKHMw: Sign in to confirm your age. Use --cookies-from-browser or --cookies";
-        let said = ytdlp_message(1, tail);
+        let said = ytdlp_message(1, tail, false);
         assert!(
             said.starts_with("YouTube wants a signed-in session"),
             "{said}"
@@ -1436,8 +2101,61 @@ mod tests {
     }
 
     #[test]
+    fn a_sign_in_refusal_says_something_different_once_cookies_are_set() {
+        let tail = "ERROR: [youtube] DgYSM91vJko: Sign in to confirm your age.";
+        // Nothing set: ask for a jar.
+        let without = ytdlp_message(1, tail, false);
+        assert!(
+            without.contains("Point the app at a cookies.txt"),
+            "{without}"
+        );
+        // A jar set and still refused: the jar is the problem, and telling
+        // someone to do what they have already done is the worst answer.
+        let with = ytdlp_message(1, tail, true);
+        assert!(with.contains("carry no YouTube sign-in"), "{with}");
+        assert!(!with.contains("Point the app at a cookies.txt"), "{with}");
+    }
+
+    #[test]
+    fn a_jar_is_signed_in_only_with_a_first_party_session() {
+        let dir = std::env::temp_dir().join(format!("hp-sess-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("cookies.txt");
+        let row = |domain: &str, name: &str| {
+            format!(
+                "{domain}	TRUE	/	TRUE	0	{name}	x
+"
+            )
+        };
+        // What the owner's export actually held: third-party only, which
+        // YouTube still treats as signed out.
+        std::fs::write(
+            &p,
+            format!(
+                "# Netscape HTTP Cookie File
+{}{}{}",
+                row(".youtube.com", "__Secure-3PSID"),
+                row(".youtube.com", "VISITOR_INFO1_LIVE"),
+                row(".google.com", "SID"),
+            ),
+        )
+        .unwrap();
+        assert!(!jar_has_youtube_session(&p), "3P alone is not a sign-in");
+        std::fs::write(&p, row(".youtube.com", "__Secure-1PSID")).unwrap();
+        assert!(jar_has_youtube_session(&p));
+        std::fs::write(
+            &p,
+            "# only a comment
+",
+        )
+        .unwrap();
+        assert!(!jar_has_youtube_session(&p));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_failure_we_do_not_know_keeps_yt_dlps_words() {
-        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]");
+        let said = ytdlp_message(2, "ERROR: unable to rename file: [WinError 32]", false);
         assert!(said.starts_with("yt-dlp failed (2)"), "{said}");
         assert!(said.contains("WinError 32"), "{said}");
     }
