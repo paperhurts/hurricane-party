@@ -66,7 +66,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Playlist>, DbError> {
     let mut st = conn.prepare(
         "SELECT p.id, p.name, p.created_at,
                 (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS count
-         FROM playlists p ORDER BY p.created_at",
+         FROM playlists p ORDER BY COALESCE(p.position, 1e18), p.created_at, p.id",
     )?;
     let rows = st.query_map([], |r| {
         Ok(Playlist {
@@ -81,11 +81,83 @@ pub fn list(conn: &Connection) -> Result<Vec<Playlist>, DbError> {
 
 pub fn create(conn: &Connection, name: &str) -> Result<i64, DbError> {
     let name = if name.is_empty() { "Untitled" } else { name };
+    // A new list goes to the bottom of the order a person arranged (D116).
     conn.execute(
-        "INSERT INTO playlists (name, profile_id, created_at) VALUES (?1, 1, ?2)",
+        "INSERT INTO playlists (name, profile_id, created_at, position)
+         VALUES (?1, 1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM playlists))",
         params![name, db::now()],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Give a playlist a new name (D116). A name is trimmed, and an empty one is
+/// refused rather than quietly turned into "Untitled": renaming to nothing is
+/// far more likely a slip than a wish.
+pub fn rename(conn: &Connection, id: i64, name: &str) -> Result<(), DbError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(DbError::Io("a playlist needs a name".into()));
+    }
+    let n = conn.execute(
+        "UPDATE playlists SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )?;
+    if n == 0 {
+        return Err(DbError::Io(format!("no playlist {id}")));
+    }
+    Ok(())
+}
+
+/// Delete a playlist, never its tracks (D116). The schema cascades the
+/// memberships, sets `jobs.playlist_id` to NULL for anything still queued into
+/// it — those downloads still land, just in the library rather than the list —
+/// and the order closes over the gap.
+pub fn delete(conn: &mut Connection, id: i64) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    let n = tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+    if n == 0 {
+        return Err(DbError::Io(format!("no playlist {id}")));
+    }
+    let order = playlist_order(&tx)?;
+    rewrite_order(&tx, &order)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Move a playlist to index `to` in the list (D116). An index past the end
+/// is the end; a playlist that is not there is nothing to do.
+pub fn move_to(conn: &mut Connection, id: i64, to: i64) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    let mut order = playlist_order(&tx)?;
+    let Some(idx) = order.iter().position(|p| *p == id) else {
+        return Ok(());
+    };
+    let moved = order.remove(idx);
+    let dest = (to.max(0) as usize).min(order.len());
+    order.insert(dest, moved);
+    rewrite_order(&tx, &order)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Every playlist id, in the order the list shows them.
+fn playlist_order(conn: &Connection) -> Result<Vec<i64>, DbError> {
+    let mut st =
+        conn.prepare("SELECT id FROM playlists ORDER BY COALESCE(position, 1e18), created_at, id")?;
+    let rows = st.query_map([], |r| r.get::<_, i64>(0))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Positions 0..n in the given order. No UNIQUE constraint on the column, so
+/// unlike `rewrite` for a playlist's items this needs no two-phase dance.
+fn rewrite_order(conn: &Connection, order: &[i64]) -> Result<(), DbError> {
+    for (i, id) in order.iter().enumerate() {
+        conn.execute(
+            "UPDATE playlists SET position = ?1 WHERE id = ?2",
+            params![i as i64, id],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn items(conn: &Connection, playlist_id: i64) -> Result<Vec<MediaRow>, DbError> {
@@ -197,6 +269,79 @@ pub fn reorder(conn: &mut Connection, playlist_id: i64, from: i64, to: i64) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(conn: &Connection) -> Vec<String> {
+        list(conn).unwrap().into_iter().map(|p| p.name).collect()
+    }
+
+    #[test]
+    fn a_new_playlist_goes_to_the_bottom_and_can_be_moved() {
+        let (mut conn, _) = fixture(0);
+        let b = create(&conn, "b").unwrap();
+        let c = create(&conn, "c").unwrap();
+        assert_eq!(names(&conn), ["test", "b", "c"]);
+        move_to(&mut conn, c, 0).unwrap();
+        assert_eq!(names(&conn), ["c", "test", "b"]);
+        // Past the end is the end; a missing id is nothing to do.
+        move_to(&mut conn, c, 99).unwrap();
+        assert_eq!(names(&conn), ["test", "b", "c"]);
+        move_to(&mut conn, 12345, 0).unwrap();
+        assert_eq!(names(&conn), ["test", "b", "c"]);
+        let _ = b;
+    }
+
+    #[test]
+    fn a_rename_trims_and_refuses_nothing() {
+        let (conn, pid) = fixture(0);
+        rename(&conn, pid, "  Storm Prep  ").unwrap();
+        assert_eq!(names(&conn), ["Storm Prep"]);
+        assert!(
+            rename(&conn, pid, "   ").is_err(),
+            "an empty name is a slip, not a wish"
+        );
+        assert_eq!(names(&conn), ["Storm Prep"]);
+        assert!(rename(&conn, 9999, "x").is_err());
+    }
+
+    #[test]
+    fn deleting_a_playlist_keeps_its_tracks_and_closes_the_order() {
+        let (mut conn, pid) = fixture(3);
+        let b = create(&conn, "b").unwrap();
+        let c = create(&conn, "c").unwrap();
+        delete(&mut conn, pid).unwrap();
+        assert_eq!(names(&conn), ["b", "c"]);
+        // The three tracks it held are still in the library.
+        assert_eq!(list_media(&conn).unwrap().len(), 3);
+        let pos: Vec<i64> = conn
+            .prepare("SELECT position FROM playlists ORDER BY position")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(pos, [0, 1], "dense again after the gap");
+        assert!(delete(&mut conn, pid).is_err(), "it is gone");
+        let _ = (b, c);
+    }
+
+    #[test]
+    fn a_queued_download_outlives_the_playlist_it_was_for() {
+        let (mut conn, pid) = fixture(0);
+        conn.execute(
+            "INSERT INTO jobs (url, status, stage, playlist_id, created_at, updated_at)
+             VALUES ('https://x', 'queued', 'probe', ?1, 0, 0)",
+            [pid],
+        )
+        .unwrap();
+        delete(&mut conn, pid).unwrap();
+        let (n, playlist): (i64, Option<i64>) = conn
+            .query_row("SELECT COUNT(*), MAX(playlist_id) FROM jobs", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(n, 1, "the download still happens");
+        assert_eq!(playlist, None, "it just lands in the library instead");
+    }
 
     /// Build an in-memory library with `n` tracks in one playlist.
     fn fixture(n: i64) -> (Connection, i64) {

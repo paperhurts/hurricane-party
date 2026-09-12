@@ -25,6 +25,8 @@
     bytes_total: number | null;
     error: string | null;
     attempts: number;
+    playlist_id: number | null;
+    playlist_name: string | null;
   };
 
   type MediaRow = {
@@ -393,6 +395,157 @@
   async function openList(id: number | null) {
     selectedList = id;
     listItems = id == null ? [] : await invoke<MediaRow[]>("playlist_items", { id });
+  }
+
+  // ---- managing the playlists themselves (D116) ----
+  //
+  // Rename in place, delete with a question, and drag to put them in order.
+  // The same pointer-capture drag the rows of a playlist use, for the same
+  // reason: HTML5 drag and drop is eaten by the webview's drop handler.
+  let renaming = $state<number | null>(null);
+  let renameTo = $state("");
+  let listMenuFor = $state<number | null>(null);
+  let listDragId = $state<number | null>(null);
+  let listDropAt = $state<number | null>(null);
+  let navEl: HTMLElement;
+
+  function startRename(p: Playlist) {
+    listMenuFor = null;
+    renaming = p.id;
+    renameTo = p.name;
+  }
+
+  async function finishRename(save: boolean) {
+    const id = renaming;
+    renaming = null;
+    if (!save || id == null) return;
+    const was = playlists.find((p) => p.id === id)?.name;
+    const name = renameTo.trim();
+    if (!name || name === was) return;
+    try {
+      await invoke("rename_playlist", { id, name });
+    } catch (e) {
+      notice = `That name was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    refreshLibrary();
+  }
+
+  async function deleteList(p: Playlist) {
+    listMenuFor = null;
+    const tracks = p.count === 1 ? "Its 1 track stays" : `Its ${p.count} tracks stay`;
+    const yes = await ask(`Delete the playlist "${p.name}"?\n\n${tracks} in the library.`, {
+      title: "Delete playlist",
+      kind: "warning",
+      okLabel: "Delete playlist",
+    });
+    if (!yes) return;
+    try {
+      await invoke("delete_playlist", { id: p.id });
+      if (selectedList === p.id) await openList(null);
+      notice = `Deleted "${p.name}". ${tracks} in the library.`;
+    } catch (e) {
+      notice = `Couldn't delete "${p.name}": ${e instanceof Error ? e.message : String(e)}`;
+    }
+    refreshLibrary();
+  }
+
+  function listGripDown(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const p = playlists[i];
+    const grip = e.currentTarget as HTMLElement;
+    grip.setPointerCapture(e.pointerId);
+    listDragId = p.id;
+    listDropAt = i;
+    const onMove = (ev: PointerEvent) => {
+      const rows = Array.from(navEl.querySelectorAll<HTMLElement>(".plrow[data-idx]"));
+      let at = rows.length;
+      for (const r of rows) {
+        const b = r.getBoundingClientRect();
+        if (ev.clientY < b.top + b.height / 2) {
+          at = Number(r.dataset.idx);
+          break;
+        }
+      }
+      listDropAt = at;
+    };
+    const onUp = async () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.removeEventListener("pointercancel", onUp);
+      const at = listDropAt ?? i;
+      listDragId = null;
+      listDropAt = null;
+      // An index among the rows as they stand; the row leaves first, so a
+      // target below it shifts up by one.
+      const dest = at > i ? at - 1 : at;
+      if (dest === i) return;
+      await invoke("move_playlist", { id: p.id, to: dest });
+      refreshLibrary();
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+    grip.addEventListener("pointercancel", onUp);
+  }
+
+  // ---- stopping downloads (D117) ----
+  //
+  // Pause stops the download and keeps its bytes, Resume picks them up,
+  // Cancel drops the job. An import of a playlist is many jobs, so it also
+  // gets one line that does the same to all of them at once: a Pause button
+  // that flickers past while each 40-second job runs is not a way to stop 40.
+  async function jobAction(cmd: "pause_job" | "resume_job" | "cancel_job" | "retry_job", id: number) {
+    try {
+      await invoke(cmd, { id });
+    } catch (e) {
+      error = String(e);
+    }
+    refreshJobs();
+  }
+
+  type Import = {
+    id: number;
+    name: string;
+    left: number;
+    running: number;
+    queued: number;
+    paused: number;
+    failed: number;
+    done: number;
+  };
+  // Every playlist import with something still to do, in the order its jobs
+  // appear. One job on its own is just a row; the header starts at two.
+  let imports = $derived.by(() => {
+    const by = new Map<number, Import>();
+    for (const j of jobs) {
+      if (j.playlist_id == null) continue;
+      const g =
+        by.get(j.playlist_id) ??
+        { id: j.playlist_id, name: j.playlist_name ?? "Playlist", left: 0, running: 0, queued: 0, paused: 0, failed: 0, done: 0 };
+      g[j.status] += 1;
+      if (j.status !== "done") g.left += 1;
+      by.set(j.playlist_id, g);
+    }
+    return [...by.values()].filter((g) => g.left > 0 && g.left + g.done >= 2);
+  });
+
+  async function importAction(g: Import, action: "pause" | "resume" | "cancel") {
+    if (action === "cancel") {
+      const yes = await ask(
+        `Cancel the ${g.left} unfinished ${g.left === 1 ? "download" : "downloads"} of "${g.name}"?\n\n` +
+          `What already finished stays in the library and in the playlist.`,
+        { title: "Cancel import", kind: "warning", okLabel: "Cancel downloads", cancelLabel: "Keep going" },
+      );
+      if (!yes) return;
+    }
+    try {
+      const n = await invoke<number>("playlist_jobs", { playlistId: g.id, action });
+      const verb = action === "pause" ? "Paused" : action === "resume" ? "Resumed" : "Cancelled";
+      notice = `${verb} ${n} ${n === 1 ? "download" : "downloads"} of "${g.name}".`;
+    } catch (e) {
+      error = String(e);
+    }
+    refreshJobs();
   }
 
   async function newList() {
@@ -819,6 +972,7 @@
         youtube: boolean;
         elsewhere: string[];
         kept: boolean;
+        encrypted: boolean;
       }>("export_cookies_from_browser", { browser: spec });
       const from = await invoke<string>("get_cookies_from").catch(() => "");
       cookies = made.path;
@@ -826,15 +980,33 @@
       // so here beats saying it once per download (D113).
       // Where the sign-in actually is beats telling someone to make one
       // they may already have, in a profile the export never looked at.
-      const found = made.elsewhere.length
-        ? ` These do have one: ${made.elsewhere.join(", ")}. Try one of those instead — a Chromium profile may still refuse to decrypt, Firefox will not.`
-        : ` Sign in to YouTube in ${browser}, then read them again.`;
+      // What to say when no sign-in came through (D115). Three cases, and
+      // only one of them is "you are not signed in": Firefox's store is
+      // plain, so an empty jar from it means what it says. A Chromium store
+      // encrypts the sign-in where no other program can open it, and when the
+      // browser is running its database is locked too, so an empty jar from
+      // one is "encrypted" when the database shows the session and "cannot
+      // tell" when it cannot be read — never "sign in", which the owner was
+      // told three times while signed in everywhere.
+      const src = browsers.find((b) => b.spec === spec);
+      const chromium = src ? src.browser !== "firefox" : false;
+      const reason = made.encrypted
+        ? `${browser} is signed in to YouTube, but keeps that sign-in encrypted so only the browser itself can open it.`
+        : chromium
+          ? `No YouTube sign-in came through from ${browser}. If you are signed in there, it is encrypted so only the browser itself can open it.`
+          : `${browser} has no YouTube sign-in.`;
+      const advice =
+        chromium || made.encrypted
+          ? " Firefox is the browser Windows lets another program read: sign in to YouTube there once, then read firefox with From a browser."
+          : made.elsewhere.length
+            ? ` These do have one: ${made.elsewhere.join(", ")}.`
+            : ` Sign in to YouTube in ${browser}, then read it again.`;
       notice = made.youtube
         ? `Read ${made.count} cookies from ${browser}, with a YouTube sign-in among them. Videos that want one will import now; read them again when they stop.`
         : made.kept
           ? // A read with no sign-in never replaces one that has it (D115).
-            `${browser} has no YouTube sign-in, so the app kept the cookies it already had${from ? ` from ${from}` : ""}. Nothing changed; age-restricted videos still import.`
-          : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused.${found}`;
+            `${reason} The app kept the cookies it already had${from ? ` from ${from}` : ""}, so age-restricted videos still import.`
+          : `${reason}${advice}`;
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
     } finally {
@@ -904,10 +1076,14 @@
 </script>
 
 <svelte:window
-  onpointerdown={() => (addMenuFor = null)}
+  onpointerdown={() => {
+    addMenuFor = null;
+    listMenuFor = null;
+  }}
   onkeydown={(e) => {
     if (e.key === "Escape") {
       addMenuFor = null;
+      listMenuFor = null;
       selected = [];
     }
   }}
@@ -1051,6 +1227,32 @@
   {#if jobs.length}
     <section class="queue">
       <h2>Downloads</h2>
+      <!-- One line per playlist import that is still going (D117). -->
+      {#each imports as g (g.id)}
+        <div class="import">
+          <span class="what">Importing <strong>{g.name}</strong></span>
+          <span class="tally">
+            {[
+              g.running && `${g.running} running`,
+              g.queued && `${g.queued} queued`,
+              g.paused && `${g.paused} paused`,
+              g.failed && `${g.failed} failed`,
+              // Finished jobs leave this list after five minutes, so a count
+              // of them here is only ever the recent ones; zero says nothing.
+              g.done && `${g.done} just finished`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          {#if g.running || g.queued}
+            <button class="mini" onclick={() => importAction(g, "pause")}>Pause all</button>
+          {/if}
+          {#if g.paused}
+            <button class="mini" onclick={() => importAction(g, "resume")}>Resume all</button>
+          {/if}
+          <button class="mini ghost" onclick={() => importAction(g, "cancel")}>Cancel the rest</button>
+        </div>
+      {/each}
       {#each jobs as j (j.id)}
         <div class="job" class:failed={j.status === "failed"}>
           <div class="line">
@@ -1061,10 +1263,16 @@
               <span class="bytes">{mb(j.bytes_done)} / {mb(j.bytes_total)}</span>
             {/if}
             {#if j.status === "failed"}
-              <button class="mini" onclick={() => invoke("retry_job", { id: j.id }).then(refreshJobs)}>Retry</button>
+              <button class="mini" onclick={() => jobAction("retry_job", j.id)}>Retry</button>
+              <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Take it off the list">Dismiss</button>
             {/if}
             {#if j.status === "queued" || j.status === "running"}
-              <button class="mini" onclick={() => invoke("cancel_job", { id: j.id }).then(refreshJobs)}>Pause</button>
+              <button class="mini" onclick={() => jobAction("pause_job", j.id)} title="Stop, and keep what has downloaded">Pause</button>
+              <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Stop, and take it off the list">Cancel</button>
+            {/if}
+            {#if j.status === "paused"}
+              <button class="mini" onclick={() => jobAction("resume_job", j.id)} title="Carry on from where it stopped">Resume</button>
+              <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Take it off the list">Cancel</button>
             {/if}
           </div>
           {#if j.status === "running"}
@@ -1080,14 +1288,58 @@
   {/if}
 
   <section class="body">
-    <nav>
+    <nav bind:this={navEl}>
       <button class="lib" class:sel={selectedList == null} onclick={() => openList(null)}>
         Library <span class="n">{tracks.length}</span>
       </button>
-      {#each playlists as p (p.id)}
-        <button class:sel={selectedList === p.id} onclick={() => openList(p.id)}>
-          {p.name} <span class="n">{p.count}</span>
-        </button>
+      {#each playlists as p, i (p.id)}
+        <!-- A playlist a person can rename, delete and put in order (D116). -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="plrow"
+          data-idx={i}
+          class:lifted={listDragId === p.id}
+          class:dropabove={listDropAt === i && listDragId !== null && listDragId !== p.id}
+          class:dropbelow={listDropAt === playlists.length && i === playlists.length - 1 && listDragId !== null}
+          onpointerdown={(e) => e.stopPropagation()}
+        >
+          <span class="plgrip" title="Drag to reorder" onpointerdown={(e) => listGripDown(e, i)}>⋮⋮</span>
+          {#if renaming === p.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="rename"
+              bind:value={renameTo}
+              autofocus
+              onkeydown={(e) => {
+                if (e.key === "Enter") finishRename(true);
+                else if (e.key === "Escape") finishRename(false);
+              }}
+              onblur={() => finishRename(true)}
+            />
+          {:else}
+            <button
+              class="plname"
+              class:sel={selectedList === p.id}
+              onclick={() => openList(p.id)}
+              ondblclick={() => startRename(p)}
+              title={`${p.name} — double-click to rename`}
+            >
+              <span class="plt">{p.name}</span> <span class="n">{p.count}</span>
+            </button>
+            <button
+              class="plmore"
+              class:open={listMenuFor === p.id}
+              onclick={() => (listMenuFor = listMenuFor === p.id ? null : p.id)}
+              title="Rename or delete"
+            >⋯</button>
+            {#if listMenuFor === p.id}
+              <div class="menu plmenu" role="menu">
+                <button role="menuitem" onclick={() => startRename(p)}>Rename</button>
+                <button role="menuitem" class="danger" onclick={() => deleteList(p)}>Delete playlist…</button>
+              </div>
+            {/if}
+          {/if}
+        </div>
       {/each}
       <button class="new" onclick={newList}>+ New playlist</button>
       <!-- Every root, even a lone one: a click rescans it, and the one folder
@@ -1254,6 +1506,14 @@
   .status.failed  { color: var(--warn); }
   .status.done    { color: var(--alert); }
   .status.paused  { color: color-mix(in srgb, var(--text) 35%, transparent); }
+  /* A playlist import's own line above its rows (D117). */
+  .import { display: flex; align-items: center; gap: 8px; padding: 6px 9px; font-size: 12px;
+            border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+            background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+  .import .what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .import .what strong { color: var(--accent); font-weight: 400; }
+  .import .tally { flex: 1 1 auto; font-size: 11px; white-space: nowrap;
+                   color: color-mix(in srgb, var(--text) 50%, transparent); }
   .stage { font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
            color: color-mix(in srgb, var(--text) 35%, transparent); }
   .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1359,6 +1619,28 @@
   .menu .new { color: color-mix(in srgb, var(--text) 55%, transparent); margin-top: 2px;
                border-top: 1px solid color-mix(in srgb, var(--accent) 15%, transparent); }
   .menu .none { padding: 6px 10px; font-size: 11px; color: color-mix(in srgb, var(--text) 40%, transparent); }
+  /* A playlist in the sidebar: grip, name, and a menu, the grip and menu
+     quiet until the row is under the pointer (D116). */
+  .plrow { position: relative; display: flex; align-items: stretch; gap: 2px; }
+  /* The name gives way, the count does not: a long imported title used to
+     push the number out of sight. */
+  .plrow .plname { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+  .plrow .plt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plrow .plname .n { flex: 0 0 auto; }
+  .plgrip { flex: 0 0 auto; display: flex; align-items: center; padding: 0 2px; font-size: 11px;
+            letter-spacing: -3px; cursor: grab; touch-action: none; user-select: none;
+            color: color-mix(in srgb, var(--text) 30%, transparent); opacity: 0; }
+  .plmore { flex: 0 0 auto; padding: 0 6px; border-color: transparent;
+            color: color-mix(in srgb, var(--text) 45%, transparent); opacity: 0; }
+  .plrow:hover .plgrip, .plrow:hover .plmore, .plmore.open { opacity: 1; }
+  .plmore:hover, .plmore.open { color: var(--accent); }
+  .plrow.lifted { opacity: 0.45; }
+  .plrow.dropabove { box-shadow: inset 0 2px 0 var(--accent); }
+  .plrow.dropbelow { box-shadow: inset 0 -2px 0 var(--accent); }
+  .plrow .rename { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; padding: 3px 6px;
+                   background: var(--surface); color: var(--text); border: 1px solid var(--accent); }
+  .plmenu { right: 0; top: 24px; min-width: 150px; }
+  .menu .danger { color: var(--warn); }
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { font-size: 11px; color: color-mix(in srgb, var(--text) 45%, transparent); flex: 0 0 auto; }
 

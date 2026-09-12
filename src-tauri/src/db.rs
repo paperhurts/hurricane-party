@@ -90,7 +90,10 @@ CREATE TABLE IF NOT EXISTS playlists (
   is_smart      INTEGER DEFAULT 0,
   rule_json     TEXT,
   profile_id    INTEGER NOT NULL DEFAULT 1,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  -- Where it sits in the list a person arranged (D116). Dense from 0, and
+  -- not UNIQUE: a move rewrites every row in one transaction.
+  position      INTEGER
 );
 
 -- The unique (playlist_id, position) invariant is real and worth keeping, but
@@ -178,7 +181,40 @@ pub fn open(path: &PathBuf) -> Result<Connection, DbError> {
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
     conn.execute_batch(SCHEMA)?;
+    migrate(&conn)?;
     Ok(conn)
+}
+
+/// Columns added after their table first shipped (D116).
+///
+/// `CREATE TABLE IF NOT EXISTS` does nothing to a table that is already there,
+/// so a database made before a column existed never gains it from `SCHEMA`.
+/// Each such column gets one idempotent step, checked against the table's own
+/// description rather than a version counter, so running it twice, or against
+/// a database made yesterday, is a no-op.
+pub fn migrate(conn: &Connection) -> Result<(), DbError> {
+    if !has_column(conn, "playlists", "position")? {
+        // The order a person already sees is creation order, so that is the
+        // order the new column starts in.
+        conn.execute_batch(
+            "ALTER TABLE playlists ADD COLUMN position INTEGER;
+             UPDATE playlists SET position = (
+               SELECT COUNT(*) FROM playlists q
+               WHERE q.created_at < playlists.created_at
+                  OR (q.created_at = playlists.created_at AND q.id < playlists.id)
+             );",
+        )?;
+    }
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, DbError> {
+    let mut st = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let found = st
+        .query_map([], |r| r.get::<_, String>("name"))?
+        .filter_map(|n| n.ok())
+        .any(|n| n == column);
+    Ok(found)
 }
 
 /// Crash recovery, run once at launch (D10, refined by D26).
@@ -391,6 +427,33 @@ mod tests {
         assert_eq!(plain_path(r"\\?\UNC\nas\music"), r"\\nas\music");
         assert_eq!(plain_path(r"C:\dev\mp3"), r"C:\dev\mp3");
         assert_eq!(plain_path("/home/x/music"), "/home/x/music");
+    }
+
+    #[test]
+    fn a_database_from_before_the_order_column_gains_it_in_creation_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        // The table as it shipped before D116.
+        conn.execute_batch(
+            "CREATE TABLE playlists (
+               id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_smart INTEGER DEFAULT 0,
+               rule_json TEXT, profile_id INTEGER NOT NULL DEFAULT 1,
+               created_at INTEGER NOT NULL);
+             INSERT INTO playlists (id, name, created_at) VALUES (1, 'newest', 30);
+             INSERT INTO playlists (id, name, created_at) VALUES (2, 'oldest', 10);
+             INSERT INTO playlists (id, name, created_at) VALUES (3, 'middle', 20);",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        let order: Vec<String> = conn
+            .prepare("SELECT name FROM playlists ORDER BY position")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(order, ["oldest", "middle", "newest"]);
+        // And a second run is a no-op rather than a duplicate column.
+        migrate(&conn).unwrap();
     }
 
     fn fresh() -> Connection {

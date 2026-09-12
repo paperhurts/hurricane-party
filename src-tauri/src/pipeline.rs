@@ -428,6 +428,13 @@ pub struct CookieExport {
     /// This read had no sign-in and the jar already in use did, so the jar in
     /// use stayed (D115). `path` is that jar either way.
     pub kept: bool,
+    /// The store *is* signed in — its database holds the session cookies by
+    /// name — and yet none came through, so they were encrypted where yt-dlp
+    /// cannot open them (Chromium's App-Bound Encryption). The owner was
+    /// signed in to YouTube in every browser and was told, three times, to
+    /// sign in: an encrypted sign-in and an absent one read identically from
+    /// the jar, and only the database can tell them apart.
+    pub encrypted: bool,
 }
 
 /// Read a browser's cookie store with yt-dlp and write the jar into the app's
@@ -503,20 +510,22 @@ pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport>
     let youtube = jar_has_youtube_session(&out);
     let kept = settle_read(&out, &live)
         .map_err(|e| PipelineError::Io(format!("couldn't keep the cookies it read: {e}")))?;
+    // Only when there is bad news to explain: see `stores_with_session`.
+    let with_session = if youtube {
+        Vec::new()
+    } else {
+        stores_with_session()
+    };
     Ok(CookieExport {
         path: live.to_string_lossy().into_owned(),
         count,
         youtube,
         kept,
-        // Only when there is bad news to explain: see `stores_with_session`.
-        elsewhere: if youtube {
-            Vec::new()
-        } else {
-            stores_with_session()
-                .into_iter()
-                .filter(|l| *l != source.label)
-                .collect()
-        },
+        encrypted: with_session.contains(&source.label),
+        elsewhere: with_session
+            .into_iter()
+            .filter(|l| *l != source.label)
+            .collect(),
     })
 }
 
@@ -722,6 +731,22 @@ pub(crate) fn validate_url(raw: &str) -> Result<String> {
 }
 
 /// Phase 1 — probe. No download. Cheap enough to run on paste.
+/// Hand a job's current child to the runner's registry, so Pause and Cancel
+/// can stop it (D117). Each stage replaces the last: probe, download, extract.
+fn track_child(
+    app: &AppHandle,
+    job_id: Option<i64>,
+    child: tauri_plugin_shell::process::CommandChild,
+) {
+    if let Some(id) = job_id {
+        app.state::<crate::jobs::Running>()
+            .0
+            .lock()
+            .unwrap()
+            .insert(id, child);
+    }
+}
+
 pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Probed> {
     let url = &validate_url(url)?;
     emit(
@@ -747,13 +772,15 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         url.to_string(),
     ]);
 
-    let (mut rx, _child) = app
+    let (mut rx, child) = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+    // Pause and Cancel stop this child (D117).
+    track_child(app, job_id, child);
 
     let mut json = String::new();
     let mut tail = Tail::new();
@@ -1071,13 +1098,15 @@ async fn download_media(
         url.to_string(),
     ]);
 
-    let (mut rx, _child) = app
+    let (mut rx, child) = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+    // Pause and Cancel stop this child (D117).
+    track_child(app, job_id, child);
 
     let mut tail = Tail::new();
     let mut code = 0;
@@ -1389,13 +1418,15 @@ async fn extract_mp3(
         scratch.to_string_lossy().into_owned(),
     ]);
 
-    let (mut rx, _child) = app
+    let (mut rx, child) = app
         .shell()
         .sidecar("ffmpeg")
         .map_err(|e| PipelineError::Sidecar(format!("ffmpeg sidecar missing: {e}")))?
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start ffmpeg: {e}")))?;
+    // Pause and Cancel stop this child (D117).
+    track_child(app, job_id, child);
 
     let mut tail = Tail::new();
     let mut code = 0;
