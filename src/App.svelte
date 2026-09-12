@@ -170,6 +170,7 @@
     invoke<string>("get_skin").then((s) => (skin = s));
     invoke<string[]>("list_skins").then((s) => (skins = s));
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
+    invoke<string[]>("cookie_browsers").then((b) => (browsers = b));
     // The switches as they were left (#115). Tell the playlist window once
     // they are known, since it may already have asked.
     invoke<{ shuffle: boolean; repeat: string }>("get_play_mode").then((m) => {
@@ -698,6 +699,30 @@
     notice = "Cookies cleared. Downloads are signed out again.";
   }
 
+  /**
+   * The same thing without the export dance (D113): yt-dlp reads the browser's
+   * own cookie store and writes the jar into this app's folder. The list comes
+   * from Rust so the picker cannot offer something the allowlist refuses.
+   */
+  let browsers = $state<string[]>([]);
+  let reading = $state(false);
+  async function fromBrowser(browser: string) {
+    if (!browser || reading) return;
+    reading = true;
+    notice = `Reading cookies from ${browser}…`;
+    try {
+      const made = await invoke<{ path: string; count: number }>("export_cookies_from_browser", {
+        browser,
+      });
+      cookies = made.path;
+      notice = `Read ${made.count} cookies from ${browser}. Videos that want a signed-in session will import now; do it again when they stop.`;
+    } catch (e) {
+      notice = e instanceof Error ? e.message : String(e);
+    } finally {
+      reading = false;
+    }
+  }
+
   // Whether the line showing is the skin's, so a skin with nothing to say
   // clears the last skin's line without taking a delete offer with it.
   let skinSaid = false;
@@ -779,18 +804,33 @@
         {#each [1, 2, 3, 4] as n}<option value={n}>{n}</option>{/each}
       </select>
     </label>
-    <button
-      class="mini"
-      onclick={pickCookies}
-      title={cookies
-        ? `yt-dlp signs in with ${cookies}. Click to pick another.`
-        : "For age-restricted and members-only videos: a cookies.txt exported from a browser you are signed in with"}
-    >
-      {cookies ? "Cookies \u2713" : "Cookies\u2026"}
-    </button>
-    {#if cookies}
-      <button class="mini" onclick={clearCookies} title="Stop using that file">&times;</button>
-    {/if}
+    <span class="cookiectl">
+      <button
+        class="mini"
+        onclick={pickCookies}
+        title={cookies
+          ? `yt-dlp signs in with ${cookies}. Click to pick another.`
+          : "For age-restricted and members-only videos: a cookies.txt exported from a browser you are signed in with"}
+      >
+        {cookies ? "Cookies \u2713" : "Cookies\u2026"}
+      </button>
+      <select
+        class="mini frombrowser"
+        disabled={reading}
+        value=""
+        onchange={(e) => {
+          fromBrowser(e.currentTarget.value);
+          e.currentTarget.value = "";
+        }}
+        title="Read cookies straight out of a browser you are signed in with"
+      >
+        <option value="" disabled selected>{reading ? "Reading…" : "From a browser…"}</option>
+        {#each browsers as b (b)}<option value={b}>{b}</option>{/each}
+      </select>
+      {#if cookies}
+        <button class="mini" onclick={clearCookies} title="Stop using that file">&times;</button>
+      {/if}
+    </span>
     <label class="glow" title="The halo on the player's buttons, clock and lit rows">
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
@@ -1088,6 +1128,10 @@
   .play { padding: 1px 7px; font-size: 10px; }
   .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
   .mini.ghost { border-color: transparent; color: color-mix(in srgb, var(--text) 55%, transparent); }
+  /* The cookie export sits beside its button and reads as one control. */
+  select.frombrowser { font-size: 10px; padding: 1px 4px; }
+  /* Kept on one line: the button and the picker are one setting. */
+  .cookiectl { display: inline-flex; align-items: center; gap: 4px; }
   /* The right column: the selection bar, when there is one, sits on the list. */
   .listcol { display: flex; flex-direction: column; min-width: 0; }
   .selbar { display: flex; align-items: center; gap: 10px; padding: 5px 9px; font-size: 12px;

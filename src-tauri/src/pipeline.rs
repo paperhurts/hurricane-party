@@ -172,6 +172,119 @@ fn bundled_ffmpeg() -> Option<PathBuf> {
     None
 }
 
+/// The browsers yt-dlp can read a cookie store from on Windows (D113).
+///
+/// An allowlist because the value reaches argv: nothing a person picks goes
+/// near yt-dlp's flag surface, which is the same rule `validate_url` keeps
+/// about `--exec`. Safari is macOS-only and left out.
+pub const BROWSERS: [&str; 7] = [
+    "firefox", "brave", "chrome", "chromium", "edge", "opera", "vivaldi",
+];
+
+/// What an export produced: where the jar landed, and how many cookies are in
+/// it — the count is what tells a person it worked, and it is all this app
+/// ever says about the contents.
+#[derive(Debug, Clone, Serialize)]
+pub struct CookieExport {
+    pub path: String,
+    pub count: usize,
+}
+
+/// Read a browser's cookie store with yt-dlp and write the jar into the app's
+/// own data folder (D113).
+///
+/// yt-dlp dumps the jar it loaded whenever `--cookies` names a file, so this
+/// is one run of the tool that already ships. It needs a URL to accept the
+/// job, and the URL it gets is `https://cookies.invalid/`: `.invalid` is
+/// reserved by RFC 2606 and can never resolve, so the run cannot reach anyone
+/// — the extraction fails, the jar is written anyway, and the exit code is
+/// ignored on purpose. What counts as success is a file with cookies in it.
+pub async fn export_cookies(app: &AppHandle, browser: &str) -> Result<CookieExport> {
+    if !BROWSERS.contains(&browser) {
+        return Err(PipelineError::BadUrl(format!(
+            "{browser} is not a browser this can read"
+        )));
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| PipelineError::Io(format!("no app data dir: {e}")))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| PipelineError::Io(format!("couldn't create {}: {e}", dir.display())))?;
+    let out = dir.join("cookies.txt");
+
+    let args: Vec<String> = vec![
+        "--cookies-from-browser".into(),
+        browser.to_string(),
+        "--cookies".into(),
+        out.to_string_lossy().into_owned(),
+        "--simulate".into(),
+        "--skip-download".into(),
+        "--no-warnings".into(),
+        "--".into(),
+        "https://cookies.invalid/".into(),
+    ];
+    let (mut rx, _child) = app
+        .shell()
+        .sidecar("yt-dlp")
+        .map_err(|e| PipelineError::Sidecar(format!("yt-dlp sidecar missing: {e}")))?
+        .args(args)
+        .spawn()
+        .map_err(|e| PipelineError::Sidecar(format!("couldn't start yt-dlp: {e}")))?;
+
+    let mut tail = Tail::new();
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                tail.push(String::from_utf8_lossy(&b).trim().to_string())
+            }
+            _ => {}
+        }
+    }
+
+    let count = count_cookies(&out);
+    if count == 0 {
+        // Nothing usable: leave no half-written jar behind for yt-dlp to send.
+        let _ = std::fs::remove_file(&out);
+        return Err(PipelineError::Io(explain_export(browser, &tail.text())));
+    }
+    Ok(CookieExport {
+        path: out.to_string_lossy().into_owned(),
+        count,
+    })
+}
+
+/// Cookies in a Netscape jar: every line that is not blank and not a comment.
+/// Reading the file this way is deliberate — the count is the only thing this
+/// process ever learns about it.
+fn count_cookies(path: &Path) -> usize {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+    text.lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+        .count()
+}
+
+/// Why a browser would not give up its cookies, in words a person can act on
+/// (D113). Both of these were seen on the owner's machine before any of this
+/// was written.
+fn explain_export(browser: &str, tail: &str) -> String {
+    if tail.contains("Could not copy") && tail.contains("cookie database") {
+        format!(
+            "{browser} is running, so its cookie database is locked. Close it completely — check the tray — and try again."
+        )
+    } else if tail.contains("DPAPI") || tail.contains("App-Bound") {
+        format!(
+            "{browser} encrypts its cookies in a way yt-dlp cannot read (Chromium's App-Bound Encryption). Firefox works, or export a cookies.txt yourself and pick it with Cookies."
+        )
+    } else if tail.contains("could not find") {
+        format!("No {browser} profile with cookies was found on this machine.")
+    } else {
+        format!("{browser} gave up no cookies. yt-dlp said: {tail}")
+    }
+}
+
 /// Where a person keeps the `cookies.txt` they exported from their own
 /// browser, when they have pointed the app at one (D112). Unset, which is the
 /// default, means yt-dlp runs with no authentication at all.
@@ -1248,6 +1361,48 @@ mod tests {
         assert!(speed.unwrap() > 52318.0);
         assert_eq!(eta, Some(3));
         assert_eq!(status, "downloading");
+    }
+
+    #[test]
+    fn only_browsers_on_the_list_reach_argv() {
+        // The value lands in argv, so it is an allowlist, not a sanitiser.
+        assert!(BROWSERS.contains(&"firefox"));
+        assert!(!BROWSERS.contains(&"--exec"));
+        assert!(!BROWSERS.contains(&"safari"));
+    }
+
+    #[test]
+    fn a_jar_is_counted_by_its_cookie_lines() {
+        let dir = std::env::temp_dir().join(format!("hp-jar-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("cookies.txt");
+        std::fs::write(
+            &p,
+            "# Netscape HTTP Cookie File
+# This file is generated by yt-dlp
+
+.youtube.com	TRUE	/	TRUE	0	PREF	x
+.youtube.com	TRUE	/	TRUE	0	SID	y
+",
+        )
+        .unwrap();
+        assert_eq!(count_cookies(&p), 2);
+        assert_eq!(count_cookies(&dir.join("nothing.txt")), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_browser_that_refuses_says_which_wall_it_is() {
+        let locked = explain_export(
+            "brave",
+            "ERROR: Could not copy Chrome cookie database. See ...",
+        );
+        assert!(locked.contains("running"), "{locked}");
+        let dpapi = explain_export("chrome", "ERROR: Failed to decrypt with DPAPI. See ...");
+        assert!(dpapi.contains("App-Bound"), "{dpapi}");
+        // Anything else keeps yt-dlp's words rather than guessing.
+        let odd = explain_export("opera", "ERROR: something nobody has seen");
+        assert!(odd.contains("something nobody has seen"), "{odd}");
     }
 
     #[test]
