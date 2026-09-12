@@ -967,9 +967,11 @@
         {#if list.uploader}· {list.uploader}{/if}
       </span>
       <span class="spacer"></span>
-      <button class="mini" onclick={() => pickAll("all")}>All</button>
-      <button class="mini" onclick={() => pickAll("new")}>New only</button>
-      <button class="mini" onclick={() => pickAll("none")}>None</button>
+      <span class="picks">
+        <button class="mini" onclick={() => pickAll("all")}>All</button>
+        <button class="mini" onclick={() => pickAll("new")}>New only</button>
+        <button class="mini" onclick={() => pickAll("none")}>None</button>
+      </span>
     </header>
     <ul>
       {#each list.items as item, i (item.id)}
@@ -1284,7 +1286,16 @@
      the eye already is, under the URL field that produced it. */
   .listpick { margin: 10px 0 0; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
               background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
-  .listpick header, .listpick footer { display: flex; align-items: center; gap: 8px; padding: 6px 9px; }
+  /* `header` wraps app-wide, which put these buttons on a second row — and a
+     different row per playlist, since it depended on the title's length. Here
+     the row holds and the title is what gives way. */
+  .listpick header, .listpick footer { display: flex; flex-wrap: nowrap; align-items: center;
+                                       gap: 8px; padding: 6px 9px; }
+  .listpick header strong, .listpick header .dim { min-width: 0; overflow: hidden;
+                                                   text-overflow: ellipsis; white-space: nowrap; }
+  .listpick header strong { flex: 0 1 auto; }
+  .listpick header .dim { flex: 0 4 auto; }
+  .listpick .picks { flex: 0 0 auto; display: inline-flex; gap: 6px; }
   .listpick header { border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .listpick footer { border-top: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .listpick .spacer { flex: 1 1 auto; }
