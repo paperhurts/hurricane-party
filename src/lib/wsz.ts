@@ -65,6 +65,30 @@ const TITLEBAR_SP = {
   closeDown: [18, 9, 9, 9] as Rect,
 };
 
+// Where the windowshade strip's controls sit inside the 275 x 14 bar, from
+// Webamp (D102, D111). The classic paints these into the strip art itself:
+// the transport has no sprites of its own and no pressed state, and Winamp
+// hit-tested fixed rectangles over the picture. The position bar is the
+// exception and has four small sprites of its own, at the bottom left of
+// TITLEBAR.BMP.
+const SHADE_SP = {
+  prev: [169, 2, 7, 10] as Rect,
+  play: [176, 2, 10, 10] as Rect,
+  pause: [186, 2, 9, 10] as Rect,
+  stop: [195, 2, 9, 10] as Rect,
+  next: [204, 2, 10, 10] as Rect,
+  eject: [215, 2, 10, 10] as Rect,
+  // The analyser, half a pixel high and 38 wide at 1x.
+  vis: [79, 5, 38, 5] as Rect,
+  // The time, two digits either side of a colon painted into the strip, in
+  // the 5 x 6 chrome font — the same split D104 made of the big clock.
+  clockMinutes: [134, 4, 10, 6] as Rect,
+  clockSeconds: [147, 4, 10, 6] as Rect,
+  position: [226, 4, 17, 7] as Rect,
+  positionTrack: [0, 36, 17, 7] as Rect,
+  positionThumb: [20, 36, 3, 7] as Rect,
+};
+
 const CBUTTONS_SP = {
   prev: [0, 0, 23, 18] as Rect,
   prevDown: [0, 18, 23, 18] as Rect,
@@ -302,7 +326,14 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
  * this number moves on (D107). Bump it whenever the mapping changes what it
  * writes for the same art.
  */
-export const WSZ_GENERATION = 3;
+export const WSZ_GENERATION = 4;
+
+/** What a classic skin draws that this app does not use (D110). Not a fault
+ * in the skin and not one in this app: the format is another program's
+ * layout, and these controls belong to features this app has elsewhere or
+ * does not have at all. */
+const NOT_USED =
+  "A classic skin also draws balance, mono/stereo, the playlist's own transport row and its SEL and MISC menus. This app has one transport (D81), no balance and no menus, so in this skin those stay pictures.";
 
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
@@ -378,6 +409,13 @@ export function wszManifest(input: WszInput): { manifest: Record<string, unknown
       // from its art, so a better importer rewrites it rather than leaving a
       // person with what an older one could manage (D107).
       generator: WSZ_GENERATION,
+      // Kept with the skin so the library can say it every time the skin is
+      // picked, not only in the moment it was imported (D110). An unknown key
+      // like this one is ignored by the validator. The warnings are about
+      // this skin's art; the last line is about this app, and is the "to a
+      // degree" in classic skin support said where a person can read it
+      // rather than left for them to find by pressing.
+      notes: [...warnings, NOT_USED],
       name: input.name,
       author: "",
       authoredScale: 1,
@@ -597,6 +635,8 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
       active: sp("shufrep", s.eqDown),
       on: { sprite: sp("shufrep", s.eqOn) },
       action: "eq",
+      bind: "eqOpen",
+      when: "on",
     };
     els.plButton = {
       type: "toggle",
@@ -605,6 +645,8 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
       active: sp("shufrep", s.playlistDown),
       on: { sprite: sp("shufrep", s.playlistOn) },
       action: "playlist",
+      bind: "plOpen",
+      when: "on",
     };
     els.shuffleButton = {
       type: "toggle",
@@ -631,26 +673,55 @@ function mainWindow(sheets: Record<string, string>, fonts: Record<string, unknow
   }
 
   const shadeButtons = titleButtons(true);
+  // A control painted into the strip: the button draws the strip's own
+  // pixels, at the same place, in both the focused and the idle art, so it
+  // shows exactly what the skin drew and still answers a press. No pressed
+  // state, because the classic had none here either (D111).
+  const painted = (rect: Rect, action: string): ElementJson => ({
+    type: "button",
+    rect,
+    sprite: sp("titlebar", [27 + rect[0], 29 + rect[1], rect[2], rect[3]] as Rect),
+    inactive: sp("titlebar", [27 + rect[0], 42 + rect[1], rect[2], rect[3]] as Rect),
+    action,
+  });
+  const shadeEls: Record<string, ElementJson> = {
+    titlebar: {
+      type: "image",
+      rect: L.titleBar,
+      sprite: sp("titlebar", TITLEBAR_SP.shadeBarActive),
+      inactive: sp("titlebar", TITLEBAR_SP.shadeBar),
+      role: "drag",
+    },
+    zoom: shadeButtons.zoom,
+    minimize: shadeButtons.minimize,
+    shade: shadeButtons.shade,
+    close: shadeButtons.close,
+    shadePrev: painted(SHADE_SP.prev, "prev"),
+    shadePlay: painted(SHADE_SP.play, "play"),
+    shadePause: painted(SHADE_SP.pause, "pause"),
+    shadeStop: painted(SHADE_SP.stop, "stop"),
+    shadeNext: painted(SHADE_SP.next, "next"),
+    shadeEject: painted(SHADE_SP.eject, "eject"),
+    vis: { type: "visualizer", rect: SHADE_SP.vis },
+  };
+  if (fonts.chrome) {
+    shadeEls.clockMinutes = { type: "text", rect: SHADE_SP.clockMinutes, font: "chrome", bind: "elapsedMinutes" };
+    shadeEls.clockSeconds = { type: "text", rect: SHADE_SP.clockSeconds, font: "chrome", bind: "elapsedSeconds" };
+  }
+  // The strip's seek bar is the one control here with art of its own.
+  shadeEls.shadeSeek = {
+    type: "slider",
+    rect: SHADE_SP.position,
+    orientation: "horizontal",
+    bind: "position",
+    track: sp("titlebar", SHADE_SP.positionTrack),
+    thumb: sp("titlebar", SHADE_SP.positionThumb),
+  };
   return {
     size: [275, 116],
     resizable: false,
     elements: els,
-    shade: {
-      size: [275, 14],
-      elements: {
-        titlebar: {
-          type: "image",
-          rect: L.titleBar,
-          sprite: sp("titlebar", TITLEBAR_SP.shadeBarActive),
-          inactive: sp("titlebar", TITLEBAR_SP.shadeBar),
-          role: "drag",
-        },
-        zoom: shadeButtons.zoom,
-        minimize: shadeButtons.minimize,
-        shade: shadeButtons.shade,
-        close: shadeButtons.close,
-      },
-    },
+    shade: { size: [275, 14], elements: shadeEls },
   };
 }
 

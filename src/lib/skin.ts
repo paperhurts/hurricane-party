@@ -122,6 +122,10 @@ export const BINDS = [
   "repeatOn",
   "repeatLabel",
   "plCanRemove",
+  // Main's EQ and PL buttons, which only a classic skin draws (D109): "on"
+  // while that window is on screen.
+  "eqOpen",
+  "plOpen",
 ] as const;
 export type Bind = (typeof BINDS)[number];
 

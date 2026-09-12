@@ -385,6 +385,35 @@
   // The manifest says where the clock, the tags, the seek bar and the
   // transport are and how they are drawn; this window says what they read.
   // Nothing below knows a pixel.
+  //
+  // A classic skin puts four more controls here than Eyewall does: SHUFFLE,
+  // REPEAT, EQ and PL (D109). The first two are the library's to own (D74),
+  // exactly as the playlist window's pair are; the last two show and hide a
+  // window. Eyewall draws none of them, which is why they sat dead until a
+  // `.wsz` drew them.
+  let shuffle = $state(false);
+  let repeat = $state<"off" | "all" | "one">("off");
+  let eqOpen = $state(true);
+  let plOpen = $state(true);
+
+  $effect(() => {
+    const subs = [
+      listen<{ shuffle: boolean; repeat: "off" | "all" | "one" }>("play:mode", (e) => {
+        shuffle = e.payload.shuffle;
+        repeat = e.payload.repeat;
+      }),
+    ];
+    // The library's first broadcast may have gone out before this window had a
+    // listener (D67), and a push it missed is a push it never gets.
+    emit("play:hello").catch(() => {});
+    // Nothing pushes visibility, so ask once. A satellite that was hidden
+    // before a reload of this window must come back drawn as hidden.
+    invoke<boolean>("wm_visible", { label: "eq" }).then((v) => (eqOpen = v)).catch(() => {});
+    invoke<boolean>("wm_visible", { label: "playlist" }).then((v) => (plOpen = v)).catch(() => {});
+    return () => {
+      for (const s of subs) s.then((off) => off());
+    };
+  });
   let playState = $derived(
     uiPlaying ? "playing" : uiPaused ? "paused" : uiStopped ? "stopped" : "none",
   );
@@ -401,6 +430,13 @@
     volume: uiVol,
     volumePercent: Math.round(uiVol * 100),
     playState,
+    // The same words the playlist's own pair read, so one skin can draw the
+    // switches wherever it likes and they say the same thing (D109).
+    shuffle: shuffle ? "on" : "off",
+    repeatOn: repeat === "off" ? "off" : "on",
+    repeatLabel: repeat === "one" ? "1x" : repeat === "all" ? "ALL" : "REP",
+    eqOpen: eqOpen ? "on" : "off",
+    plOpen: plOpen ? "on" : "off",
   });
 
   function action(name: string) {
@@ -409,6 +445,21 @@
     else if (name === "play") uiPlay();
     else if (name === "pause") uiPause();
     else if (name === "stop") uiStop();
+    // The library owns the order (D74); these only ask, and the buttons light
+    // from what it says back over `play:mode`.
+    else if (name === "shuffle") emitTo("library", "play:shuffle").catch(() => {});
+    else if (name === "repeat") emitTo("library", "play:repeat").catch(() => {});
+    // Hidden, not closed (D109): a closed satellite cannot come back until the
+    // next launch, and these are buttons a person presses to clear the screen.
+    else if (name === "eq" || name === "playlist") {
+      const label = name === "eq" ? "eq" : "playlist";
+      invoke<boolean>("wm_toggle_visible", { label })
+        .then((on) => (name === "eq" ? (eqOpen = on) : (plOpen = on)))
+        .catch(() => {});
+    }
+    // The classic's eject opened files. This app's files come from the
+    // library, which is what the playlist's own LOAD LIST button says too.
+    else if (name === "eject") invoke("show_library").catch(() => {});
   }
 
   function slide(bind: string, frac: number) {
