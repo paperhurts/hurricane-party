@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { emitTo, listen } from "@tauri-apps/api/event";
   import { applyTheme } from "../lib/theme";
   import { elementsOf, type Element } from "../lib/skin";
   import { loadSkin, type LoadedSkin } from "../lib/skinsheet";
-  import { currentSkin, windowNameOf } from "../lib/skins";
+  import { currentSkin, EYEWALL, eyewallFile, windowNameOf } from "../lib/skins";
   import Sprite from "./Sprite.svelte";
 
   // Shared shell for the three classic 275px windows. They differ only in what
@@ -85,12 +85,33 @@
   let skin = $state<LoadedSkin | null>(null);
   let win = $derived(windowNameOf(label));
   function reloadSkin() {
-    currentSkin()
-      .then((w) => loadSkin(w.skin, w.resolve, window.devicePixelRatio))
-      .then(
+    currentSkin().then((w) => {
+      if (w.instead) sayItCannotBeWorn(w.instead.id, w.instead.reason);
+      loadSkin(w.skin, w.resolve, window.devicePixelRatio).then(
         (s) => (skin = s),
-        (e) => console.error(e),
+        (e) => {
+          console.error(e);
+          // A skin that will not load used to fall back to Eyewall in
+          // silence, which looks exactly like nothing happening (#107). Say
+          // so where a person is looking, and wear the one that always works.
+          sayItCannotBeWorn(w.id, e instanceof Error ? e.message : String(e));
+          if (w.id !== "eyewall") {
+            loadSkin(EYEWALL, eyewallFile, window.devicePixelRatio).then(
+              (s) => (skin = s),
+              (e2) => console.error(e2),
+            );
+          }
+        },
       );
+    });
+  }
+
+  /** The library is the window with a line to say it in, and it is the window
+   * the person chose the skin from. Three windows report the same failure;
+   * it shows one notice. */
+  function sayItCannotBeWorn(id: string, reason: string) {
+    if (id === "eyewall") return;
+    emitTo("library", "skin:failed", { id, reason }).catch(() => {});
   }
   reloadSkin();
   // The sheet is chosen for the screen's pixel ratio, and that changes under

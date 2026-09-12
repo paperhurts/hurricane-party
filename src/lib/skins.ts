@@ -31,8 +31,15 @@ export function eyewallFile(file: string): string {
   return url;
 }
 
-/** A skin ready to load: its art, and where each sheet's file lives. */
-export type Wearable = { id: string; skin: Skin; resolve: (file: string) => string };
+/** A skin ready to load: its art, where each sheet's file lives, and why it
+ * is not the skin that was asked for, when it is not. */
+export type Wearable = {
+  id: string;
+  skin: Skin;
+  resolve: (file: string) => string;
+  /** The skin the person chose, and what went wrong reading it. */
+  instead?: { id: string; reason: string };
+};
 
 /**
  * The skin the person is wearing (#107). Eyewall is bundled and always the
@@ -56,8 +63,9 @@ export async function currentSkin(): Promise<Wearable> {
     for (const w of parsed.warnings) console.warn(`${id}: ${w}`);
     return { id, skin: parsed.skin, resolve: (file) => convertFileSrc(`${on.dir}/${file}`) };
   } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
     console.error(`skin "${id}" could not be worn; wearing Eyewall instead:`, e);
-    return { id: "eyewall", skin: EYEWALL, resolve: eyewallFile };
+    return { id: "eyewall", skin: EYEWALL, resolve: eyewallFile, instead: { id, reason } };
   }
 }
 

@@ -200,6 +200,16 @@
       listen<{ id: number; title: string }>("player:missing", (e) => {
         missing = e.payload;
       }),
+      // A skin that will not load (#107). The classic windows fall back to
+      // Eyewall so they are never bare; this is the window that can say why,
+      // and the one the skin was chosen from. All three report the same
+      // failure, so the first one to arrive sets the picker straight.
+      listen<{ id: string; reason: string }>("skin:failed", (e) => {
+        if (skin === "eyewall") return;
+        notice = `${e.payload.id} could not be worn, so the windows kept Eyewall: ${e.payload.reason}`;
+        skin = "eyewall";
+        invoke("set_skin", { id: "eyewall" }).catch(() => {});
+      }),
       // The classic playlist window mirrors the list showing here. It asks
       // once on mount, in case the first broadcast went out before it had a
       // listener, and sends its clicks back here so the audio/video branch
