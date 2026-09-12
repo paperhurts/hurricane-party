@@ -818,7 +818,9 @@
         count: number;
         youtube: boolean;
         elsewhere: string[];
+        kept: boolean;
       }>("export_cookies_from_browser", { browser: spec });
+      const from = await invoke<string>("get_cookies_from").catch(() => "");
       cookies = made.path;
       // A jar with no YouTube sign-in in it fails every age gate, and saying
       // so here beats saying it once per download (D113).
@@ -829,7 +831,10 @@
         : ` Sign in to YouTube in ${browser}, then read them again.`;
       notice = made.youtube
         ? `Read ${made.count} cookies from ${browser}, with a YouTube sign-in among them. Videos that want one will import now; read them again when they stop.`
-        : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused.${found}`;
+        : made.kept
+          ? // A read with no sign-in never replaces one that has it (D115).
+            `${browser} has no YouTube sign-in, so the app kept the cookies it already had${from ? ` from ${from}` : ""}. Nothing changed; age-restricted videos still import.`
+          : `Read ${made.count} cookies from ${browser}, but none of them is a YouTube sign-in — so age-restricted videos will still be refused.${found}`;
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
     } finally {
