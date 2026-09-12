@@ -33,7 +33,10 @@
   // The viz channel's source (control-api.md). Rust says when and how fast;
   // this reads the graph's unsmoothed tap and ships bytes, not JSON.
   const viz = new VizCapture((bins, headers) => invoke("viz_frame", bins, { headers }));
-  const palette = viscolor("eyewall");
+  // The analyser's ramp is the skin's, and the theme's until one is worn
+  // (D101): `VISCOLOR.TXT` is read at import for this, and an imported skin
+  // that brings a green-on-black ramp should not draw Eyewall's radar.
+  let palette = $state(viscolor("eyewall"));
   // The EQ window owns the sliders and the saved copy; this is the applied
   // copy. Same saved state at mount, then live updates over eq:set.
   let eq: EqState = loadEq(localStorage);
@@ -552,6 +555,7 @@
   slots={error ? { vis, trackTitle: strip } : { vis }}
   onaction={action}
   onslide={slide}
+  onskin={(s) => (palette = s.viscolor)}
 />
 
 <!-- crossorigin is load-bearing. The file comes from the asset protocol,
