@@ -353,7 +353,7 @@ function Draw-Sprite($g, $job, [int]$s) {
         # The preset button's "on" is its menu open: a full ring, no fill.
         if ($boxBase -eq "eqPresetButton" -and $on) { $fill = 0.00 }
         Draw-Box $g $x $y $w $h $s $ring $fill
-        # Its ▼, at full strength whatever the ring: the arrow was always arc.
+        # Its ▼, at full strength whatever the ring: the arrow was always the accent.
         if ($boxBase -eq "eqPresetButton") {
             $ax = $x + $w - 9 * $s; $ay = $y + [int][Math]::Floor(($h - 3 * $s) / 2)
             Fill $g $ax $ay (5 * $s) $s 1.0
@@ -365,8 +365,8 @@ function Draw-Sprite($g, $job, [int]$s) {
 
     switch ($recipe) {
         # The EQ's rail: one hairline down the middle and the 0 dB tick across
-        # it, both at the CSS rail's strength. One tint: the tick was filament,
-        # now arc like the rail, a 5-pixel difference nobody will miss.
+        # it, both at the CSS rail's strength. One tint: the tick was the text colour,
+        # now the accent like the rail, a 5-pixel difference nobody will miss.
         "eq.track" {
             Fill $g ($x + 8 * $s) $y $s $h 0.22
             Fill $g ($x + 6 * $s) ($y + 34 * $s) (5 * $s) $s 0.22

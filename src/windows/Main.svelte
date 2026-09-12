@@ -572,13 +572,13 @@
     object-position: center bottom;
     padding: 2px 0 0;
     box-sizing: border-box;
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ember) 30%, transparent);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 30%, transparent);
   }
   /* Off: the well, and nothing drawing into it. */
   .visbox.off {
-    background: var(--well);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 14%, transparent);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
   }
 
   .errline {
@@ -587,7 +587,7 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    color: var(--ember);
+    color: var(--warn);
     /* The text box lets the pointer through to the title bar; this one line
        takes it back, or the tooltip never shows. */
     pointer-events: auto;
@@ -604,15 +604,15 @@
     letter-spacing: 1px;
     text-transform: uppercase;
     line-height: 13px;
-    color: var(--ember);
+    color: var(--warn);
     background: transparent;
-    border: 1px solid color-mix(in srgb, var(--ember) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
     cursor: pointer;
     pointer-events: auto;
   }
   .act:hover {
-    background: color-mix(in srgb, var(--ember) 18%, transparent);
-    border-color: var(--ember);
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    border-color: var(--warn);
   }
 
   /* The windowshade strip's scrolling title. The strip's contents are still

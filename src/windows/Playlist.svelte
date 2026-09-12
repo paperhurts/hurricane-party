@@ -492,10 +492,10 @@
     white-space: nowrap;
     font-size: 6px;
     letter-spacing: 0.1em;
-    color: color-mix(in srgb, var(--filament) 40%, transparent);
+    color: color-mix(in srgb, var(--text) 40%, transparent);
   }
   .tot {
-    color: var(--arc);
+    color: var(--accent);
   }
   .flash {
     height: 100%;
@@ -506,7 +506,7 @@
     white-space: nowrap;
     font-size: 7px;
     letter-spacing: 0.02em;
-    color: var(--arc);
+    color: var(--accent);
     /* The whole notice is in its tooltip; the slot lets the pointer through
        and this takes it back. */
     pointer-events: auto;
@@ -521,14 +521,14 @@
     font: inherit;
     font-size: 8px;
     letter-spacing: 0;
-    color: var(--filament);
-    background: var(--well);
+    color: var(--text);
+    background: var(--surface);
     border: 0;
-    box-shadow: inset 0 0 0 1px var(--arc);
+    box-shadow: inset 0 0 0 1px var(--accent);
     outline: none;
     pointer-events: auto;
   }
   .url::placeholder {
-    color: color-mix(in srgb, var(--filament) 40%, transparent);
+    color: color-mix(in srgb, var(--text) 40%, transparent);
   }
 </style>

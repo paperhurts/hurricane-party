@@ -41,8 +41,8 @@ body {
 .chrome {
   width: 100%;
   height: 100%;
-  background: var(--void);
-  color: var(--filament);
+  background: var(--ground);
+  color: var(--text);
 }
 
 /* ---- the skin (#3, D73) ----
@@ -118,7 +118,7 @@ body {
 }
 .sp-glow.glow:hover,
 .sp-glow.glow:active {
-  filter: drop-shadow(0 0 3px var(--arc));
+  filter: drop-shadow(0 0 3px var(--accent));
 }
 .sp-button {
   position: absolute;
@@ -353,7 +353,7 @@ body {
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  color: color-mix(in srgb, var(--filament) 55%, transparent);
+  color: color-mix(in srgb, var(--text) 55%, transparent);
 }
 
 /* ---- seams ----
@@ -407,7 +407,7 @@ body {
 .seam::after {
   content: "";
   position: absolute;
-  background: var(--arc);
+  background: var(--accent);
   opacity: 0.55;
   transition: opacity 90ms linear;
   will-change: opacity;
@@ -439,8 +439,8 @@ body {
   position: absolute;
   z-index: 3;
   pointer-events: none;
-  background: var(--arc);
-  box-shadow: 0 0 6px var(--arc);
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
   opacity: 0;
   will-change: opacity;
   animation: discharge 120ms ease-out forwards;
@@ -481,11 +481,11 @@ body {
   height: 10px;
   z-index: 4;
   background:
-    linear-gradient(135deg, transparent 0 55%, color-mix(in srgb, var(--arc) 55%, transparent) 55% 65%, transparent 65% 75%, color-mix(in srgb, var(--arc) 55%, transparent) 75% 85%, transparent 85%);
+    linear-gradient(135deg, transparent 0 55%, color-mix(in srgb, var(--accent) 55%, transparent) 55% 65%, transparent 65% 75%, color-mix(in srgb, var(--accent) 55%, transparent) 75% 85%, transparent 85%);
 }
 .grip:hover {
   background:
-    linear-gradient(135deg, transparent 0 55%, var(--arc) 55% 65%, transparent 65% 75%, var(--arc) 75% 85%, transparent 85%);
+    linear-gradient(135deg, transparent 0 55%, var(--accent) 55% 65%, transparent 65% 75%, var(--accent) 75% 85%, transparent 85%);
 }
 
 /* ---- windowshade (D60) ----
@@ -524,10 +524,10 @@ body {
   text-transform: none;
   letter-spacing: 0;
   font-size: 8px;
-  color: var(--filament);
+  color: var(--text);
 }
 .chrome[data-active="false"] .shade {
-  color: color-mix(in srgb, var(--filament) 45%, transparent);
+  color: color-mix(in srgb, var(--text) 45%, transparent);
 }
 
 /* A transport button that fits in nine pixels. */
@@ -542,27 +542,27 @@ body {
   font: inherit;
   font-size: 5px;
   line-height: 1;
-  color: color-mix(in srgb, var(--filament) 80%, transparent);
-  background: color-mix(in srgb, var(--void) 70%, var(--well));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arc) 22%, transparent);
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+  background: color-mix(in srgb, var(--ground) 70%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
   cursor: pointer;
 }
 .shade .sb:hover {
-  color: var(--arc);
-  box-shadow: inset 0 0 0 1px var(--arc);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .shade .sb.lit {
-  color: var(--arc);
-  background: color-mix(in srgb, var(--arc) 14%, var(--void));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--ground));
   box-shadow:
-    inset 0 0 0 1px var(--arc),
-    0 0 6px color-mix(in srgb, var(--arc) 45%, transparent);
+    inset 0 0 0 1px var(--accent),
+    0 0 6px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .shade .sep {
   flex: 0 0 1px;
   height: 8px;
-  background: color-mix(in srgb, var(--arc) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* A small label: the window's initials, a state word, a count. */
@@ -570,10 +570,10 @@ body {
   flex: 0 0 auto;
   font-size: 6px;
   letter-spacing: 0.1em;
-  color: color-mix(in srgb, var(--filament) 45%, transparent);
+  color: color-mix(in srgb, var(--text) 45%, transparent);
 }
 .shade .stag.lit {
-  color: var(--arc);
+  color: var(--accent);
 }
 
 /* The one line of text that takes what is left. */
@@ -585,18 +585,18 @@ body {
   text-overflow: ellipsis;
 }
 .shade .stext.err {
-  color: var(--ember);
+  color: var(--warn);
 }
 .shade .stext.now {
-  color: var(--strike);
+  color: var(--alert);
 }
 
 /* The time readout: the clock's glow at the clock's size for the strip. */
 .shade .stime {
   flex: 0 0 auto;
-  color: var(--arc);
+  color: var(--accent);
   letter-spacing: -0.02em;
-  text-shadow: 0 0 5px color-mix(in srgb, var(--arc) 55%, transparent);
+  text-shadow: 0 0 5px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 /* Ten band gains as ten bars, the EQ curve at a glance. */
@@ -609,9 +609,9 @@ body {
 }
 .shade .sbars i {
   flex: 0 0 3px;
-  background: var(--arc);
+  background: var(--accent);
   opacity: 0.85;
-  box-shadow: 0 0 3px color-mix(in srgb, var(--arc) 70%, transparent);
+  box-shadow: 0 0 3px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .shade .sbars.off i {
   opacity: 0.25;
@@ -627,7 +627,7 @@ body {
  * analyser's, which is its ramp art (D73), and the discharge, which is a
  * bond breaking rather than decoration. */
 .chrome[data-glow="off"] .shade .sb.lit {
-  box-shadow: inset 0 0 0 1px var(--arc);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .chrome[data-glow="off"] .shade .stime {
   text-shadow: none;

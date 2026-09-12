@@ -11,7 +11,38 @@
 
 export const SKIN_FORMAT = "hp-skin/1";
 
-export const TOKENS = ["void", "well", "filament", "arc", "strike", "ember"] as const;
+/** The six roles every theme and every skin fills (D108). They are named for
+ * what a colour is *for*, not for how Eyewall happens to look: the ground a
+ * window sits on, a recessed surface, text, the live accent, attention, and a
+ * warning. Purricane's ground is nearly white and its text is dark purple,
+ * which is what `void` and `filament` could not survive. */
+export const TOKENS = ["ground", "surface", "text", "accent", "alert", "warn"] as const;
+
+/** What those roles were called when they were named after Eyewall's own
+ * materials, accepted wherever a token is read so a manifest written against
+ * the old names still loads (D108). The importer rewrites what it wrote
+ * (D107); a skin someone else hand-wrote keeps working untouched. */
+const WAS: Record<string, (typeof TOKENS)[number]> = {
+  void: "ground",
+  well: "surface",
+  filament: "text",
+  arc: "accent",
+  strike: "alert",
+  ember: "warn",
+};
+
+/** The former spelling of each role, for a `palette` block keyed the old way. */
+const WAS_KEY = Object.fromEntries(Object.entries(WAS).map(([was, role]) => [role, was])) as Record<
+  (typeof TOKENS)[number],
+  string
+>;
+
+/** A token, by either spelling. */
+function token(v: unknown, path: string): (typeof TOKENS)[number] {
+  if (typeof v === "string" && v in WAS) return WAS[v];
+  return oneOf(v, TOKENS, path);
+}
+
 export type Token = (typeof TOKENS)[number];
 
 export const WINDOWS = ["main", "equalizer", "playlist"] as const;
@@ -372,7 +403,7 @@ function sprite(v: unknown, sheets: Skin["sheets"], path: string): SpriteRef {
   if (!isObj(v)) fail(path, "must be a sprite {sheet, rect}");
   const sheet = str(v, "sheet", path);
   if (!(sheet in sheets)) fail(`${path}.sheet`, `names no sheet (have ${Object.keys(sheets).join(", ")})`);
-  const tint = v.tint === undefined ? "filament" : oneOf(v.tint, TOKENS, `${path}.tint`);
+  const tint = v.tint === undefined ? "text" : token(v.tint, `${path}.tint`);
   return { sheet, rect: rect(v.rect, `${path}.rect`), tint };
 }
 
@@ -450,10 +481,10 @@ function element(
       font: fontOf(l, where),
       value: l.value === undefined ? null : str(l, "value", where),
       bind: bindOf(l, where, false),
-      tint: l.tint === undefined ? "filament" : oneOf(l.tint, TOKENS, `${where}.tint`),
+      tint: l.tint === undefined ? "text" : token(l.tint, `${where}.tint`),
       opacity: opacityOf(l, where),
-      hover: l.hover === undefined ? null : oneOf(l.hover, TOKENS, `${where}.hover`),
-      on: l.on === undefined ? null : oneOf(l.on, TOKENS, `${where}.on`),
+      hover: l.hover === undefined ? null : token(l.hover, `${where}.hover`),
+      on: l.on === undefined ? null : token(l.on, `${where}.on`),
     };
     if (l.bind === undefined && out.value === null) fail(where, 'needs a "bind", a literal "value", or both');
     return out;
@@ -543,7 +574,7 @@ function element(
         font,
         bind: bindOf(v, path, false),
         value: v.value === undefined ? null : str(v, "value", path),
-        tint: v.tint === undefined ? "filament" : oneOf(v.tint, TOKENS, `${path}.tint`),
+        tint: v.tint === undefined ? "text" : token(v.tint, `${path}.tint`),
         opacity: opacityOf(v, path),
         glow: boolOf(v, "glow", path),
         overflow: v.overflow === undefined ? "clip" : oneOf(v.overflow, ["clip", "scroll"] as const, `${path}.overflow`),
@@ -565,7 +596,7 @@ function element(
         e.lit = {
           bind: bindOf(l, `${path}.lit`, true),
           when: str(l, "when", `${path}.lit`),
-          tint: l.tint === undefined ? e.tint : oneOf(l.tint, TOKENS, `${path}.lit.tint`),
+          tint: l.tint === undefined ? e.tint : token(l.tint, `${path}.lit.tint`),
           opacity: opacityOf(l, `${path}.lit`),
           glow: boolOf(l, "glow", `${path}.lit`),
         };
@@ -590,7 +621,7 @@ function element(
         e.lit = {
           bind: bindOf(l, `${path}.lit`, true),
           when: str(l, "when", `${path}.lit`),
-          tint: l.tint === undefined ? "filament" : oneOf(l.tint, TOKENS, `${path}.lit.tint`),
+          tint: l.tint === undefined ? "text" : token(l.tint, `${path}.lit.tint`),
           opacity: opacityOf(l, `${path}.lit`),
         };
       }
@@ -611,10 +642,10 @@ function element(
         type,
         rowHeight: int(v.rowHeight, `${path}.rowHeight`, 1),
         font: fontOf(v, path),
-        tint: v.tint === undefined ? "filament" : oneOf(v.tint, TOKENS, `${path}.tint`),
+        tint: v.tint === undefined ? "text" : token(v.tint, `${path}.tint`),
         opacity: opacityOf(v, path),
-        current: v.current === undefined ? "strike" : oneOf(v.current, TOKENS, `${path}.current`),
-        selected: v.selected === undefined ? "arc" : oneOf(v.selected, TOKENS, `${path}.selected`),
+        current: v.current === undefined ? "alert" : token(v.current, `${path}.current`),
+        selected: v.selected === undefined ? "accent" : token(v.selected, `${path}.selected`),
       };
     case "slot":
       return { ...placed(v, name, path), type };
@@ -766,7 +797,8 @@ export function parseSkin(json: unknown): { skin: Skin; warnings: string[] } {
 
   if (!isObj(m.palette)) fail("palette", "must declare all six tokens (D71)");
   const palette = {} as Record<Token, string>;
-  for (const t of TOKENS) palette[t] = hex(m.palette[t], `palette.${t}`);
+  const pal = m.palette;
+  for (const t of TOKENS) palette[t] = hex(pal[t] ?? pal[WAS_KEY[t]], `palette.${t}`);
 
   if (!Array.isArray(m.viscolor) || m.viscolor.length !== 24) fail("viscolor", "must be exactly 24 entries");
   const viscolor = m.viscolor.map((c, i) => hex(c, `viscolor[${i}]`));
@@ -793,7 +825,7 @@ export function parseSkin(json: unknown): { skin: Skin; warnings: string[] } {
   let seam: Skin["seam"] = {
     thickness: 1,
     hoverThickness: 2,
-    color: "arc",
+    color: "accent",
     discharge: { durationMs: 120, peakThickness: 4 },
   };
   if (m.seam !== undefined) {
@@ -803,7 +835,7 @@ export function parseSkin(json: unknown): { skin: Skin; warnings: string[] } {
     seam = {
       thickness: s.thickness === undefined ? 1 : int(s.thickness, "seam.thickness", 1),
       hoverThickness: s.hoverThickness === undefined ? 2 : int(s.hoverThickness, "seam.hoverThickness", 1),
-      color: s.color === undefined ? "arc" : oneOf(s.color, TOKENS, "seam.color"),
+      color: s.color === undefined ? "accent" : token(s.color, "seam.color"),
       discharge: {
         durationMs: d.durationMs === undefined ? 120 : int(d.durationMs, "seam.discharge.durationMs", 0),
         peakThickness: d.peakThickness === undefined ? 4 : int(d.peakThickness, "seam.discharge.peakThickness", 1),

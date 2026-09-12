@@ -254,7 +254,7 @@
     inset: 0;
     display: flex;
     flex-direction: column;
-    background: var(--well);
+    background: var(--surface);
   }
   video {
     flex: 1 1 auto;
@@ -263,7 +263,7 @@
     /* The letterbox bars around a video that doesn't fill the window follow the
        theme rather than being a literal black (D65). `well` is the deepest
        colour in the palette, so this still reads as black in practice. */
-    background: var(--well);
+    background: var(--surface);
   }
   footer {
     flex: 0 0 auto;
@@ -271,33 +271,33 @@
     gap: 10px;
     align-items: baseline;
     padding: 6px 10px;
-    background: var(--void);
-    border-top: 1px solid color-mix(in srgb, var(--arc) 20%, transparent);
+    background: var(--ground);
+    border-top: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
     font-size: 12px;
   }
   .title {
-    color: var(--filament);
+    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .by { color: color-mix(in srgb, var(--filament) 45%, transparent); }
+  .by { color: color-mix(in srgb, var(--text) 45%, transparent); }
   .error, .loading {
     margin: auto;
     font-size: 13px;
-    color: color-mix(in srgb, var(--filament) 55%, transparent);
+    color: color-mix(in srgb, var(--text) 55%, transparent);
   }
   /* Waiting: the capybara above the word, centred, briefly. */
   .wait { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .wait img { width: 160px; height: 160px; }
   .wait .loading { margin: 0; }
-  .error { color: var(--ember); }
+  .error { color: var(--warn); }
   /* The cooler capybara above the message, centred in the window. */
   .oops { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-  .oops img { width: 200px; height: 200px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--ember) 25%, transparent)); }
+  .oops img { width: 200px; height: 200px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--warn) 25%, transparent)); }
   .oops .error { margin: 0; }
   .oops .act { margin-top: 6px; font: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
-               padding: 3px 10px; color: var(--ember); background: transparent; cursor: pointer;
-               border: 1px solid color-mix(in srgb, var(--ember) 55%, transparent); }
-  .oops .act:hover { background: color-mix(in srgb, var(--ember) 18%, transparent); border-color: var(--ember); }
+               padding: 3px 10px; color: var(--warn); background: transparent; cursor: pointer;
+               border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); }
+  .oops .act:hover { background: color-mix(in srgb, var(--warn) 18%, transparent); border-color: var(--warn); }
 </style>

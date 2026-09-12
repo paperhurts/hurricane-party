@@ -179,26 +179,26 @@
     height: 100%;
   }
   .zero {
-    stroke: color-mix(in srgb, var(--filament) 15%, transparent);
+    stroke: color-mix(in srgb, var(--text) 15%, transparent);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
   .halo {
     fill: none;
-    stroke: color-mix(in srgb, var(--arc) 35%, transparent);
+    stroke: color-mix(in srgb, var(--accent) 35%, transparent);
     stroke-width: 3;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
   }
   .line {
     fill: none;
-    stroke: var(--arc);
+    stroke: var(--accent);
     stroke-width: 1;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
   }
   .curve.off .line {
-    stroke: color-mix(in srgb, var(--filament) 35%, transparent);
+    stroke: color-mix(in srgb, var(--text) 35%, transparent);
   }
   .curve.off .halo {
     stroke: transparent;
@@ -209,7 +209,7 @@
     stroke: transparent;
   }
   :global(.chrome[data-glow="off"]) .pmenu {
-    box-shadow: inset 0 0 0 1px var(--arc);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   /* The preset menu, over the curve. The skin's boxes let the pointer
@@ -224,10 +224,10 @@
     flex-direction: column;
     padding: 2px 0;
     pointer-events: auto;
-    background: var(--void);
+    background: var(--ground);
     box-shadow:
-      inset 0 0 0 1px var(--arc),
-      0 0 8px color-mix(in srgb, var(--arc) 35%, transparent);
+      inset 0 0 0 1px var(--accent),
+      0 0 8px color-mix(in srgb, var(--accent) 35%, transparent);
   }
   .pmenu button {
     height: 11px;
@@ -241,13 +241,13 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--filament);
+    color: var(--text);
     background: transparent;
     cursor: pointer;
   }
   .pmenu button:hover,
   .pmenu button.on {
-    color: var(--arc);
-    background: color-mix(in srgb, var(--arc) 14%, transparent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
 </style>
