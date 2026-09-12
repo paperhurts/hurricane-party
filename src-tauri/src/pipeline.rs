@@ -428,6 +428,13 @@ pub struct CookieExport {
     /// This read had no sign-in and the jar already in use did, so the jar in
     /// use stayed (D115). `path` is that jar either way.
     pub kept: bool,
+    /// The store *is* signed in — its database holds the session cookies by
+    /// name — and yet none came through, so they were encrypted where yt-dlp
+    /// cannot open them (Chromium's App-Bound Encryption). The owner was
+    /// signed in to YouTube in every browser and was told, three times, to
+    /// sign in: an encrypted sign-in and an absent one read identically from
+    /// the jar, and only the database can tell them apart.
+    pub encrypted: bool,
 }
 
 /// Read a browser's cookie store with yt-dlp and write the jar into the app's
@@ -503,20 +510,22 @@ pub async fn export_cookies(app: &AppHandle, spec: &str) -> Result<CookieExport>
     let youtube = jar_has_youtube_session(&out);
     let kept = settle_read(&out, &live)
         .map_err(|e| PipelineError::Io(format!("couldn't keep the cookies it read: {e}")))?;
+    // Only when there is bad news to explain: see `stores_with_session`.
+    let with_session = if youtube {
+        Vec::new()
+    } else {
+        stores_with_session()
+    };
     Ok(CookieExport {
         path: live.to_string_lossy().into_owned(),
         count,
         youtube,
         kept,
-        // Only when there is bad news to explain: see `stores_with_session`.
-        elsewhere: if youtube {
-            Vec::new()
-        } else {
-            stores_with_session()
-                .into_iter()
-                .filter(|l| *l != source.label)
-                .collect()
-        },
+        encrypted: with_session.contains(&source.label),
+        elsewhere: with_session
+            .into_iter()
+            .filter(|l| *l != source.label)
+            .collect(),
     })
 }
 
