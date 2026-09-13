@@ -284,6 +284,15 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* A line squeezed across to fit its box (Sprite.svelte, #147): as wide as its
+ * words, scaled from the left edge to exactly the box's width. */
+.sp-text .t.fit {
+  flex: none;
+  overflow: visible;
+  text-overflow: clip;
+  transform: scaleX(var(--squeeze, 1));
+  transform-origin: left center;
+}
 .chrome[data-active="false"] .sp-text {
   color: var(--tc-i, var(--tc));
 }
@@ -347,6 +356,12 @@ body {
  * which is the one rule no manifest can change (D73). */
 .sp-vis {
   position: absolute;
+}
+/* Purricane's badge (D132): the analyser drawn inside the largest circle its
+ * box holds. A clip, not a mask or a filter, so D73 still holds. */
+.sp-vis.round {
+  border-radius: 50%;
+  overflow: hidden;
 }
 
 /* The interior, under the title bar. Where it starts is the skin's to say

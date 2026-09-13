@@ -6,6 +6,8 @@ import { inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import tokens from "../../design/tokens.json";
 import eyewall from "../../skins/eyewall/manifest.json";
+import purricane from "../../skins/purricane/manifest.json";
+import { legible } from "./palette";
 import {
   checkSheetBounds,
   elementsOf,
@@ -23,8 +25,8 @@ const SKIN_DIR = new URL("../../skins/eyewall/", import.meta.url);
 
 /** Width and height from a PNG's IHDR chunk. Enough to check bounds without
  * decoding, which is the one thing a test runner without a browser can do. */
-function pngSize(file: string): { w: number; h: number } {
-  const b = readFileSync(new URL(file, SKIN_DIR));
+function pngSize(file: string, dir = SKIN_DIR): { w: number; h: number } {
+  const b = readFileSync(new URL(file, dir));
   if (b.toString("latin1", 1, 4) !== "PNG") throw new Error(`${file} is not a PNG`);
   return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
 }
@@ -424,6 +426,58 @@ describe("the Eyewall manifest", () => {
   });
 });
 
+// The skin that ships with Purricane (D132): the designer's layout in the
+// designer's colours, drawn by tools/purricane-sheet.ps1.
+describe("the Purricane manifest", () => {
+  const PURRICANE_DIR = new URL("../../skins/purricane/", import.meta.url);
+
+  it("parses clean, paints its own colours and draws the kaleidoscope", () => {
+    const { skin, warnings } = parseSkin(purricane);
+    expect(warnings).toEqual([]);
+    expect(skin.art).toBe("final");
+    expect(skin.colors).toBe("own");
+    expect(skin.visualizer.component).toBe("kaleidoscope");
+    const vis = elementsOf(skin, "main", false).elements.find((e) => e.name === "vis");
+    expect(vis).toMatchObject({ type: "visualizer", shape: "round", rect: [5, 23, 34, 34] });
+  });
+
+  it("takes its colours from design/tokens.json", () => {
+    const { skin } = parseSkin(purricane);
+    const t = tokens.themes.purricane;
+    // The window, the wells and the ink are the theme's; the words are the
+    // designer's plum, the playing row the designer's rose, and a warning the butter
+    // the theme wears.
+    expect(skin.palette.ground).toBe(t.colors.ground);
+    expect(skin.palette.surface).toBe(t.colors.surface);
+    expect(skin.palette.text).toBe(t.colors.text);
+    expect(skin.palette.accent).toBe(t.art.plum);
+    expect(skin.palette.alert).toBe(t.art.rose);
+    expect(skin.palette.warn).toBe(legible(t.colors).warn);
+    expect(skin.viscolor).toEqual(t.visualizer.palette);
+  });
+
+  it("has the kaleidoscope's pills on Main", () => {
+    const { skin } = parseSkin(purricane);
+    const els = elementsOf(skin, "main", false).elements;
+    expect(els.find((e) => e.name === "calm")).toMatchObject({ type: "toggle", action: "calm", bind: "calm", when: "on" });
+    expect(els.find((e) => e.name === "segments6")).toMatchObject({ action: "segments6", bind: "segments", when: "6" });
+    expect(els.find((e) => e.name === "segments8")).toMatchObject({ action: "segments8", bind: "segments", when: "8" });
+  });
+
+  it("ships a sheet at 1x and 2x, and every sprite lies inside both", () => {
+    const { skin } = parseSkin(purricane);
+    const sizes: Record<string, { w: number; h: number }> = {};
+    for (const per of Object.values(skin.sheets)) {
+      for (const file of Object.values(per)) sizes[file] = pngSize(file, PURRICANE_DIR);
+    }
+    const one = sizes[sheetFor(skin, "chrome", 1).file];
+    const two = sizes[sheetFor(skin, "chrome", 2).file];
+    expect(two.w).toBe(one.w * 2);
+    expect(two.h).toBe(one.h * 2);
+    expect(checkSheetBounds(skin, sizes)).toEqual([]);
+  });
+});
+
 describe("parseSkin refuses rather than half-loads", () => {
   const refuse = (mutate: (m: any) => void, message: RegExp) => {
     expect(() => parseSkin(broken(mutate))).toThrow(SkinError);
@@ -549,10 +603,12 @@ describe("parseSkin warns on the soft cases", () => {
   });
 
   it("an unknown visualizer falls back to bars", () => {
-    const { skin, warnings } = parseSkin(broken((m) => (m.visualizer.component = "kaleidoscope")));
+    const { skin, warnings } = parseSkin(broken((m) => (m.visualizer.component = "vectrex")));
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/kaleidoscope/);
+    expect(warnings[0]).toMatch(/vectrex/);
     expect(skin.visualizer.component).toBe("spectrum-bars");
+    // The kaleidoscope is one the app has now (#147).
+    expect(parseSkin(broken((m) => (m.visualizer.component = "kaleidoscope"))).warnings).toEqual([]);
   });
 
   it("gives a list with only a face and a row height the usual colours (D99)", () => {

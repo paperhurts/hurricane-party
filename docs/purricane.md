@@ -34,12 +34,16 @@ this document was written in them; the token a component reads is the role.
 
 | Token | Purricane calls it | Hex | Role |
 |---|---|---|---|
-| `--ground` | sugar | `#FFF4FB` | Field. Near-white with a pink cast — bright, not neutral |
-| `--surface` | floss | `#FF9FD6` | Hot pink. Insets, and this theme's loudest surface |
-| `--accent` | mint | `#7FFFD4` | Aquamarine. The live edge, where Eyewall glows cyan |
+| `--ground` | sugar | `#FFF4FB` | Near-white with a pink cast. The window itself |
+| `--surface` | milk | `#FFFFFF` | White. The wells: the rows, the title strip, the analyser's badge |
+| `--accent` | floss | `#FF9FD6` | Pink. The outline and its glow, where Eyewall glows cyan |
 | `--warn` | butter | `#FFE97F` | Pale yellow. Warmth, and warnings |
-| `--alert` | periwinkle | `#A99FFF` | Violet. Now-playing. The callback to paperhurts' base — same hue family as Eyewall's `--ground`, opposite end of the value scale |
+| `--alert` | periwinkle | `#A99FFF` | Now-playing. The callback to paperhurts' base — same hue family as Eyewall's `--ground`, opposite end of the value scale |
 | `--text` | ink | `#4A2A5C` | Deep violet. Text |
+
+These are the designer's screens as drawn (`design/screens/PurricaneMain`, `PurricanePlaylist`; D132). Two palettes came before them: this table's first draft put the floss pink in the wells, where it read as Pepto-Bismol, and a square harmony on a pink window (D131) was the next try. The screens' other colours sit beside the six in the tokens' `art` block: blush for the title bars and the transport, mint for the switches and the volume, plum for the words, rose for the playing row. On sugar the three pastels are under 3:1, so the library wears them deepened (D130). The Purricane skin wears the designer's own plum and rose for its words instead.
+
+**Purricane comes with a skin** (D132). `skins/purricane` is the screens' layout: a round kaleidoscope badge on Main, CALM and 6/8 SEG pills, a pastel seek bar, pill buttons, and an EQ in the same hand. Picking the theme puts it on, picking it puts the theme on, and going back to Eyewall takes it off. `tools/purricane-sheet.ps1` draws its sheet from its manifest in the tokens' colours.
 
 This is the one theme where text is dark on light rather than bright on dark. That's fine; don't fight it. Everything *else* still glows.
 
@@ -57,6 +61,8 @@ Radial symmetry driven by live FFT data.
 - **High frequencies drive detail density** near the rim
 - **Beat flag triggers a bloom** — a fast scale-and-fade pulse, roughly 150ms, not a color change
 - **Hue drifts slowly** across the palette, cycling on the order of a minute or two
+
+*As built* (D132): drawn the designer's way (`design/screens/Kaleidoscope`). Petals glow round a bright centre, each segment is a step further round the colour wheel, and dots sit at the rim. Bass lengthens the petals and swells the centre, the mids widen them, and the highs add dots. The hue drifts once every 95 s through the theme's `visualizer.palette`: floss, periwinkle, mint, butter and back, in 24 steps. Main's round badge holds one mandala; a wide display, like Eyewall's under Purricane, holds a band of them. On Purricane's Main, **6 SEG** and **8 SEG** pick the segments, saved as `vis.segments`, and **CALM** is the calm toggle. The words under the pills say what it is doing: HUE DRIFT 95s, or STATIC MANDALA.
 
 ### Accessibility — this one is real, not boilerplate
 
@@ -232,7 +238,7 @@ Split it:
 
 | | Ships in | Where it lives |
 |---|---|---|
-| Kaleidoscope visualizer + Purricane palette | **v0.5**, with the skin system. *The palette is in `design/tokens.json` in the six roles (D108, #28); nothing can wear it yet, and the kaleidoscope is not built* | In the player |
+| Kaleidoscope visualizer + Purricane palette | **v0.5**, with the skin system. *Built* (#147, D130, D132): picked in the library, in the designer's colours, wearing its own skin with the kaleidoscope in Main's round badge, and calm both beside the picker and on Main | In the player |
 | Kittens | **v0.7**, after protocol freeze | External process |
 
 The theme is usable and complete without the cats. The cats are the encore.

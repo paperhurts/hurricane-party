@@ -8,11 +8,13 @@
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
   import Oscilloscope from "./Oscilloscope.svelte";
+  import Kaleidoscope from "./Kaleidoscope.svelte";
   import { untrack } from "svelte";
   import { AudioGraph } from "../lib/audio";
   import { sourceFromAnalyser, VizCapture, type Demand } from "../lib/vizstream";
   import { loadEq, type EqState } from "../lib/eq";
-  import { viscolor } from "../lib/theme";
+  import { kaleidoscopeFor, rampWorn, viscolor, visualizerFor } from "../lib/theme";
+  import { HUE_PERIOD_S } from "../lib/kaleidoscope";
   import { loadVisMode, nextVisMode, saveVisMode, type VisMode } from "../lib/vis";
   // The cooler capybara's home (#62): the display, while a file cannot be
   // opened. The analyser has nothing to draw then, and he has a drink.
@@ -37,6 +39,27 @@
   // (D101): `VISCOLOR.TXT` is read at import for this, and an imported skin
   // that brings a green-on-black ramp should not draw Eyewall's radar.
   let palette = $state(viscolor("eyewall"));
+  // What draws in the bars' place, and in which colours (#147): the theme's
+  // analyser for a skin that wears the theme, Purricane's kaleidoscope among
+  // them, and the skin's own for a skin with its own colours.
+  let component = $state("spectrum-bars");
+  let kaleido = $state(kaleidoscopeFor("eyewall"));
+  // Calm: the kaleidoscope still (#147). The library holds the switch, and
+  // Purricane's Main a pill for it (D132).
+  let calm = $state(false);
+  // The six or eight segments a person picked on Purricane's Main (D132);
+  // null until they pick, and the theme's number until then.
+  let segments = $state<6 | 8 | null>(null);
+  // The OS's reduced motion, which stills the kaleidoscope whatever calm says;
+  // here only so Main's words for what it is doing tell the truth.
+  let reduced = $state(false);
+  $effect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    reduced = mq.matches;
+    const on = () => (reduced = mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  });
   // The EQ window owns the sliders and the saved copy; this is the applied
   // copy. Same saved state at mount, then live updates over eq:set.
   let eq: EqState = loadEq(localStorage);
@@ -294,6 +317,10 @@
     // every change after. A reload of this window while a video plays must
     // come back showing the video, not a blank clock.
     invoke<Remote>("transport_state").then(absorbCurrent).catch(() => {});
+    invoke<boolean>("get_calm").then((on) => (calm = on)).catch(() => {});
+    invoke<number | null>("get_segments")
+      .then((n) => (segments = n === 6 || n === 8 ? n : null))
+      .catch(() => {});
     const subs = [
       listen<Remote>("player:current", (e) => absorbCurrent(e.payload), {
         target: { kind: "WebviewWindow", label: "main" },
@@ -309,6 +336,10 @@
       listen<EqState>("eq:set", (e) => {
         eq = e.payload;
         graph?.applyEq(eq);
+      }),
+      listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "main" } }),
+      listen<number>("vis:segments", (e) => (segments = e.payload === 8 ? 8 : 6), {
+        target: { kind: "WebviewWindow", label: "main" },
       }),
       // Targeted at this window: Rust routes a transport command to whichever
       // window is the transport (D70), and a listener with no target would
@@ -440,6 +471,10 @@
     repeatLabel: repeat === "one" ? "1x" : repeat === "all" ? "ALL" : "REP",
     eqOpen: eqOpen ? "on" : "off",
     plOpen: plOpen ? "on" : "off",
+    // The kaleidoscope's, for Purricane's pills and the words under them.
+    calm: calm ? "on" : "off",
+    segments: String(segments ?? kaleido.segments),
+    visMotion: calm || reduced ? "STATIC MANDALA" : `HUE DRIFT ${HUE_PERIOD_S}s`,
   });
 
   function action(name: string) {
@@ -463,6 +498,15 @@
     // The classic's eject opened files. This app's files come from the
     // library, which is what the playlist's own LOAD LIST button says too.
     else if (name === "eject") invoke("show_library").catch(() => {});
+    // Saved, and said to every window that shows it (D132): the library's
+    // calm box moves with this pill.
+    else if (name === "calm") {
+      calm = !calm;
+      invoke("set_calm", { on: calm }).catch(() => {});
+    } else if (name === "segments6" || name === "segments8") {
+      segments = name === "segments8" ? 8 : 6;
+      invoke("set_segments", { n: segments }).catch(() => {});
+    }
   }
 
   function slide(bind: string, frac: number) {
@@ -517,13 +561,23 @@
       }
     }}
     title={visMode === "bars"
-      ? "Spectrum. Click for scope"
+      ? `${component === "kaleidoscope" ? "Kaleidoscope" : "Spectrum"}. Click for scope`
       : visMode === "scope"
         ? "Scope. Click for off"
-        : "Off. Click for spectrum"}
+        : `Off. Click for ${component === "kaleidoscope" ? "kaleidoscope" : "spectrum"}`}
   >
     {#if error}
       <img class="oops" src={cooler} alt="" draggable="false" />
+    {:else if visMode === "bars" && component === "kaleidoscope"}
+      <Kaleidoscope
+        {analyser}
+        ramp={palette}
+        active={playing}
+        {calm}
+        segments={segments ?? kaleido.segments}
+        degPerSec={kaleido.degPerSec}
+        maxBloomHz={kaleido.maxBloomHz}
+      />
     {:else if visMode === "bars"}
       <SpectrumBars {analyser} {palette} active={playing} />
     {:else if visMode === "scope"}
@@ -555,7 +609,11 @@
   slots={error ? { vis, trackTitle: strip } : { vis }}
   onaction={action}
   onslide={slide}
-  onskin={(s) => (palette = s.viscolor)}
+  onskin={(s, t) => {
+    palette = rampWorn(s, t);
+    component = visualizerFor(s, t);
+    kaleido = kaleidoscopeFor(t);
+  }}
 />
 
 <!-- crossorigin is load-bearing. The file comes from the asset protocol,
@@ -634,6 +692,7 @@
   .visbox.off {
     background: color-mix(in srgb, var(--surface) calc(var(--vis-well, 1) * 100%), transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+    border-radius: var(--vis-radius, 0);
   }
 
   .errline {

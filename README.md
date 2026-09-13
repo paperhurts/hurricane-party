@@ -70,6 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main  
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\keyout.ps1 -In art.jpg -Out icon.png   # flat background -> transparent square PNG, then: pnpm tauri icon icon.png
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Frame 64   # pose PNGs -> companion sprite sheet + manifest (docs/companion-art.md)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\chrome-sheet.ps1   # redraw skins/eyewall/*.png from its manifest (docs/skin-manifest.md)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\purricane-sheet.ps1   # redraw skins/purricane/*.png the same way (D132)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\make-test-wsz.ps1  # a synthetic classic .wsz with every sprite labelled, for testing the importer
 pnpm tauri build --no-bundle                                # release binary, no installer
 
@@ -116,6 +117,7 @@ the two remaining Claude Code commands, are in `CLAUDE.md`.
 | `src-tauri/` | Rust core: window engine, pipeline, job queue, SQLite, control server |
 | `crates/hp-control/` | The public control protocol. Unstable until v1.0 |
 | `skins/eyewall/` | The skin that ships, in `hp-skin/1`, and the template to copy for your own (D90) |
+| `skins/purricane/` | The skin the Purricane theme wears, laid out from the designer's screens (D132) |
 | `docs/` | Specs. `decisions.md` wins over everything |
 | `design/screens/` | Claude Design prototypes. **Visual reference only** — the prototype is not the spec |
 | `tools/` | Prerequisite check, sidecar fetch, dev launcher, git hooks, control-pipe and viz harnesses, screenshot and real-input helpers, the Eyewall sheet generator, a test `.wsz` maker, icon background remover, companion sheet packer |
