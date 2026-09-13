@@ -932,7 +932,10 @@ struct SkinOnDisk {
 #[tauri::command]
 fn read_skin(app: AppHandle, id: String) -> Result<SkinOnDisk, skins::SkinError> {
     let dir = skins_dir(&app).join(&id);
-    let manifest = std::fs::read_to_string(dir.join("manifest.json"))
+    // Through `text_of`, so a manifest a person saved with a byte-order mark
+    // still parses (#146).
+    let manifest = std::fs::read(dir.join("manifest.json"))
+        .map(skins::text_of)
         .map_err(|e| skins::SkinError::Io(format!("{id}: {e}")))?;
     let art = skins::contents(&dir);
     Ok(SkinOnDisk {
