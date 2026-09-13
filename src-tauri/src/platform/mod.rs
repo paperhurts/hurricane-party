@@ -122,6 +122,52 @@ pub trait WindowPlatform: Send + Sync {
     /// command line does not. The caller decides which folder; nothing from
     /// the webview reaches this as a path.
     fn open_folder(&self, path: &std::path::Path) -> Result<(), String>;
+
+    /// Watch a folder and everything under it (#111, D137), calling
+    /// `on_event` from a thread of the watch's own. Not about a window
+    /// either: the portable crates for this are a dependency the app does
+    /// not need, and on Windows a watch has one duty they skip, letting go of
+    /// the drive when a person ejects it.
+    ///
+    /// `on_event` must not block. The watch cannot read the next change
+    /// while it runs, and dropping the watch waits for its thread.
+    fn watch_tree(
+        &self,
+        root: &std::path::Path,
+        on_event: Box<dyn FnMut(TreeEvent) + Send>,
+    ) -> Result<TreeWatch, String>;
+
+    /// Whether another program has this file open (#111). A file still being
+    /// copied in is not read: its tags and its length are not there yet.
+    fn in_use(&self, path: &std::path::Path) -> bool;
+}
+
+/// What a watched folder says happened (#111).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TreeEvent {
+    /// Something at this path changed: added, removed, renamed to or from,
+    /// written. Relative to the watched folder. What it is now is the
+    /// caller's to look at; the event says only where.
+    Changed(std::path::PathBuf),
+    /// More changed than the platform could list: look at the whole folder.
+    Overflow,
+    /// The OS asked for the drive (an eject), and the watch let go of it so
+    /// the eject is not refused on the app's account. The watch has ended.
+    Released,
+    /// The watch stopped on its own: the folder went away, or reading it
+    /// failed.
+    Ended,
+}
+
+/// A running watch. Dropping it stops the watch, and returns once it has.
+pub struct TreeWatch {
+    _guard: Box<dyn Send>,
+}
+
+impl TreeWatch {
+    pub fn new(guard: Box<dyn Send>) -> TreeWatch {
+        TreeWatch { _guard: guard }
+    }
 }
 
 /// The native handle behind a Tauri window.

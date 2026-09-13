@@ -355,6 +355,9 @@
       // moves with it.
       listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "library" } }),
       listen("library-changed", refreshLibrary),
+      // A root's watch saw files leave (#111): counted and offered, the way
+      // a click on the root offers it, never dropped.
+      listen<{ root_id: number; root: string; missing: number }>("library-watched", (e) => watchedGone(e.payload)),
       // Playback lives in the Main window (D5); this window is the remote.
       // Main asks for the next or previous track because the play order —
       // which list is showing — is known only here.
@@ -1076,9 +1079,10 @@
 
   /**
    * Look at a known root again: files dropped into the folder by hand since
-   * it was last scanned come in, files taken out are counted. The library
-   * never watches its folders (a watcher is v0.6's, beside integrity
-   * checking), so this is how a folder you filled yourself gets noticed.
+   * it was last scanned come in, files taken out are counted. The roots are
+   * watched while the app runs (#111), so this is for what changed while it
+   * was closed, or on a drive that was unplugged, and for a file retagged in
+   * place, which the watcher leaves alone.
    *
    * An unplugged drive is not offered: it is a missing root, not an empty
    * one (D28), and the scan could only fail to read it.
@@ -1109,6 +1113,18 @@
       notice += ` ${r.missing} row${r.missing === 1 ? "" : "s"} in the library point${r.missing === 1 ? "s" : ""} at a file that is gone.`;
       pendingPrune = { rootId: r.root_id, count: r.missing };
     }
+  }
+
+  /**
+   * A root's watch counted rows whose files have gone (#111). The same words
+   * and the same offer a rescan gives. Another offer already up (a file to
+   * delete, a skin to keep) is not pushed aside for it: the rows stay
+   * counted, and a click on the root offers them again.
+   */
+  function watchedGone(g: { root_id: number; root: string; missing: number }) {
+    if (pendingDelete.length || pendingKeep) return;
+    notice = `${g.missing} row${g.missing === 1 ? "" : "s"} in ${g.root} point${g.missing === 1 ? "s" : ""} at a file that is gone.`;
+    pendingPrune = { rootId: g.root_id, count: g.missing };
   }
 
   async function setConc(n: number) {

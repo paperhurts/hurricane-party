@@ -14,6 +14,7 @@ mod skins;
 mod tray;
 mod video;
 mod viz;
+mod watch;
 pub mod wm;
 
 use db::Db;
@@ -251,9 +252,13 @@ async fn add_local_folder(
     // Scanning a big folder blocks on I/O and tag reads, so keep it off the
     // main thread rather than freezing the window.
     let app2 = app.clone();
-    tauri::async_runtime::spawn_blocking(move || localimport::scan_root(&app2, &p, &label))
-        .await
-        .map_err(|e| db::DbError::Io(e.to_string()))?
+    let report =
+        tauri::async_runtime::spawn_blocking(move || localimport::scan_root(&app2, &p, &label))
+            .await
+            .map_err(|e| db::DbError::Io(e.to_string()))??;
+    // A folder just added is watched from now, not in ten seconds (#111).
+    watch::nudge(&app);
+    Ok(report)
 }
 
 #[tauri::command]
@@ -1429,6 +1434,8 @@ pub fn run() {
             localimport::allow_known_roots(&handle);
 
             jobs::spawn_runner(handle.clone());
+            // The roots, watched while the app runs (#111, D137).
+            watch::spawn(handle.clone());
 
             // Undocumented and unstable until v1.0 (control-api.md). Shipping
             // it now proves the pipe while nothing external depends on it.

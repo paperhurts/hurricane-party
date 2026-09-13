@@ -134,6 +134,103 @@ fn read_tags(path: &Path) -> Tags {
     }
 }
 
+/// Every file under `dir` the library claims, in walk order: what a scan of a
+/// root walks, and what the watcher walks when a folder inside one changes
+/// (#111).
+pub fn media_files(dir: &Path) -> impl Iterator<Item = walkdir::DirEntry> {
+    walkdir::WalkDir::new(dir)
+        .follow_links(false) // a symlink loop would walk forever
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && kind_of(e.path()).is_some())
+}
+
+/// Whether the library claims this path as a file at all.
+pub fn claims(path: &Path) -> bool {
+    kind_of(path).is_some() && path.is_file()
+}
+
+/// A file read and ready to become a row. A scan and the watcher both make
+/// one, so a file dropped in and found by the watcher is the row a click on
+/// its root would have made.
+pub struct Found {
+    relpath: String,
+    kind: &'static str,
+    tags: Tags,
+    container: Option<String>,
+    filesize: Option<i64>,
+}
+
+impl Found {
+    /// Read a file under `root`: `None` for a file the library does not
+    /// claim, or one that is not under `root`.
+    pub fn read(root: &Path, path: &Path, filesize: Option<i64>) -> Option<Found> {
+        let kind = kind_of(path)?;
+        let relpath = path.strip_prefix(root).ok()?.to_string_lossy().to_string();
+        Some(Found {
+            relpath,
+            kind,
+            tags: read_tags(path),
+            container: path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_string),
+            filesize,
+        })
+    }
+}
+
+/// Write a file's row, upserted on `(root_id, relpath)` (D28). Returns its id
+/// and whether it is new.
+pub fn upsert(
+    conn: &rusqlite::Connection,
+    root_id: i64,
+    f: &Found,
+) -> Result<(i64, bool), DbError> {
+    // Ask first, because the counts are reported to the user and an UPSERT
+    // cannot tell them apart: SQLite reports one changed row whether the
+    // conflict clause inserted or updated, so counting `execute`'s return
+    // called every re-scan a fresh import. One indexed lookup per file is a
+    // cheap price for a message that is true.
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM media WHERE root_id = ?1 AND relpath = ?2",
+            rusqlite::params![root_id, f.relpath],
+            |r| r.get(0),
+        )
+        .ok();
+
+    // D28: (root_id, relpath), never the absolute path.
+    conn.execute(
+        "INSERT INTO media (source_id, root_id, relpath, kind, title, uploader,
+                            duration_s, container, bitrate_kbps, filesize, added_at)
+         VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(root_id, relpath) DO UPDATE SET
+            kind = excluded.kind, title = excluded.title,
+            uploader = excluded.uploader, duration_s = excluded.duration_s,
+            filesize = excluded.filesize",
+        rusqlite::params![
+            root_id,
+            f.relpath,
+            f.kind,
+            f.tags.title,
+            f.tags.artist,
+            f.tags.duration_s,
+            f.container,
+            f.tags.bitrate_kbps,
+            f.filesize,
+            db::now(),
+        ],
+    )?;
+    Ok(match existing {
+        Some(id) => (id, false),
+        // Read only on a real insert: after the UPDATE arm of the upsert,
+        // last_insert_rowid still names whatever was inserted last, which is
+        // why the known id comes from the lookup above.
+        None => (conn.last_insert_rowid(), true),
+    })
+}
+
 /// Register a folder as a library root and pull everything in it into `media`.
 ///
 /// Re-scanning an already-known root is safe and expected — it's how you pick
@@ -172,73 +269,20 @@ pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport
     let mut conn = state.0.lock().unwrap();
     let tx = conn.transaction()?;
 
-    for entry in walkdir::WalkDir::new(&root)
-        .follow_links(false) // a symlink loop would walk forever
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        let Some(kind) = kind_of(path).filter(|_| entry.file_type().is_file()) else {
-            continue;
-        };
+    for entry in media_files(&root) {
         report.found += 1;
-
-        let Ok(rel) = path.strip_prefix(&root) else {
+        let filesize = entry.metadata().map(|m| m.len() as i64).ok();
+        let Some(found) = Found::read(&root, entry.path(), filesize) else {
             report.skipped += 1;
             continue;
         };
-        let relpath = rel.to_string_lossy().to_string();
-        let filesize = entry.metadata().map(|m| m.len() as i64).ok();
-        let t = read_tags(path);
-
-        // Ask first, because the counts are reported to the user and an UPSERT
-        // cannot tell them apart: SQLite reports one changed row whether the
-        // conflict clause inserted or updated, so counting `execute`'s return
-        // called every re-scan a fresh import. One indexed lookup per file is a
-        // cheap price for a message that is true.
-        let existing: Option<i64> = tx
-            .query_row(
-                "SELECT id FROM media WHERE root_id = ?1 AND relpath = ?2",
-                rusqlite::params![root_id, relpath],
-                |r| r.get(0),
-            )
-            .ok();
-
-        // D28: (root_id, relpath), never the absolute path.
-        tx.execute(
-            "INSERT INTO media (source_id, root_id, relpath, kind, title, uploader,
-                                duration_s, container, bitrate_kbps, filesize, added_at)
-             VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-             ON CONFLICT(root_id, relpath) DO UPDATE SET
-                kind = excluded.kind, title = excluded.title,
-                uploader = excluded.uploader, duration_s = excluded.duration_s,
-                filesize = excluded.filesize",
-            rusqlite::params![
-                root_id,
-                relpath,
-                kind,
-                t.title,
-                t.artist,
-                t.duration_s,
-                path.extension().and_then(|e| e.to_str()),
-                t.bitrate_kbps,
-                filesize,
-                db::now(),
-            ],
-        )?;
-        match existing {
-            Some(id) => {
-                report.updated += 1;
-                report.ids.push(id);
-            }
-            None => {
-                report.added += 1;
-                // Read only on a real insert: after the UPDATE arm of the
-                // upsert, last_insert_rowid still names whatever was inserted
-                // last, which is why the known id comes from the lookup above.
-                report.ids.push(tx.last_insert_rowid());
-            }
+        let (id, added) = upsert(&tx, root_id, &found)?;
+        if added {
+            report.added += 1;
+        } else {
+            report.updated += 1;
         }
+        report.ids.push(id);
     }
 
     // Counted after the upserts, so a file the walk just found is never in

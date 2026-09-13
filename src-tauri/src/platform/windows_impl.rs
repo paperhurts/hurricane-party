@@ -1,8 +1,9 @@
 //! The Windows implementation of [`WindowPlatform`]. Six calls, D44 + D57.
 //!
-//! Every `unsafe` block in the window engine is in this file.
+//! Every `unsafe` block in the window engine is in this file. The folder
+//! watch (#111) is in `tree`, beside it.
 
-use super::{NativeWindow, WindowPlatform};
+use super::{NativeWindow, TreeEvent, TreeWatch, WindowPlatform};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::HiDpi::{
@@ -15,6 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SW_SHOWNOACTIVATE,
 };
+
+mod tree;
 
 pub struct Win32Platform;
 
@@ -170,6 +173,32 @@ impl WindowPlatform for Win32Platform {
         }
     }
 
+    fn watch_tree(
+        &self,
+        root: &std::path::Path,
+        on_event: Box<dyn FnMut(TreeEvent) + Send>,
+    ) -> Result<TreeWatch, String> {
+        tree::watch(root, on_event)
+    }
+
+    fn in_use(&self, path: &std::path::Path) -> bool {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Foundation::ERROR_SHARING_VIOLATION;
+        // Share mode 0 asks for the file to ourselves, which Windows refuses
+        // while anyone else has it open: a copy still writing, an editor
+        // saving. Read access, because an open for attributes alone is never
+        // refused on sharing. Anything else that fails the open (gone, no
+        // permission) is not "in use": the caller finds that out itself.
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(path)
+        {
+            Ok(_) => false,
+            Err(e) => e.raw_os_error() == Some(ERROR_SHARING_VIOLATION.0 as i32),
+        }
+    }
+
     fn restore_no_activate(&self, w: NativeWindow) {
         // SW_SHOWNOACTIVATE rather than SW_RESTORE: the rescue runs from a
         // WM_DISPLAYCHANGE handler, and stealing focus because a monitor was
@@ -193,5 +222,21 @@ mod tests {
         assert!(why.contains("not a folder"), "{why}");
         let file = std::env::current_exe().unwrap();
         assert!(Win32Platform.open_folder(&file).is_err());
+    }
+
+    /// #111: a file another handle still has open is in use; once it is
+    /// closed it is not; a file that is not there is not in use either.
+    #[test]
+    fn a_file_still_open_for_writing_is_in_use() {
+        let dir = std::env::temp_dir().join("hp-in-use-111");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("copying.mp3");
+        let writer = std::fs::File::create(&path).unwrap();
+        assert!(Win32Platform.in_use(&path));
+        drop(writer);
+        assert!(!Win32Platform.in_use(&path));
+        assert!(!Win32Platform.in_use(&dir.join("never.mp3")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
