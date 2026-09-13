@@ -76,6 +76,11 @@ export const ACTIONS = [
   "remove",
   "library",
   "loadSelected",
+  // The kaleidoscope's own, from Purricane's Main (D132): calm, its still
+  // switch, and the six or eight segments it is cut into.
+  "calm",
+  "segments6",
+  "segments8",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -128,6 +133,11 @@ export const BINDS = [
   // while that window is on screen.
   "eqOpen",
   "plOpen",
+  // The kaleidoscope (D132): `calm` is "on" or "off", `segments` "6" or "8",
+  // and `visMotion` the words for what it is doing, drifting or holding still.
+  "calm",
+  "segments",
+  "visMotion",
 ] as const;
 export type Bind = (typeof BINDS)[number];
 
@@ -274,6 +284,10 @@ export type Element =
        * (D122). 1, the default, is Eyewall's solid well; a skin with a
        * picture behind its chrome lets it show through. */
       well: number;
+      /** The box's outline (D132). `rect`, the default, is every analyser
+       * there has been; `round` is Purricane's badge, the largest circle the
+       * box holds, and the analyser is drawn inside it. */
+      shape: "rect" | "round";
     })
   | (Placed & {
       type: "list";
@@ -672,7 +686,8 @@ function element(
         well = num(v.well, `${path}.well`);
         if (well < 0 || well > 1) fail(`${path}.well`, "must be between 0 and 1");
       }
-      return { ...placed(v, name, path), type, well };
+      const shape = v.shape === undefined ? "rect" : oneOf(v.shape, ["rect", "round"] as const, `${path}.shape`);
+      return { ...placed(v, name, path), type, well, shape };
     }
     case "list":
       // The playlist's rows (D99): the skin's box, metrics and colours; the
@@ -1088,6 +1103,12 @@ export function actionTitle(action: Action | null, on: boolean): string {
       return "Show the library, or put it away if it is in front";
     case "loadSelected":
       return "Load the list selected in the library";
+    case "calm":
+      return on ? "Let the kaleidoscope move" : "Calm: the kaleidoscope holds still";
+    case "segments6":
+      return "Six segments";
+    case "segments8":
+      return "Eight segments";
     case null:
       return "";
   }

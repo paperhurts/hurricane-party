@@ -36,10 +36,11 @@ describe("every theme", () => {
   });
 
   // Cone has no palette of its own and `extends` Eyewall, so the ramp walk is
-  // what gives it one. Purricane draws a kaleidoscope and has no ramp yet.
+  // what gives it one. Purricane's is the designer's hue drift (D132).
   it("inherits the radar ramp through extends", () => {
     expect(viscolor("eyewall")).toHaveLength(24);
     expect(viscolor("cone")).toEqual(viscolor("eyewall"));
+    expect(viscolor("purricane")).toHaveLength(24);
   });
 
   // A theme may keep its own words for the six — Eyewall's void and filament,
@@ -84,18 +85,19 @@ describe("wearing a theme", () => {
     for (const t of ["accent", "alert", "warn"] as const) expect(contrast(c[t], c.ground)).toBeGreaterThanOrEqual(3);
   });
 
-  it("keeps Purricane's ground and surface as written, and its accent's hue", () => {
+  it("keeps Purricane's ground, surface and ink as written, and its accent's hue", () => {
     const raw = colorsFor("purricane");
     const worn = colorsShown("purricane");
     expect(worn.ground).toBe(raw.ground);
     expect(worn.surface).toBe(raw.surface);
-    // The pastel mint is about 2:1 on the pink window (D131); it deepens, and
-    // stays a green-blue.
+    expect(worn.text).toBe(raw.text);
+    // The designer's floss is under 2:1 on the sugar window (D132); in the
+    // library it deepens, and stays a pink: red first, then blue, then green.
     expect(worn.accent).not.toBe(raw.accent);
     const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const [r, g, bl] = rgb(worn.accent);
-    expect(g).toBeGreaterThan(r);
-    expect(bl).toBeGreaterThan(r);
+    expect(r).toBeGreaterThan(bl);
+    expect(bl).toBeGreaterThan(g);
   });
 
   it("sets Comic Sans larger, and leaves Eyewall's sizes alone", () => {
@@ -112,8 +114,8 @@ describe("wearing a theme", () => {
     expect(visualizerFor(own, "purricane")).toBe("spectrum-bars");
     expect(rampWorn(mask, "eyewall")).toEqual(viscolor("eyewall"));
     expect(rampWorn(own, "purricane")).toEqual(["a"]);
-    // Purricane has no ramp in the tokens, so one is made from its colours.
-    expect(rampWorn(mask, "purricane")).toHaveLength(24);
+    // Purricane's ramp is its own in the tokens (D132).
+    expect(rampWorn(mask, "purricane")).toEqual(viscolor("purricane"));
     expect(colorsWorn({ art: "mask", palette: {} }, "purricane")).toEqual(colorsShown("purricane"));
   });
 

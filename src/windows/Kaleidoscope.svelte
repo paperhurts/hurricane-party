@@ -1,25 +1,28 @@
 <script lang="ts">
-  // Purricane's visualizer (#147, docs/purricane.md): radial mirrored segments
-  // driven by the same spectrum the bars read. Bass pushes the pattern out
-  // from the centre, the highs add detail near the rim, a beat blooms, and the
-  // colour drifts through the theme's palette over a minute and a half. The
-  // turn is a slow constant that audio never touches. The manifest and the
-  // tokens name this component as `kaleidoscope`.
+  // Purricane's visualizer (#147, docs/purricane.md), drawn as the designer
+  // drew it (design/screens/Kaleidoscope, D132): mirrored petals round a
+  // bright centre, each segment a step further round the wheel, a glow on
+  // every petal and dots at the rim. Bass lengthens the petals and swells the
+  // centre, the mids widen them, the highs add dots, a beat blooms, and the
+  // hue drifts once round the palette's ramp in a minute and a half. The turn
+  // is a slow constant that audio never touches. The manifest and the tokens
+  // name this component as `kaleidoscope`.
   //
-  // Still — calm, or prefers-reduced-motion — is a mandala that does not turn,
-  // does not bloom and keeps one colour, and answers the music in size only.
-  // Those clamps are `lib/kaleidoscope.ts`'s, and no theme or skin reaches them.
+  // What the designer's was not is slow: it turned at twenty degrees a second
+  // and bloomed on any bass over a fixed line. The turn and the bloom are
+  // `lib/kaleidoscope.ts`'s clamps, which no theme or skin reaches. Still —
+  // calm, or prefers-reduced-motion — is a mandala that does not turn, does
+  // not bloom and keeps one hue, and answers the music in size only.
   //
   // Physical pixels and no CSS filter on this element or any ancestor (D73),
-  // for the same reasons as the bars.
+  // for the same reasons as the bars. The petals' glow is the canvas's own.
   import { untrack } from "svelte";
-  import { BloomGate, bloomAt, centres, hueAt, mix, rotationAt } from "../lib/kaleidoscope";
+  import { BloomGate, bloomAt, centres, driftHue, HUE_PERIOD_S, hueOf, rotationAt } from "../lib/kaleidoscope";
   import { bandEdges, Levels, reduceBands, type BandEdges } from "../lib/spectrum";
-  import type { Token } from "../lib/skin";
 
   let {
     analyser,
-    colours,
+    ramp,
     active,
     calm = false,
     segments = 6,
@@ -27,8 +30,8 @@
     maxBloomHz = 3,
   }: {
     analyser: AnalyserNode | null;
-    /** The six the window is wearing. */
-    colours: Record<Token, string>;
+    /** The ramp the window wears, whose hues the pattern drifts through. */
+    ramp: string[];
     active: boolean;
     calm?: boolean;
     segments?: 6 | 8;
@@ -37,6 +40,9 @@
   } = $props();
 
   const BANDS = 24;
+  /** Where still holds the drift: a quarter of the way round, where the
+   * designer's calm held it. */
+  const HOLD = 0.25;
 
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
@@ -49,6 +55,7 @@
   let gate = new BloomGate(untrack(() => maxBloomHz));
   let bloomed = -Infinity;
   let raf = 0;
+  let hues = $derived(ramp.map(hueOf));
 
   // The OS's say, live: a person can turn reduced motion on with the music
   // playing.
@@ -79,6 +86,11 @@
     return s / (to - from);
   };
 
+  /** A glow at `hue`, at the designer's saturation and lightness. The hue is
+   * the palette's; how bright a petal is, is this component's. */
+  const hsla = (hue: number, s: number, l: number, a: number) =>
+    `hsla(${((hue % 360) + 360) % 360}, ${s}%, ${l}%, ${a})`;
+
   function draw() {
     raf = 0;
     if (!ctx) return;
@@ -96,126 +108,100 @@
     }
     levels.step(vals ?? new Float32Array(BANDS));
     const L = levels.bars;
-    const bass = avg(L, 0, 5);
-    const highs = avg(L, 15, BANDS);
     const overall = avg(L, 0, BANDS);
-    if (gate.feed(bass, now, still)) bloomed = now;
+    // Still, every part follows the one overall level, so the size answers
+    // the music and nothing else does: no dots coming and going.
+    const bass = still ? overall : avg(L, 0, 4);
+    const mids = still ? overall : L[6];
+    const inner = still ? overall : L[10];
+    const treble = still ? 0 : (L[17] + L[19] + L[21] + L[23]) / 4;
+    if (gate.feed(avg(L, 0, 4), now, still)) bloomed = now;
     const bloom = still ? 0 : bloomAt(now, bloomed);
 
     ctx.clearRect(0, 0, W, H);
     const turn = rotationAt(t, degPerSec, still);
+    const hue = driftHue(still ? HOLD * HUE_PERIOD_S : t, hues);
     const seg = (2 * Math.PI) / segments;
-    const stops = [colours.accent, colours.alert, colours.warn];
-    const lead = still ? mix(colours.accent, colours.accent, 0) : hueAt(t, stops);
-    const second = still ? mix(colours.alert, colours.alert, 0) : hueAt(t + 30, stops);
 
     centres(W, H).forEach((c, m) => {
-      const ctxt = ctx!;
-      ctxt.save();
-      ctxt.translate(c.x, c.y);
-      const grow = 1 + bloom * 0.18;
-      ctxt.scale(grow, grow);
-      // Neighbours turn opposite ways, so the band reads as gears, not a belt.
-      const dir = m % 2 === 0 ? 1 : -1;
-      // Each wedge is drawn symmetric about its own middle, so turning it into
-      // place is the mirror. Flipping every other one as well folded each
-      // petal onto its neighbour's and six arms read as three.
+      const g = ctx!;
+      const R = c.r;
+      g.save();
+      g.translate(c.x, c.y);
+      g.scale(1 + bloom * 0.11, 1 + bloom * 0.11);
+      // Neighbours in a band turn opposite ways, so it reads as gears.
+      g.rotate((m % 2 === 0 ? 1 : -1) * turn);
       for (let k = 0; k < segments; k++) {
-        ctxt.save();
-        ctxt.rotate(dir * turn + k * seg);
-        wedge(ctxt, c.r, seg, L, bass, highs, overall, still, lead, second);
-        ctxt.restore();
+        g.save();
+        g.rotate(k * seg);
+        // Every other petal mirrored: the kaleidoscope's mirror.
+        if (k % 2) g.scale(1, -1);
+        petal(g, R, hue + k * (180 / segments), bass, mids, inner, treble, bloom);
+        g.restore();
       }
-      ctxt.restore();
+      // The bright centre, swelling with the bass.
+      const cr = R * (0.22 + bass * 0.12);
+      const glow = g.createRadialGradient(0, 0, 0, 0, 0, cr);
+      glow.addColorStop(0, hsla(hue, 100, 98, 0.95));
+      glow.addColorStop(0.55, hsla(hue, 95, 82, 0.75));
+      glow.addColorStop(1, hsla(hue, 95, 75, 0));
+      g.beginPath();
+      g.arc(0, 0, cr, 0, 2 * Math.PI);
+      g.fillStyle = glow;
+      g.fill();
+      g.restore();
     });
 
     const settling = !levels.settled();
     if (active || settling || bloom > 0) raf = requestAnimationFrame(draw);
   }
 
-  /** One wedge, from the centre to the rim, between angle 0 and a segment,
-   * symmetric about its middle; the loop above turns it into the rest. */
-  function wedge(
+  /** One segment's petal, its inner petal and its rim dots, pointing down the
+   * y axis from the centre; the loop above turns and mirrors it into the rest. */
+  function petal(
     g: CanvasRenderingContext2D,
     R: number,
-    seg: number,
-    L: Float32Array,
+    hs: number,
     bass: number,
-    highs: number,
-    overall: number,
-    still: boolean,
-    lead: string,
-    second: string,
+    mids: number,
+    inner: number,
+    treble: number,
+    bloom: number,
   ) {
-    // Bass pushes the pattern out; still, only the overall level does.
-    const reach = R * (still ? 0.5 + 0.5 * overall : 0.4 + 0.6 * bass);
-    const half = seg / 2;
-    const at = (r: number, a: number): [number, number] => [r * Math.cos(a), r * Math.sin(a)];
-    const RINGS = 4;
-    const per = Math.floor(L.length / RINGS);
+    const reach = R * (0.34 + bass * 0.58);
+    const wide = R * (0.09 + mids * 0.16);
+    g.shadowBlur = R * 0.22;
+    g.shadowColor = hsla(hs, 95, 72, 0.5 + bloom * 0.4);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.quadraticCurveTo(wide, reach * 0.45, 0, reach);
+    g.quadraticCurveTo(-wide * 0.6, reach * 0.4, 0, 0);
+    g.fillStyle = hsla(hs, 92, 72 - bass * 8, 0.62);
+    g.fill();
+    g.shadowBlur = 0;
+    g.lineWidth = Math.max(1, R / 17);
+    g.strokeStyle = hsla(hs, 95, 52, 0.85);
+    g.stroke();
 
-    for (let j = 0; j < RINGS; j++) {
-      // A ring of the pattern per quarter of the spectrum, lows innermost.
-      let lv = 0;
-      for (let i = j * per; i < (j + 1) * per; i++) lv += L[i];
-      lv = still ? overall : lv / per;
-      const r0 = (reach * j) / RINGS;
-      const r1 = (reach * (j + 1)) / RINGS;
-      const rm = (r0 + r1) / 2;
+    const short = R * (0.16 + inner * 0.2);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.quadraticCurveTo(wide * 1.5, short * 0.5, 0, short);
+    g.quadraticCurveTo(-wide * 1.1, short * 0.45, 0, 0);
+    g.fillStyle = hsla(hs + 40, 95, 80, 0.7);
+    g.fill();
 
-      // The ring itself, as the arc of this wedge: six of them close a circle.
-      g.globalAlpha = 0.25 + 0.45 * lv;
-      g.strokeStyle = j % 2 === 0 ? second : lead;
-      g.lineWidth = Math.max(1, R * 0.02 * (0.5 + 1.5 * lv));
-      g.beginPath();
-      g.arc(0, 0, r1, 0, seg);
-      g.stroke();
-
-      // A petal down the middle of the wedge, wider the louder its ring.
-      const w = half * (still ? 0.55 : 0.25 + 0.7 * lv);
-      g.globalAlpha = 0.45 + 0.5 * lv;
-      g.fillStyle = j % 2 === 0 ? lead : second;
-      g.beginPath();
-      g.moveTo(...at(r0, half));
-      g.quadraticCurveTo(...at(rm * 1.08, half - w), ...at(r1, half));
-      g.quadraticCurveTo(...at(rm * 1.08, half + w), ...at(r0, half));
-      g.fill();
-
-      // A leaf on each edge of the wedge, which meets its neighbour's there:
-      // the pair is the mirror across the seam.
-      const e = half * (still ? 0.3 : 0.15 + 0.45 * lv);
-      g.globalAlpha = 0.3 + 0.4 * lv;
-      g.fillStyle = j % 2 === 0 ? second : lead;
-      for (const [edge, s] of [
-        [0, 1],
-        [seg, -1],
-      ] as const) {
-        g.beginPath();
-        g.moveTo(...at(rm, edge));
-        g.quadraticCurveTo(...at(r1, edge + s * e * 0.5), ...at(r1 * 0.98, edge + s * e));
-        g.quadraticCurveTo(...at(rm, edge + s * e * 0.6), ...at(rm, edge));
-        g.fill();
-      }
-
-      // A jewel at the tip.
-      g.globalAlpha = 0.6 + 0.4 * lv;
-      g.fillStyle = lead;
-      g.beginPath();
-      g.arc(...at(r1, half), Math.max(0.75, R * 0.035 * (0.4 + lv)), 0, 2 * Math.PI);
-      g.fill();
-    }
-
-    // The rim's detail, from the highs. None when still: detail that comes
-    // and goes is motion.
-    const dots = still ? 0 : Math.round(highs * 6);
+    // The rim: four dots, and more with the highs.
+    const dots = Math.round(4 + treble * 14);
+    const across = (2 * Math.PI) / segments;
     for (let d = 0; d < dots; d++) {
-      g.globalAlpha = 0.7;
-      g.fillStyle = second;
+      const a = (-0.3 + 0.6 * (d / Math.max(1, dots - 1))) * across;
+      const rr = R * (0.8 + 0.16 * ((d % 3) / 2));
       g.beginPath();
-      g.arc(...at(reach * 1.06, (half * 2 * (d + 1)) / (dots + 1)), Math.max(0.5, R * 0.018), 0, 2 * Math.PI);
+      g.arc(Math.sin(a) * rr, Math.cos(a) * rr, Math.max(0.7, R * (0.012 + treble * 0.016)), 0, 2 * Math.PI);
+      g.fillStyle = d % 2 ? hsla(hs + 80, 95, 70, 0.9) : hsla(hs + 200, 90, 72, 0.9);
       g.fill();
     }
-    g.globalAlpha = 1;
   }
 
   function layout(w: number, h: number) {
@@ -237,7 +223,8 @@
     void analyser;
     void calm;
     void reduced;
-    void colours;
+    void hues;
+    void segments;
     if (!raf && ctx) raf = requestAnimationFrame(draw);
   });
 
@@ -275,5 +262,7 @@
     /* The same well as the bars (D122). */
     background: color-mix(in srgb, var(--surface) calc(var(--vis-well, 1) * 100%), transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+    /* A round badge is a circle (D132), and so is its well. */
+    border-radius: var(--vis-radius, 0);
   }
 </style>

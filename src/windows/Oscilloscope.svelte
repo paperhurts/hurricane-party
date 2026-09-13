@@ -117,5 +117,6 @@
        made skin's picture. */
     background: color-mix(in srgb, var(--surface) calc(var(--vis-well, 1) * 100%), transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+    border-radius: var(--vis-radius, 0);
   }
 </style>

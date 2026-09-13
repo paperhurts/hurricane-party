@@ -1,8 +1,7 @@
-// The skin that ships. Eyewall is bundled by Vite from skins/eyewall/, so it
-// is present with zero network and zero file access (D11, D29): the manifest
-// is a JSON import and the sheets are asset imports, which Vite inlines as
-// data: URLs at this size. An imported skin (#107) arrives by another road
-// into the same `loadSkin`.
+// The skins that ship. Eyewall and Purricane (D132) are bundled by Vite from
+// skins/, so they are present with zero network and zero file access (D11,
+// D29): the manifest is a JSON import and the sheets are asset imports. An
+// imported skin (#107) arrives by another road into the same `loadSkin`.
 //
 // The manifest is validated at import, not at mount, so a broken default
 // skin is a build that does not start rather than three windows with no
@@ -12,6 +11,9 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import manifest from "../../skins/eyewall/manifest.json";
 import chrome1 from "../../skins/eyewall/chrome.png";
 import chrome2 from "../../skins/eyewall/chrome@2x.png";
+import purricaneManifest from "../../skins/purricane/manifest.json";
+import purricane1 from "../../skins/purricane/chrome.png";
+import purricane2 from "../../skins/purricane/chrome@2x.png";
 import { parseSkin, type Skin, type WindowName } from "./skin";
 import { wszManifest, WSZ_GENERATION } from "./wsz";
 import {
@@ -42,6 +44,37 @@ export function eyewallFile(file: string): string {
   return url;
 }
 
+const purricaneParsed = parseSkin(purricaneManifest);
+for (const w of purricaneParsed.warnings) console.warn(`purricane: ${w}`);
+
+/** Purricane's own skin (D132): the designer's layout, which the Purricane
+ * theme wears and which wears the Purricane theme. */
+export const PURRICANE: Skin = purricaneParsed.skin;
+
+const PURRICANE_FILES: Record<string, string> = {
+  "chrome.png": purricane1,
+  "chrome@2x.png": purricane2,
+};
+
+/** The skins inside the app, by id. Nothing on disk can take these ids
+ * (`skins.rs` SHIPPED), so an id here is always this skin. */
+const SHIPPED: Record<string, Omit<Wearable, "id" | "instead">> = {
+  eyewall: { skin: EYEWALL, resolve: eyewallFile },
+  purricane: {
+    skin: PURRICANE,
+    resolve: (file) => {
+      const url = PURRICANE_FILES[file];
+      if (!url) throw new Error(`purricane: manifest names ${file}, which is not bundled`);
+      return url;
+    },
+  },
+};
+
+/** Whether a skin id is one that ships rather than one on disk. */
+export function isShipped(id: string): boolean {
+  return Object.hasOwn(SHIPPED, id);
+}
+
 /** A skin ready to load: its art, where each sheet's file lives, and why it
  * is not the skin that was asked for, when it is not. */
 export type Wearable = {
@@ -67,7 +100,7 @@ export async function currentSkin(): Promise<Wearable> {
     // No backend (a browser, a test): the shipped skin is the only one there.
     return { id, skin: EYEWALL, resolve: eyewallFile };
   }
-  if (id === "eyewall") return { id, skin: EYEWALL, resolve: eyewallFile };
+  if (isShipped(id)) return { id, ...SHIPPED[id] };
   try {
     const on = await invoke<SkinOnDisk>("read_skin", { id });
     const own = (file: string) => convertFileSrc(`${on.dir}/${file}`);
@@ -207,7 +240,7 @@ async function measure(dir: string, files: string[]): Promise<Record<string, [nu
  * person picks the skin and not only the once at import. Eyewall has none.
  */
 export async function skinNotes(id: string): Promise<string[]> {
-  if (id === "eyewall") return [];
+  if (isShipped(id)) return [];
   try {
     const on = await invoke<SkinOnDisk>("read_skin", { id });
     const notes = (JSON.parse(on.manifest) as { notes?: unknown }).notes;
@@ -251,7 +284,7 @@ const readying = new Map<string, Promise<{ at: PicturePlace | null; redrawn: boo
 
 async function readyOnce(id: string): Promise<{ at: PicturePlace | null; redrawn: boolean }> {
   const none = { at: null, redrawn: false };
-  if (id === "eyewall") return none;
+  if (isShipped(id)) return none;
   try {
     const on = await invoke<SkinOnDisk>("read_skin", { id });
     const written = JSON.parse(on.manifest) as Record<string, any>;
