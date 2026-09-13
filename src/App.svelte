@@ -349,6 +349,10 @@
       // listener, and sends its clicks back here so the audio/video branch
       // stays in one place.
       listen("queue:hello", announceQueue),
+      // The playlist window's SEL (D124): make the list showing here the
+      // queue, without playing anything. What is playing keeps playing; the
+      // playlist window shows the new list, and Next walks it.
+      listen("queue:load-selected", adoptShowingAsQueue),
       listen<number>("queue:play", (e) => {
         const t = queue.find((x) => x.id === e.payload);
         // Playing from the playlist window fixes the queue it shows (D120).
