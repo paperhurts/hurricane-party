@@ -227,7 +227,7 @@ Multi-window pushes work earlier, because the skin renderer sits on top of it an
 The two points specific to this document that survive:
 
 - **v0.4 is the big one**, and is worth splitting into v0.4a (window system) and v0.4b (skin renderer). They are separable and the second is much easier once the first is proven
-- **`REGION.TXT` is explicitly best-effort at v0.5.** Non-rectangular windows are not a v1.0 commitment
+- **`REGION.TXT` is explicitly best-effort.** v0.5 shipped without it (a manifest's `regions` is reserved and not read), and non-rectangular windows are not a v1.0 commitment
 
 ---
 

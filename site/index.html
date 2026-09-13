@@ -114,6 +114,14 @@
   .shade p { color: color-mix(in srgb, var(--text) 85%, transparent); margin-top: 6px; }
   .shade img.capy { width: 100%; max-width: 300px; justify-self: center; }
 
+  .purr { display: grid; grid-template-columns: minmax(0, auto) minmax(240px, 1fr); gap: 40px; align-items: start; }
+  .purr .shots { overflow-x: auto; max-width: 100%; }
+  .purr .shots img { width: 550px; max-width: none; image-rendering: pixelated; filter: drop-shadow(0 0 30px color-mix(in srgb, var(--alert) 22%, transparent)); }
+  .purr .blurb .label { color: var(--alert); }
+  .trio { display: flex; flex-direction: column; gap: 10px; }
+  .trio img { width: 100%; max-width: 740px; }
+  .trio .caps { display: grid; grid-template-columns: repeat(3, 1fr); max-width: 740px; font: 400 11px/1.5 var(--mono); letter-spacing: 1.6px; color: var(--dim); text-align: center; }
+
   .tinker { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr); gap: 32px; align-items: center; padding-top: 24px; }
   .tinker img { width: 100%; max-width: 520px; justify-self: center; }
 
@@ -133,7 +141,7 @@
   footer img { width: 220px; }
 
   @media (max-width: 760px) {
-    header.hero, .two, .windows, .shade, .tinker, .faq, footer.wrap { grid-template-columns: 1fr; }
+    header.hero, .two, .windows, .purr, .shade, .tinker, .faq, footer.wrap { grid-template-columns: 1fr; }
     .hero img, .tinker img, footer img { justify-self: start; }
     .wrap { padding: 40px 20px; }
     nav { padding: 18px 20px; }
@@ -150,6 +158,7 @@
   <div class="links">
     <a href="#first-minute">FIRST MINUTE</a>
     <a href="#windows">THE WINDOWS</a>
+    <a href="#purricane">PURRICANE</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/paperhurts/hurricane-party">GITHUB</a>
   </div>
@@ -178,7 +187,7 @@
   <div class="steps">
     <div class="step">
       <div class="shot"><img src="shots/step1.png" alt="The library window with a URL pasted and a download finishing in the queue"></div>
-      <div class="num"><span>1</span><p><strong>Paste a URL.</strong> One video at a time for now. It queues, downloads into your library folder, and survives a restart.</p></div>
+      <div class="num"><span>1</span><p><strong>Paste a URL.</strong> A video, or a whole YouTube playlist: you pick what to keep before anything downloads. It queues, downloads into your library folder, and survives a restart.</p></div>
     </div>
     <div class="step">
       <div class="shot"><img src="shots/step2.png" alt="The library window listing tracks and videos"></div>
@@ -221,7 +230,7 @@
       <div class="lines">
         <div>A downloader and a player in one small app.</div>
         <div>Your files, in a folder you chose, as ordinary MP3 and MP4.</div>
-        <div>Built to be used in the dark with the power out. The screen is the only light in the room, so the app is dark only.</div>
+        <div>Built to be used in the dark with the power out. The screen is the only light in the room, so there is no light mode. Even the bright theme glows.</div>
       </div>
     </div>
     <div class="card strike">
@@ -242,11 +251,11 @@
     <h2>Three small windows that snap together. Drag one, they all come.</h2>
   </div>
   <div class="windows">
-    <div class="shots"><img src="shots/windows.png" alt="Main, EQ and Playlist bonded in a stack, the analyser lit, at 2x"></div>
+    <div class="shots"><img src="shots/windows.png" alt="Main, EQ and Playlist bonded in a stack in the Eyewall skin, a track playing and the analyser lit, at 2x"></div>
     <div class="blurbs">
       <div class="blurb"><div class="label">MAIN</div><p>Transport, time, seek, volume. The analyser runs on a weather radar ramp: green through yellow to red, peaking magenta. Click it for an oscilloscope.</p></div>
-      <div class="blurb"><div class="label">EQUALIZER</div><p>Ten bands, a preamp, presets, and a trim that keeps a boosted mix from clipping. A lamp lights when it does.</p></div>
-      <div class="blurb"><div class="label">PLAYLIST</div><p>Resizes by the corner grip. The lit seam between windows is a bond: drag it to resize both neighbours, double-click to break it.</p></div>
+      <div class="blurb"><div class="label">EQUALIZER</div><p>Ten bands, a preamp, and a trim that keeps a boosted mix from clipping. A lamp lights when it does. Save the curve as your own preset, or import presets from Winamp <code>.eqf</code> files.</p></div>
+      <div class="blurb"><div class="label">PLAYLIST</div><p>Resizes by the corner grip. Shuffle and repeat live in its bar. The lit seam between windows is a bond: drag it to resize both neighbours, double-click to break it.</p></div>
     </div>
   </div>
   <div class="shade">
@@ -256,6 +265,46 @@
       <p>Double-click Main's title bar and it collapses to a fourteen-pixel bar that stays on top. Title, transport, time. This is the one you live in while working in another app.</p>
     </div>
     <img class="capy" src="img/capybara-desk.png" alt="The capybara at a desk in headphones, the windowshade bar floating above his terminal">
+  </div>
+</section>
+
+<section id="skins" class="wrap rule" style="display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow">SKINS</div>
+    <h2>Wear an old Winamp skin, or make one of your own.</h2>
+  </div>
+  <div class="cards">
+    <div class="card arc">
+      <div class="label arc">IMPORT SKIN…</div>
+      <div class="lines"><div>Classic <code>.wsz</code> skins load and dress all three windows. Most work. If a skin uses something this player doesn't have, it says so instead of drawing it wrong.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">MAKE A SKIN…</div>
+      <div class="lines"><div>Pick any picture. The windows take its colours, kept readable, and wear the picture behind the buttons. You choose which part of it shows.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">PAINT YOUR OWN…</div>
+      <div class="lines"><div>A folder opens with a numbered template. Paint over it in any image editor, then bring the folder or a zip of it back in.</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="purricane" class="wrap rule" style="display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow strike">PURRICANE</div>
+    <h2>A second theme, and a kaleidoscope that blooms on the beat.</h2>
+  </div>
+  <div class="purr">
+    <div class="shots"><img src="shots/purricane.png" alt="Main, EQ and Playlist in Purricane: rounded pastel pink windows, mint and periwinkle pills, and a round kaleidoscope badge on Main, a track playing, at 2x"></div>
+    <div class="blurbs">
+      <div class="blurb"><div class="label">THE THEME</div><p>Pick Purricane beside the skin in the library and every window turns over at once. It comes with a skin of its own: soft rounded chrome in floss pink, milk white, mint, periwinkle and butter, with words in Comic Sans.</p></div>
+      <div class="blurb"><div class="label">THE KALEIDOSCOPE</div><p>A mandala sits in the round badge on Main. Bass pushes it out, the highs scatter dots at the rim, a beat makes it bloom, and its colour drifts once around the palette every minute and a half. 6 SEG and 8 SEG cut it into six or eight.</p></div>
+      <div class="blurb"><div class="label">CALM</div><p>It turns slowly and never flashes more than a few times a second, whatever the tempo. CALM holds it still and lets it answer the music in size only. Windows' reduced-motion setting does the same.</p></div>
+    </div>
+  </div>
+  <div class="trio">
+    <img src="shots/kaleidoscope.png" alt="Three kaleidoscope badges playing the same track: six segments, eight segments, and calm, smaller and in one colour">
+    <div class="caps"><span>6 SEG</span><span>8 SEG</span><span>CALM</span></div>
   </div>
 </section>
 
@@ -278,7 +327,8 @@
     <div><dt>Where did my files go?</dt><dd>Into the library folder, whose path is shown at the bottom of the library window. They are plain MP3 and MP4 files; any other player can open them.</dd></div>
     <div><dt>Does it need the internet?</dt><dd>Only to download. Playback never touches the network, by design and by enforcement. Unplug and it keeps going.</dd></div>
     <div><dt>Why is it Windows only?</dt><dd>It was built for one Windows machine in hurricane country. Nothing in it is Windows-specific on purpose, but nothing has been tested anywhere else either.</dd></div>
-    <div><dt>Can I use my old Winamp skins?</dt><dd>Not yet. Classic .wsz skins import at v0.5.</dd></div>
+    <div><dt>Can I use my old Winamp skins?</dt><dd>Yes. Import skin… in the library reads a classic .wsz. Most skins work, and one that uses something this player doesn't have tells you what it left out.</dd></div>
+    <div><dt>Is there a light mode?</dt><dd>No, and there won't be. There is a bright theme, Purricane, pastel pink with a kaleidoscope, and Eyewall, the dark one it ships in.</dd></div>
     <div><dt>Is my library shared anywhere?</dt><dd>No. There is no account and no server. The list of what you have lives in a database file on your disk.</dd></div>
     <div><dt>The download is broken. Who do I tell?</dt><dd><a href="https://github.com/paperhurts/hurricane-party/issues/new">Open an issue on GitHub.</a> If the link on this page is dead, the <a href="https://github.com/paperhurts/hurricane-party/releases">release list</a> is the fallback.</dd></div>
   </dl>
