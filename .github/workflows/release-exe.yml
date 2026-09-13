@@ -1,5 +1,5 @@
 # The shipping exe, built on demand. Not part of the PR gate: it fetches the
-# three pinned sidecars (~230 MB; D46, D47, D48) and takes several minutes.
+# three pinned sidecars (~290 MB; D46, D47, D133) and takes several minutes.
 #
 # Run it from the Actions tab (workflow_dispatch) when a merged build is wanted
 # on another machine, or push a v* tag. The artifact is the exe plus the three
@@ -58,11 +58,14 @@ jobs:
       - name: Build (no installer)
         run: pnpm tauri build --no-bundle
 
-      - name: Collect the exe and its sidecars
+      # The sidecars' licences ride along beside them (D133): ffmpeg is GPL,
+      # and a copy of the licence and where its source is go with the binary.
+      - name: Collect the exe, its sidecars and their licences
         run: |
-          mkdir -p out
+          mkdir -p out/licenses
           cp src-tauri/target/release/*.exe out/
-          ls -la out
+          cp licenses/* out/licenses/
+          ls -la out out/licenses
 
       # An artifact name may not contain a slash, and every branch here has
       # one (chore/61-…). Tags and main never did, which is why a manual run
