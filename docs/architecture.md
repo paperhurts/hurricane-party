@@ -274,7 +274,7 @@ A `DynamicsCompressorNode` as a limiter is the lazier option and it colors the s
 
 **Per-track EQ** — the `auto` toggle on the EQ window means "load this track's saved preset on play." That's what `media.eq_preset_id` is for. Null means use the global setting.
 
-**`.eqf` import** — Winamp's EQ preset format is small and simple, and importing it is cheap. It is in v0.5 (D27), and D31 has the byte layout verified; it is not built yet.
+**`.eqf` import** — Winamp's EQ preset format is small and simple, and importing it is cheap. Built at v0.5 (#145, D128): the EQ preset menu imports any number of `.eqf` files and saves the EQ under a name, into `eq_presets`, beside the four presets that ship. D31 has the byte layout.
 
 **Deliberately not in the control API v1.** No `set_eq` command. The public surface stays small; EQ is an in-app control, and adding it later is additive rather than breaking.
 

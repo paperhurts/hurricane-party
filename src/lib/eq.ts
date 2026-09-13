@@ -35,6 +35,27 @@ export const PRESETS: Record<string, readonly number[]> = {
 
 export const CUSTOM = "CUSTOM";
 
+/**
+ * A preset: one of the four that ship, or one the person saved or imported
+ * from an `.eqf` (#145), which has the database's `id`. The same shape
+ * `EqState` keeps, so applying either is a copy.
+ */
+export type Preset = { name: string; preamp: number; bands: readonly number[]; id?: number };
+
+/** The four that ship, as presets. */
+export const SHIPPED: readonly Preset[] = Object.entries(PRESETS).map(([name, vals]) => ({
+  name,
+  preamp: vals[0],
+  bands: vals.slice(1),
+}));
+
+/** Whether a name is taken by a preset that ships. Without case, because
+ * the window draws every name in capitals. */
+export function shipsAs(name: string): boolean {
+  const n = name.trim().toUpperCase();
+  return SHIPPED.some((p) => p.name.toUpperCase() === n);
+}
+
 export function defaultEq(): EqState {
   return { on: true, preamp: 0, bands: [...FLAT] };
 }
@@ -72,18 +93,22 @@ export function trimDb(s: EqState): number {
   return boost > 0 ? -boost : 0;
 }
 
-/** Which preset the state matches exactly, or CUSTOM. */
-export function presetName(s: EqState): string {
-  for (const [name, vals] of Object.entries(PRESETS)) {
-    if (vals[0] === s.preamp && vals.slice(1).every((v, i) => v === s.bands[i])) return name;
+/** Which preset the state matches exactly, or CUSTOM. The first match wins,
+ * so a saved preset identical to one that ships reads as the shipped one. */
+export function presetName(s: EqState, presets: readonly Preset[] = SHIPPED): string {
+  for (const p of presets) {
+    if (p.preamp === s.preamp && p.bands.length === s.bands.length && p.bands.every((v, i) => v === s.bands[i])) {
+      return p.name;
+    }
   }
   return CUSTOM;
 }
 
-export function applyPreset(s: EqState, name: string): EqState {
-  const vals = PRESETS[name];
-  if (!vals) return s;
-  return { on: s.on, preamp: vals[0], bands: vals.slice(1) };
+/** Apply a preset, by itself or by name. The on/off switch is kept. */
+export function applyPreset(s: EqState, preset: string | Preset, presets: readonly Preset[] = SHIPPED): EqState {
+  const p = typeof preset === "string" ? presets.find((x) => x.name === preset) : preset;
+  if (!p || p.bands.length !== BANDS.length) return s;
+  return { on: s.on, preamp: clampDb(p.preamp), bands: p.bands.map(clampDb) };
 }
 
 /** Cycle to the next preset name after the current one, wrapping. */

@@ -3,25 +3,35 @@
   // Main, so every change is sent over as the whole state and Main applies
   // it. Persisted in localStorage, which all the app's windows share, so both
   // sides read the same saved state at mount and only this window writes.
+  import { invoke } from "@tauri-apps/api/core";
   import { emitTo, listen } from "@tauri-apps/api/event";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { tick } from "svelte";
   import Classic from "./Classic.svelte";
   import {
     applyPreset,
     BANDS,
     clampDb,
+    CUSTOM,
     DB_MAX,
     DB_MIN,
     loadEq,
-    PRESETS,
     presetName,
     saveEq,
     shadeBarPx,
+    SHIPPED,
+    shipsAs,
     trimDb,
     type EqState,
+    type Preset,
   } from "../lib/eq";
 
   let eq = $state<EqState>(loadEq(localStorage));
-  let preset = $derived(presetName(eq));
+  // The person's own presets (#145), from the database; the four that ship
+  // come first and cannot be removed.
+  let mine = $state<Preset[]>([]);
+  let presets = $derived([...SHIPPED, ...mine]);
+  let preset = $derived(presetName(eq, presets));
   let trim = $derived(trimDb(eq));
 
   // The lamp stays lit a beat after the last clip Main reported, so a burst
@@ -53,12 +63,94 @@
   // The preset button opens a menu. It used to cycle, which is not what a ▼
   // promises.
   let menuOpen = $state(false);
-  const presetNames = Object.keys(PRESETS);
 
-  function pick(name: string) {
-    eq = applyPreset(eq, name);
+  function pick(p: Preset) {
+    eq = applyPreset(eq, p);
     menuOpen = false;
     commit();
+  }
+
+  async function loadMine() {
+    try {
+      mine = await invoke<Preset[]>("eq_presets");
+    } catch {
+      // No backend (a browser, a test): the four that ship are all there is.
+    }
+  }
+  loadMine();
+
+  // A line where the preset's name goes, for a moment: what an import or a
+  // save did. The EQ window has nowhere else to say it.
+  let said = $state<string | null>(null);
+  let saidTimer = 0;
+  function say(line: string) {
+    said = line;
+    clearTimeout(saidTimer);
+    saidTimer = window.setTimeout(() => (said = null), 2500);
+  }
+
+  // SAVE: the menu's last row becomes a name field. Enter keeps it, Esc
+  // or a press elsewhere lets it go.
+  let naming = $state(false);
+  let newName = $state("");
+  let nameEl = $state<HTMLInputElement | null>(null);
+  async function startNaming() {
+    naming = true;
+    newName = preset === CUSTOM ? "" : preset;
+    await tick();
+    nameEl?.focus();
+    nameEl?.select();
+  }
+  async function saveAs() {
+    const name = newName.trim();
+    if (!name) return;
+    if (shipsAs(name)) {
+      say("THAT NAME SHIPS");
+      return;
+    }
+    try {
+      await invoke("save_eq_preset", { name, preamp: eq.preamp, bands: $state.snapshot(eq.bands) });
+      await loadMine();
+      naming = false;
+      menuOpen = false;
+      say(`SAVED ${name}`);
+    } catch (e) {
+      say(String(e).toUpperCase());
+    }
+  }
+  // A menu that closes takes an unfinished name with it.
+  $effect(() => {
+    if (!menuOpen) naming = false;
+  });
+  function nameKey(e: KeyboardEvent) {
+    if (e.key === "Enter") saveAs();
+    else if (e.key === "Escape") naming = false;
+  }
+
+  async function remove(p: Preset) {
+    if (p.id === undefined) return;
+    await invoke("delete_eq_preset", { id: p.id }).catch(() => {});
+    await loadMine();
+  }
+
+  // IMPORT: Winamp `.eqf` files, one preset or a library of them (D31).
+  async function importEqf() {
+    menuOpen = false;
+    const picked = await openDialog({
+      multiple: true,
+      title: "Import EQ presets",
+      filters: [{ name: "Winamp EQ preset", extensions: ["eqf"] }],
+    });
+    const paths = picked === null ? [] : Array.isArray(picked) ? picked : [picked];
+    if (!paths.length) return;
+    const got = await invoke<{ saved: number; refused: [string, string][]; cut_short: string[] }>("import_eqf", {
+      paths,
+    }).catch((e) => ({ saved: 0, refused: [["", String(e)]] as [string, string][], cut_short: [] }));
+    await loadMine();
+    for (const [file, why] of got.refused) console.warn(`EQ import: ${file}: ${why}`);
+    if (got.saved === 0) say(got.refused.length ? "NOT AN EQF" : "NO PRESETS");
+    else say(`+${got.saved} PRESET${got.saved === 1 ? "" : "S"}${got.refused.length || got.cut_short.length ? ", SOME NOT" : ""}`);
+    if (got.saved) menuOpen = true;
   }
 
   $effect(() => {
@@ -91,7 +183,7 @@
 
   let binds = $derived({
     eqOn: eq.on ? "on" : "off",
-    eqPreset: preset,
+    eqPreset: said ?? preset,
     eqMenu: menuOpen ? "open" : "closed",
     eqTrim: `${trim > 0 ? "+" : ""}${trim.toFixed(1)} dB`,
     eqClip: clip ? "on" : "off",
@@ -124,7 +216,10 @@
     menuOpen = false;
   }}
   onkeydown={(e) => {
-    if (e.key === "Escape") menuOpen = false;
+    if (e.key === "Escape") {
+      menuOpen = false;
+      naming = false;
+    }
   }}
 />
 
@@ -153,9 +248,34 @@
   </svg>
   {#if menuOpen}
     <div class="pmenu" role="menu">
-      {#each presetNames as name (name)}
-        <button role="menuitem" class:on={name === preset} onclick={() => pick(name)}>{name}</button>
+      {#each SHIPPED as p (p.name)}
+        <button role="menuitem" class:on={p.name === preset} onclick={() => pick(p)}>{p.name}</button>
       {/each}
+      {#if mine.length}
+        <hr />
+        {#each mine as p (p.id)}
+          <div class="mine">
+            <button role="menuitem" class:on={p.name === preset} title={p.name} onclick={() => pick(p)}>{p.name}</button>
+            <button class="x" title="Remove {p.name}" aria-label="Remove {p.name}" onclick={() => remove(p)}>×</button>
+          </div>
+        {/each}
+      {/if}
+      <hr />
+      {#if naming}
+        <input
+          class="pname"
+          bind:this={nameEl}
+          bind:value={newName}
+          maxlength="40"
+          placeholder="NAME, THEN ENTER"
+          onkeydown={nameKey}
+        />
+      {:else}
+        <div class="acts">
+          <button role="menuitem" title="Keep the EQ as it is now under a name" onclick={startNaming}>SAVE…</button>
+          <button role="menuitem" title="Presets from Winamp .eqf files" onclick={importEqf}>IMPORT .EQF…</button>
+        </div>
+      {/if}
     </div>
   {/if}
 {/snippet}
@@ -214,14 +334,22 @@
 
   /* The preset menu, over the curve. The skin's boxes let the pointer
      through; the menu takes it back. */
+  /* As wide as its names need, and as tall as the window leaves below the
+     curve's top, scrolling past that: the person's presets can outnumber
+     the rows the curve box has. */
   .pmenu {
     position: absolute;
     left: 0;
-    right: 0;
     top: 0;
     z-index: 5;
     display: flex;
     flex-direction: column;
+    min-width: 100%;
+    width: max-content;
+    max-width: 150px;
+    max-height: 70px;
+    overflow-y: auto;
+    scrollbar-width: thin;
     padding: 2px 0;
     pointer-events: auto;
     background: var(--ground);
@@ -249,5 +377,56 @@
   .pmenu button.on {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  .pmenu button,
+  .pname {
+    flex: none;
+    text-transform: uppercase;
+  }
+  .pmenu hr {
+    flex: none;
+    height: 1px;
+    margin: 2px 0;
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  /* One of the person's: the name, and the × that removes it. */
+  .mine {
+    display: flex;
+  }
+  .mine button:first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .pmenu .x {
+    width: 11px;
+    padding: 0;
+    text-align: center;
+    color: color-mix(in srgb, var(--text) 50%, transparent);
+  }
+  .pmenu .x:hover {
+    color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+  }
+  .acts {
+    display: flex;
+  }
+  .acts button {
+    flex: 1;
+  }
+  .pname {
+    height: 11px;
+    margin: 0 2px;
+    padding: 0 2px;
+    border: 0;
+    outline: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    font: inherit;
+    font-size: 6px;
+    letter-spacing: 0.1em;
+    color: var(--text);
+    background: var(--surface);
+  }
+  .pname::placeholder {
+    color: color-mix(in srgb, var(--text) 40%, transparent);
   }
 </style>
