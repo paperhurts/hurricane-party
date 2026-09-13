@@ -161,10 +161,28 @@ async function rebuild(id: string, on: SkinOnDisk, why: string) {
  * the reason, which is the honest outcome for art nothing can read.
  */
 export async function measureSheets(dir: string, files: string[]): Promise<Record<string, [number, number]>> {
+  return measure(
+    dir,
+    files.filter((f) => f.endsWith(".bmp")),
+  );
+}
+
+/**
+ * The size of every sheet a native manifest names, in the form the bounds
+ * check takes (#146). A painted or zipped `hp-skin/1` skin is checked against
+ * its own art before it is worn, as an import is, so a rectangle past the end
+ * of a sheet is a refusal with a reason rather than a skin that falls back
+ * to Eyewall the moment it is picked.
+ */
+export async function sheetSizes(dir: string, files: string[]): Promise<Record<string, { w: number; h: number }>> {
+  const sizes = await measure(dir, files);
+  return Object.fromEntries(Object.entries(sizes).map(([f, [w, h]]) => [f, { w, h }]));
+}
+
+async function measure(dir: string, files: string[]): Promise<Record<string, [number, number]>> {
   const sizes: Record<string, [number, number]> = {};
   await Promise.all(
     files
-      .filter((f) => f.endsWith(".bmp"))
       .map(
         (f) =>
           new Promise<void>((done) => {
