@@ -1,6 +1,7 @@
 pub mod bond;
 mod control;
 mod db;
+mod egress;
 mod eq_presets;
 mod jobs;
 mod library;
@@ -8,6 +9,7 @@ mod localimport;
 mod pipeline;
 pub mod platform;
 mod playlist;
+mod radar;
 mod skins;
 mod tray;
 mod video;
@@ -1084,7 +1086,42 @@ fn set_theme(app: AppHandle, name: String) -> Result<String, db::DbError> {
         let _ = app.emit("skin:changed", &skin);
     }
     let _ = app.emit("theme:changed", &name);
+    // Cone fetches as soon as it is put on, not at the next tick.
+    radar::wake(&app);
     Ok(skin)
+}
+
+// ---- Cone's radar (#85) -------------------------------------------------------
+
+/// The radars a person can pick, by state.
+#[tauri::command]
+fn radar_sites() -> Vec<radar::Site> {
+    radar::sites()
+}
+
+/// The loop on disk, how old it is, and the alerts: what the windows draw.
+#[tauri::command]
+fn get_radar(app: AppHandle) -> radar::Status {
+    radar::status(&app)
+}
+
+/// Pick a radar by its id, or "" for none. The windows hear `radar:updated`
+/// with the new one's cache straight away, and the timer fetches for it.
+#[tauri::command]
+fn set_radar_site(app: AppHandle, id: String) -> Result<radar::Status, String> {
+    let id = id.trim();
+    if !id.is_empty() && radar::site(id).is_none() {
+        return Err(format!("{id} is not a radar this app knows"));
+    }
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_setting(&conn, radar::SITE_SETTING, id).map_err(|e| e.to_string())?;
+    }
+    let status = radar::status(&app);
+    let _ = app.emit("radar:updated", &status);
+    radar::wake(&app);
+    Ok(status)
 }
 
 /// Calm: the kaleidoscope still (#147). Main asks at mount and hears
@@ -1293,6 +1330,7 @@ pub fn run() {
         .manage(video::SwitchAcks::default())
         .manage(video::OpenLock::default())
         .manage(skins::TemplateDir::default())
+        .manage(radar::Wake::default())
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this
             // process computes after this line depends on the answer, so there
@@ -1357,6 +1395,9 @@ pub fn run() {
             // WM_DISPLAYCHANGE, and covers a group already stranded at launch
             // as well as one stranded while running.
             wm::spawn_display_watch(&handle);
+            // Cone's radar timer (#85, D19): idle unless Cone is the theme and
+            // a radar is picked, and never before the windows are up.
+            radar::spawn(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1441,6 +1482,9 @@ pub fn run() {
             get_ffmpeg,
             set_ffmpeg,
             open_library_folder,
+            radar_sites,
+            get_radar,
+            set_radar_site,
             get_cookies_from,
             set_cookies_file,
             show_library,

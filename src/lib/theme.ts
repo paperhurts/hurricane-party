@@ -8,10 +8,10 @@ import type { Token } from "./skin";
 export type ThemeName = keyof typeof tokens.themes;
 
 /**
- * The themes a person can pick (#147). Cone is in the tokens and is v0.6
- * (#85): until it has its radar it would be Eyewall under another name.
+ * The themes a person can pick (#147). Cone (#85) is Eyewall's colours with
+ * the radar behind the classic windows.
  */
-export const WEARABLE = ["eyewall", "purricane"] as const satisfies readonly ThemeName[];
+export const WEARABLE = ["eyewall", "purricane", "cone"] as const satisfies readonly ThemeName[];
 export type Wearable = (typeof WEARABLE)[number];
 
 export function isWearable(name: unknown): name is Wearable {

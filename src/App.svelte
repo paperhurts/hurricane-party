@@ -17,6 +17,7 @@
   import { guideSheet, paintableSheet, templateManifest, templateParts, templateReadme } from "./lib/template";
   import { eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
+  import { alertsStale, issued, readout, type RadarSite, type RadarStatus } from "./lib/radar";
   import {
     backdropPng,
     madeManifest,
@@ -1134,6 +1135,37 @@
     await invoke("set_calm", { on });
   }
 
+  // Cone (#85, D135): which radar, and what it says. The sites are a fixed
+  // list; the status arrives with every refresh.
+  let radarSites = $state<RadarSite[]>([]);
+  let radar = $state<RadarStatus | null>(null);
+  let radarNow = $state(Date.now());
+  let radarStates = $derived([...new Set(radarSites.map((s) => s.state))].sort());
+  let radarSaid = $derived(theme === "cone" ? readout(radar, radarNow) : null);
+  let alertsOld = $derived(alertsStale(radar, radarNow));
+
+  async function setRadar(id: string) {
+    try {
+      radar = await invoke<RadarStatus>("set_radar_site", { id });
+    } catch (e) {
+      notice = `That radar was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  $effect(() => {
+    if (theme !== "cone") return;
+    if (!radarSites.length) invoke<RadarSite[]>("radar_sites").then((s) => (radarSites = s)).catch(() => {});
+    invoke<RadarStatus>("get_radar").then((s) => (radar = s)).catch(() => {});
+    const sub = listen<RadarStatus>("radar:updated", (e) => (radar = e.payload), {
+      target: { kind: "WebviewWindow", label: "library" },
+    });
+    const tick = setInterval(() => (radarNow = Date.now()), 20000);
+    return () => {
+      sub.then((off) => off());
+      clearInterval(tick);
+    };
+  });
+
   /**
    * The signed-in session yt-dlp uses for the videos that need one (D112).
    * Here beside the other settings until there is a settings window, the same
@@ -1560,6 +1592,21 @@
         {#each WEARABLE as t (t)}<option value={t}>{themeLabel(t)}</option>{/each}
       </select>
     </label>
+    {#if theme === "cone"}
+      <label class="conc skinpick" title="The NWS radar nearest you. Only its name is kept, on this PC">
+        radar
+        <select value={radar?.site?.id ?? ""} onchange={(e) => setRadar(e.currentTarget.value)}>
+          <option value="">Pick…</option>
+          {#each radarStates as st (st)}
+            <optgroup label={st}>
+              {#each radarSites.filter((s) => s.state === st) as s (s.id)}
+                <option value={s.id}>{s.id} — {s.name}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+      </label>
+    {/if}
     {#if themeVisualizer(theme) === "kaleidoscope"}
       <label class="glow" title="A still kaleidoscope: no turning, no bloom, one colour, and only its size answers the music">
         <input type="checkbox" checked={calm} onchange={(e) => setCalm(e.currentTarget.checked)} />
@@ -1673,6 +1720,21 @@
   </section>
 {/if}
 
+  {#if radarSaid}
+    <!-- Cone's readout and the Weather Service's alerts for the radar's state
+         (#85). Each alert carries its issue time, and all of them are struck
+         through once the fetch behind them is old: never a current-conditions
+         claim (theme.md). -->
+    <div class="radarline" class:warn={radarSaid.warn}>
+      <span class="said">{radarSaid.text}</span>
+      {#each (radar?.alerts ?? []).slice(0, 3) as a, i (i)}
+        <span class="alert" class:old={alertsOld} title={a.headline ?? a.event}>
+          NWS · {a.event.toUpperCase()}{#if issued(a)} · {issued(a)}{/if}
+        </span>
+      {/each}
+      {#if (radar?.alerts.length ?? 0) > 3}<span class="more">+{(radar?.alerts.length ?? 0) - 3} more</span>{/if}
+    </div>
+  {/if}
   {#if notice}
     <p class="notice">
       <span>{notice}</span>
@@ -2000,6 +2062,12 @@
   .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
          color: color-mix(in srgb, var(--text) 55%, transparent); white-space: nowrap; }
   .notice { margin: 0; font-size: 12px; color: var(--accent); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .radarline { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: 11px; letter-spacing: 0.06em;
+               color: var(--accent); }
+  .radarline.warn .said { color: var(--warn); }
+  .radarline .alert { color: var(--alert); }
+  .radarline .alert.old { text-decoration: line-through; color: color-mix(in srgb, var(--alert) 55%, transparent); }
+  .radarline .more { color: color-mix(in srgb, var(--text) 45%, transparent); }
   .notice span, .error span { overflow-wrap: anywhere; }
   .error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   /* The one destructive control reads as one: ember, not arc. */
