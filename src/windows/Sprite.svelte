@@ -559,8 +559,13 @@
   </div>
 {:else if el.type === "visualizer"}
   <!-- `--vis-well` reaches the analyser inside: how strongly its well paints
-       behind the bars (D122). -->
-  <div class="sp-vis" style="{box};--vis-well:{el.well}">
+       behind the bars (D122). A round box is a circle, and `--vis-radius`
+       rounds the wells inside it to match (D132). -->
+  <div
+    class="sp-vis"
+    class:round={el.shape === "round"}
+    style="{box};--vis-well:{el.well}{el.shape === 'round' ? ';--vis-radius:50%' : ''}"
+  >
     {#if slot}{@render slot()}{/if}
   </div>
 {:else if el.type === "list"}

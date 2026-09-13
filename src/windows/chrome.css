@@ -357,6 +357,12 @@ body {
 .sp-vis {
   position: absolute;
 }
+/* Purricane's badge (D132): the analyser drawn inside the largest circle its
+ * box holds. A clip, not a mask or a filter, so D73 still holds. */
+.sp-vis.round {
+  border-radius: 50%;
+  overflow: hidden;
+}
 
 /* The interior, under the title bar. Where it starts is the skin's to say
  * (Classic.svelte sets `top`); the rest of the window is its. */

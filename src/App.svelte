@@ -344,6 +344,9 @@
 
     const subs = [
       listen("jobs-changed", refreshJobs),
+      // Purricane's Main has a calm pill of its own (D132); the box here
+      // moves with it.
+      listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "library" } }),
       listen("library-changed", refreshLibrary),
       // Playback lives in the Main window (D5); this window is the remote.
       // Main asks for the next or previous track because the play order —
@@ -1111,12 +1114,18 @@
     await invoke("set_glow", { on });
   }
 
-  /** Wear a theme (#147): this window now, the others when they hear it. */
+  /** Wear a theme (#147): this window now, the others when they hear it. A
+   * theme that ships with a skin puts it on, and leaving it takes it off
+   * (D132), so the picker follows what Rust says is worn. */
   async function setTheme(name: string) {
     if (!isWearable(name)) return;
     theme = name;
     applyTheme(name);
-    await invoke("set_theme", { name });
+    const worn = await invoke<string>("set_theme", { name });
+    if (worn !== skin) {
+      skin = worn;
+      picturePlace = (await readyPicture(worn)).at;
+    }
   }
 
   async function setCalm(on: boolean) {
@@ -1220,7 +1229,12 @@
     // Before the windows are told, so none of them reads a sheet that is
     // still being given its room (D127).
     picturePlace = (await readyPicture(id)).at;
-    await invoke("set_skin", { id });
+    // Purricane's skin brings Purricane's theme (D132).
+    const worn = await invoke<string>("set_skin", { id });
+    if (isWearable(worn) && worn !== theme) {
+      theme = worn;
+      applyTheme(worn);
+    }
     // What this app could not use of it, every time it is worn (D110).
     const notes = await skinNotes(id);
     if (notes.length) {

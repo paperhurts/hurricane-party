@@ -12,8 +12,9 @@ export const MAX_DEG_PER_SEC = 10;
 export const MAX_BLOOM_HZ = 3;
 /** A bloom: a fast scale-and-fade, never a colour change. */
 export const BLOOM_MS = 150;
-/** One trip through the palette's hues. */
-export const HUE_PERIOD_S = 90;
+/** One trip through the palette's hues: the designer's minute and a half and
+ * five seconds (design/screens/Kaleidoscope, D132). */
+export const HUE_PERIOD_S = 95;
 
 /** The pattern's turn at time `t` (seconds), in radians. Zero when still:
  * calm, or `prefers-reduced-motion`. Audio never reaches this. */
@@ -56,45 +57,48 @@ export function bloomAt(nowMs: number, bloomedAtMs: number): number {
   return 1 - age / BLOOM_MS;
 }
 
-function rgb(h: string): [number, number, number] {
-  const n = parseInt(h.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+/** A colour's hue in degrees, 0..360, from `#RRGGBB`. A grey has none and
+ * answers 0. */
+export function hueOf(hex: string): number {
+  const n = parseInt(hex.slice(1, 7), 16);
+  if (!/^#[0-9a-fA-F]{6}/.test(hex) || !Number.isFinite(n)) return 0;
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
 }
 
-/** A colour between two, `t` of the way from `a` to `b`, as `rgb()`. */
-export function mix(a: string, b: string, t: number): string {
-  const [x, y] = [rgb(a), rgb(b)];
-  const k = Math.min(1, Math.max(0, t));
-  const c = x.map((v, i) => Math.round(v + (y[i] - v) * k));
-  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
-}
-
-/** How much of each colour's turn is spent on the way to the next. The rest
- * holds: a blend between two colours from opposite sides of the wheel passes
- * through grey, and the first version sat in that grey half the time. */
-export const HUE_BLEND = 0.3;
-
-/** The colour the pattern is at time `t`: drifting through `stops` once
- * every `HUE_PERIOD_S`, and back to the first. Each colour holds, then
- * blends into the next over the last `HUE_BLEND` of its turn. */
-export function hueAt(t: number, stops: string[], period = HUE_PERIOD_S): string {
-  if (stops.length === 0) return "transparent";
-  if (stops.length === 1) return mix(stops[0], stops[0], 0);
+/**
+ * The hue the pattern is at time `t` (seconds), in degrees: once round the
+ * ramp's hues every `period`, gliding from each to the next the short way
+ * round the wheel, and back to the first. The kaleidoscope reads a ramp's
+ * hues and draws them at its own lightness, which is what keeps a pastel
+ * ramp and a dark one both a glow: the designer's hues were numbers, and the
+ * palette's colours are where this app keeps them (D132).
+ */
+export function driftHue(t: number, hues: number[], period = HUE_PERIOD_S): number {
+  if (hues.length === 0) return 0;
+  if (hues.length === 1) return hues[0];
   const phase = (((t / period) % 1) + 1) % 1;
-  const at = phase * stops.length;
-  const i = Math.floor(at);
-  const into = at - i;
-  const k = into <= 1 - HUE_BLEND ? 0 : (into - (1 - HUE_BLEND)) / HUE_BLEND;
-  return mix(stops[i % stops.length], stops[(i + 1) % stops.length], k);
+  const at = phase * hues.length;
+  const i = Math.floor(at) % hues.length;
+  const a = hues[i];
+  const b = hues[(i + 1) % hues.length];
+  const step = ((((b - a) % 360) + 540) % 360) - 180;
+  return (((a + step * (at - Math.floor(at))) % 360) + 360) % 360;
 }
 
-/** Where the mandalas sit in a box `w` x `h`: as many as fit side by side at
- * a radius that fills the height, so a wide, short display (Main's is about
- * five times as wide as it is tall) is a band of them rather than one small
- * one in the middle or a large one cut to a sliver. */
+/** Where the mandalas sit in a box `w` x `h`. A box about as wide as it is
+ * tall holds one, filling it: Purricane's round badge, which is the
+ * designer's. A wide, short one (Eyewall's display is about five times as
+ * wide as it is tall) is a band of them side by side, a little larger than
+ * the height, rather than one small one in the middle. */
 export function centres(w: number, h: number): { x: number; y: number; r: number }[] {
   if (!(w > 0 && h > 0)) return [];
-  const r = h * 0.62;
   const n = Math.max(1, Math.round(w / (h * 1.6)));
+  if (n === 1) return [{ x: w / 2, y: h / 2, r: Math.min(w, h) / 2 }];
+  const r = h * 0.55;
   return Array.from({ length: n }, (_, i) => ({ x: ((i + 0.5) * w) / n, y: h / 2, r }));
 }

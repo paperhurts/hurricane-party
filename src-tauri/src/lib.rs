@@ -797,7 +797,6 @@ fn skins_dir(app: &AppHandle) -> std::path::PathBuf {
 }
 
 const SKINS_DIR_SETTING: &str = "skins.dir";
-const SKIN_SETTING: &str = "skin.current";
 
 #[tauri::command]
 fn import_skin(app: AppHandle, path: String) -> Result<skins::Unpacked, skins::SkinError> {
@@ -887,11 +886,11 @@ fn discard_skin(app: AppHandle, id: String) -> Result<(), skins::SkinError> {
     skins::discard(&skins_dir(&app), &id)
 }
 
-/// Every skin a person can pick: the one that ships, first and always (D90),
-/// then whatever they have imported.
+/// Every skin a person can pick: the two that ship, first and always (D90,
+/// D132), then whatever they have imported.
 #[tauri::command]
 fn list_skins(app: AppHandle) -> Vec<String> {
-    let mut out = vec!["eyewall".to_string()];
+    let mut out: Vec<String> = skins::SHIPPED.iter().map(|s| s.to_string()).collect();
     out.extend(skins::installed(&skins_dir(&app)));
     out
 }
@@ -900,20 +899,25 @@ fn list_skins(app: AppHandle) -> Vec<String> {
 fn get_skin(app: AppHandle) -> String {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
-    db::get_setting(&conn, SKIN_SETTING).unwrap_or_else(|| "eyewall".into())
+    db::skin(&conn)
 }
 
 /// Wear a skin. The three classic windows hear `skin:changed` and reload,
-/// so a switch is immediate rather than a relaunch.
+/// so a switch is immediate rather than a relaunch. A skin that ships with a
+/// theme puts the theme on too (D132); the theme worn afterwards comes back,
+/// so the library can show it.
 #[tauri::command]
-fn set_skin(app: AppHandle, id: String) -> Result<(), db::DbError> {
-    {
+fn set_skin(app: AppHandle, id: String) -> Result<String, db::DbError> {
+    let (theme, changed) = {
         let state = app.state::<Db>();
         let conn = state.0.lock().unwrap();
-        db::set_setting(&conn, SKIN_SETTING, &id)?;
-    }
+        db::wear_skin(&conn, &id)?
+    };
     let _ = app.emit("skin:changed", &id);
-    Ok(())
+    if changed {
+        let _ = app.emit("theme:changed", &theme);
+    }
+    Ok(theme)
 }
 
 /// The manifest of an imported skin, and the folder its sheets are in, so the
@@ -969,15 +973,21 @@ fn get_theme(app: AppHandle) -> String {
     db::theme(&conn)
 }
 
+/// Wear a theme, and the skin that ships with it (D132). Both settings are
+/// written before either event goes out, so a window reloading on the first
+/// reads the pair. The skin worn afterwards comes back for the library.
 #[tauri::command]
-fn set_theme(app: AppHandle, name: String) -> Result<(), db::DbError> {
-    {
+fn set_theme(app: AppHandle, name: String) -> Result<String, db::DbError> {
+    let (skin, changed) = {
         let state = app.state::<Db>();
         let conn = state.0.lock().unwrap();
-        db::set_theme(&conn, &name)?;
+        db::wear_theme(&conn, &name)?
+    };
+    if changed {
+        let _ = app.emit("skin:changed", &skin);
     }
     let _ = app.emit("theme:changed", &name);
-    Ok(())
+    Ok(skin)
 }
 
 /// Calm: the kaleidoscope still (#147). Main asks at mount and hears
@@ -997,6 +1007,26 @@ fn set_calm(app: AppHandle, on: bool) -> Result<(), db::DbError> {
         db::set_calm(&conn, on)?;
     }
     let _ = app.emit("vis:calm", on);
+    Ok(())
+}
+
+/// The kaleidoscope's segments, six or eight, once a person has picked on
+/// Purricane's Main (D132). Main asks at mount and hears `vis:segments`.
+#[tauri::command]
+fn get_segments(app: AppHandle) -> Option<u8> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::segments(&conn)
+}
+
+#[tauri::command]
+fn set_segments(app: AppHandle, n: u8) -> Result<(), db::DbError> {
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_segments(&conn, n)?;
+    }
+    let _ = app.emit("vis:segments", n);
     Ok(())
 }
 
@@ -1264,6 +1294,8 @@ pub fn run() {
             set_theme,
             get_calm,
             set_calm,
+            get_segments,
+            set_segments,
             eq_presets,
             save_eq_preset,
             delete_eq_preset,
