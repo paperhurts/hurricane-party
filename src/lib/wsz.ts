@@ -234,6 +234,7 @@ const L = {
   /** The bar's menu buttons, 22 x 18, twelve up from the bottom. */
   plAdd: [14, 86, 22, 18] as Rect,
   plRemove: [43, 86, 22, 18] as Rect,
+  plSelect: [72, 86, 22, 18] as Rect,
   plList: [231, 86, 22, 18] as Rect,
   /** The running time, in the bottom-right block. */
   plStatus: [132, 88, 60, 10] as Rect,
@@ -326,14 +327,14 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
  * this number moves on (D107). Bump it whenever the mapping changes what it
  * writes for the same art.
  */
-export const WSZ_GENERATION = 4;
+export const WSZ_GENERATION = 5;
 
 /** What a classic skin draws that this app does not use (D110). Not a fault
  * in the skin and not one in this app: the format is another program's
  * layout, and these controls belong to features this app has elsewhere or
  * does not have at all. */
 const NOT_USED =
-  "A classic skin also draws balance, mono/stereo, the playlist's own transport row and its SEL and MISC menus. This app has one transport (D81), no balance and no menus, so in this skin those stay pictures.";
+  "A classic skin also draws balance, mono/stereo, the playlist's own transport row and its MISC menu. This app has one transport (D81), no balance and no menus, so in this skin those stay pictures.";
 
 export type WszInput = {
   /** Every path in the zip, in any case and at any depth. */
@@ -866,19 +867,24 @@ function playlistWindow(sheets: Record<string, string>, fonts: Record<string, un
   if (hasArt) {
     // The classic's bottom bar is five buttons that opened menus. This app
     // has no menus, so each maps to the one thing its menu was mostly for,
-    // and a press shows that menu item's own glyph (D103). The select and
-    // misc menus have nothing here to be, and stay as the art they are drawn
-    // into.
-    const barButton = (rect: Rect, patch: Rect, glyph: Rect, action: string, anchor?: string) => ({
+    // and a press shows that menu item's own glyph (D103). Misc has nothing
+    // here to be, and stays as the art it is drawn into.
+    const barButton = (rect: Rect, patch: Rect, glyph: Rect | null, action: string, anchor?: string) => ({
       type: "button",
       rect,
       ...(anchor ? { anchor } : {}),
       sprite: sp("pledit", patch),
-      active: sp("pledit", glyph),
+      ...(glyph ? { active: sp("pledit", glyph) } : {}),
       action,
     });
     els.addButton = barButton(L.plAdd, [14, 80, 22, 18], p.addDir, "add", "bottom");
     els.removeButton = barButton(L.plRemove, [43, 80, 22, 18], p.removeSelected, "remove", "bottom");
+    // Sel loads the list selected in the library, as Eyewall's SEL does
+    // (D125). Its menu was select all, none and invert, and none of those
+    // glyphs says what this press does, so a press shows no glyph: the
+    // button is the skin's own pixels, like the shade strip's controls (D111),
+    // and the playlist changing is what answers it.
+    els.selectButton = barButton(L.plSelect, [72, 80, 22, 18], null, "loadSelected", "bottom");
     els.libraryButton = barButton(L.plList, [232, 80, 22, 18], p.loadList, "library", "bottom-right");
     // No URL button: the classic's Add was a menu, and a link is added from
     // the library window. Nothing of the skin is lost, so this is a line in

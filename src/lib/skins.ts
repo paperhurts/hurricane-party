@@ -14,7 +14,16 @@ import chrome1 from "../../skins/eyewall/chrome.png";
 import chrome2 from "../../skins/eyewall/chrome@2x.png";
 import { parseSkin, type Skin, type WindowName } from "./skin";
 import { wszManifest, WSZ_GENERATION } from "./wsz";
-import { remade } from "./madeskin";
+import {
+  canMove,
+  PICTURE_H,
+  PICTURE_W,
+  pictureFor,
+  pictureOf,
+  remade,
+  type Picture,
+  type PicturePlace,
+} from "./madeskin";
 
 const FILES: Record<string, string> = {
   "chrome.png": chrome1,
@@ -61,7 +70,7 @@ export async function currentSkin(): Promise<Wearable> {
   if (id === "eyewall") return { id, skin: EYEWALL, resolve: eyewallFile };
   try {
     const on = await invoke<SkinOnDisk>("read_skin", { id });
-    const resolve = (file: string) => convertFileSrc(`${on.dir}/${file}`);
+    const own = (file: string) => convertFileSrc(`${on.dir}/${file}`);
     const written = JSON.parse(on.manifest) as { generator?: number };
     // A manifest is not the skin, it is what this importer made of it, so an
     // importer that has learned something rebuilds it from the art rather
@@ -84,6 +93,18 @@ export async function currentSkin(): Promise<Wearable> {
     }
     const parsed = again ? parseSkin(again) : stale ? await rebuild(id, on, "an older import") : parseSkin(written);
     for (const w of parsed.warnings) console.warn(`${id}: ${w}`);
+    // And it wears Eyewall's sheets as they are now, not the copies made with
+    // it (D126): a layout from today on a sheet from the day it was made
+    // reads sprites that have since moved or changed strength. The copies stay
+    // in the folder, so the folder is still a whole skin wherever it goes.
+    // Its picture's address carries the sheet's shape (D127): the same file
+    // name redrawn taller must not be answered from the webview's cache of
+    // the shorter one, which would refuse the skin for sprites past its end.
+    const shape = again ? pictureOf(again) : null;
+    const resolve = again
+      ? (file: string) =>
+          FILES[file] ?? (file.startsWith("picture") ? `${own(file)}?sheet=${shape!.sheet}.${shape!.top}` : own(file))
+      : own;
     return { id, skin: parsed.skin, resolve };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
@@ -176,6 +197,138 @@ export async function skinNotes(id: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Where a made skin's picture sits, when it could sit anywhere else (D127).
+ * Null for Eyewall, an import, and a made skin whose picture looks the same
+ * at every place, so the library offers the choice only where it does
+ * something.
+ *
+ * A skin made before D127 recorded nothing, and a picture shorter than the
+ * windows filled the top of a sheet with no room around it — which is most
+ * of the skins the owner had made. So the first time one is asked about, its
+ * sheet is given that room here, once: it looks exactly as it did, and can
+ * move from then on. A picture that really is three windows tall is measured
+ * and left as it is.
+ *
+ * `redrawn` says the sheet changed under the manifest. Ask before telling the
+ * windows to wear a skin, never after: the first try told them first, and a
+ * window that read the skin while its sheets were half rewritten refused it
+ * and put the owner back in Eyewall. When a window may already be wearing it
+ * (the library opening), tell them again once this says `redrawn`.
+ */
+export function readyPicture(id: string): Promise<{ at: PicturePlace | null; redrawn: boolean }> {
+  // One at a time per skin. Two at once was how the first try broke: the
+  // second saw the first's new 1x sheet beside its old 2x one, took the skin
+  // for done and wrote the new manifest before the 2x sheet existed.
+  const running = readying.get(id);
+  if (running) return running;
+  const run = readyOnce(id).finally(() => readying.delete(id));
+  readying.set(id, run);
+  return run;
+}
+
+const readying = new Map<string, Promise<{ at: PicturePlace | null; redrawn: boolean }>>();
+
+async function readyOnce(id: string): Promise<{ at: PicturePlace | null; redrawn: boolean }> {
+  const none = { at: null, redrawn: false };
+  if (id === "eyewall") return none;
+  try {
+    const on = await invoke<SkinOnDisk>("read_skin", { id });
+    const written = JSON.parse(on.manifest) as Record<string, any>;
+    if (typeof written.maker !== "number") return none;
+    let p = pictureOf(written);
+    let redrawn = false;
+    // No room around it: made before D127 (the windows may already have
+    // written it a record that says so), or a picture exactly this tall.
+    if (p.sheet === PICTURE_H && p.top === 0) {
+      p = await giveRoom(id, on, written);
+      redrawn = p.top > 0;
+    }
+    return { at: canMove(p) ? p.at : null, redrawn };
+  } catch (e) {
+    console.warn(`${id}: where its picture sits could not be read:`, e);
+    return none;
+  }
+}
+
+/** Move a made skin's picture (D127). Only the manifest changes; the windows
+ * wear it when they next read it, which `set_skin` asks them to. */
+export async function placePicture(id: string, at: PicturePlace): Promise<void> {
+  const on = await invoke<SkinOnDisk>("read_skin", { id });
+  const written = JSON.parse(on.manifest) as Record<string, any>;
+  const again = remade(written, { ...pictureOf(written), at });
+  if (!again) throw new Error(`${id} is not a skin made from a picture`);
+  // The same validator every skin goes through, before it is written.
+  parseSkin(again);
+  await invoke("write_skin_manifest", { id, json: JSON.stringify(again, null, 1) });
+}
+
+/**
+ * Redraw a pre-D127 made skin's picture sheets with room above and below the
+ * picture, and record where it is. The picture's height is not in the old
+ * manifest, but it is in the sheet: the maker drew it from the top and left
+ * the rest clear, so it ends at the last row with anything in it.
+ */
+async function giveRoom(id: string, on: SkinOnDisk, written: Record<string, any>): Promise<Picture> {
+  // Never from this window's cache: a sheet already redrawn must be seen as
+  // redrawn, or it would be given its room a second time.
+  const fresh = (file: string) => `${convertFileSrc(`${on.dir}/${file}`)}?read=${Date.now()}`;
+  const [one, two] = await Promise.all([picture(fresh("picture.png")), picture(fresh("picture@2x.png"))]);
+  const rows = usedRows(one);
+  const tall = one.naturalHeight;
+  let p: Picture;
+  if (tall > PICTURE_H && tall < 2 * PICTURE_H && two.naturalHeight === 2 * tall) {
+    // Already redrawn, and the record of it lost: a window that read the old
+    // manifest wrote it back. The room is in the sheet's own height.
+    p = { sheet: tall, top: tall - PICTURE_H, height: 2 * PICTURE_H - tall, at: "top" };
+  } else if (tall === PICTURE_H && two.naturalHeight === 2 * PICTURE_H && rows > 0 && rows < PICTURE_H) {
+    p = pictureFor(PICTURE_W, rows);
+    for (const [img, scale] of [
+      [one, 1],
+      [two, 2],
+    ] as const) {
+      const c = new OffscreenCanvas(PICTURE_W * scale, p.sheet * scale);
+      c.getContext("2d")!.drawImage(img, 0, p.top * scale);
+      const bytes = new Uint8Array(await (await c.convertToBlob({ type: "image/png" })).arrayBuffer());
+      await invoke("write_skin_picture", bytes, { headers: { "x-hp-skin": id, "x-hp-scale": String(scale) } });
+    }
+  } else {
+    // Exactly three windows tall, or two sheets that do not agree: left
+    // alone. Nothing is written from a sheet this cannot account for.
+    return { sheet: PICTURE_H, top: 0, height: PICTURE_H, at: "top" };
+  }
+  const again = remade(written, p);
+  if (!again) return p;
+  parseSkin(again);
+  await invoke("write_skin_manifest", { id, json: JSON.stringify(again, null, 1) });
+  console.info(`${id}: picture given room to move (${rows} rows, now in a ${p.sheet}-row sheet)`);
+  return p;
+}
+
+function picture(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    // The asset protocol is another origin; a CORS-clean image is one a
+    // canvas can read back (skinsheet.ts).
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`picture sheet failed to decode: ${url.slice(0, 64)}`));
+    img.src = url;
+  });
+}
+
+/** Rows from the top of a 1x picture sheet to the last with any pixel in it. */
+function usedRows(img: HTMLImageElement): number {
+  const c = new OffscreenCanvas(img.naturalWidth, img.naturalHeight);
+  const g = c.getContext("2d")!;
+  g.drawImage(img, 0, 0);
+  const { data, width, height } = g.getImageData(0, 0, img.naturalWidth, img.naturalHeight);
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) if (data[(y * width + x) * 4 + 3] > 0) return y + 1;
+  }
+  return 0;
 }
 
 /** The three classic windows' labels are not the manifest's names. */

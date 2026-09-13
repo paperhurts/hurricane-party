@@ -6,9 +6,17 @@
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
   import { parseSkin } from "./lib/skin";
-  import { measureSheets, skinNotes } from "./lib/skins";
+  import { measureSheets, placePicture, readyPicture, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
-  import { backdropPng, madeManifest, nameFrom, pictureHeightFor, pixelsOf } from "./lib/madeskin";
+  import {
+    backdropPng,
+    madeManifest,
+    nameFrom,
+    pictureFor,
+    pixelsOf,
+    PLACES,
+    type PicturePlace,
+  } from "./lib/madeskin";
   import { paletteFromPixels } from "./lib/palette";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
@@ -291,7 +299,13 @@
     invoke<string>("library_path").then((p) => (libraryPath = p));
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
-    invoke<string>("get_skin").then((s) => (skin = s));
+    invoke<string>("get_skin").then(async (s) => {
+      skin = s;
+      const ready = await readyPicture(s);
+      picturePlace = ready.at;
+      // The windows opened wearing it before its sheet was given room: again.
+      if (ready.redrawn) await invoke("set_skin", { id: s });
+    });
     invoke<string[]>("list_skins").then((s) => (skins = s));
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
     invoke<CookieSource[]>("cookie_browsers").then((b) => (browsers = b));
@@ -342,6 +356,7 @@
         if (skin === "eyewall") return;
         notice = `${e.payload.id} could not be worn, so the windows kept Eyewall: ${e.payload.reason}`;
         skin = "eyewall";
+        picturePlace = null;
         invoke("set_skin", { id: "eyewall" }).catch(() => {});
       }),
       // The classic playlist window mirrors the list showing here. It asks
@@ -1164,6 +1179,9 @@
   let skinSaid = false;
   async function setSkin(id: string, name = id) {
     skin = id;
+    // Before the windows are told, so none of them reads a sheet that is
+    // still being given its room (D127).
+    picturePlace = (await readyPicture(id)).at;
     await invoke("set_skin", { id });
     // What this app could not use of it, every time it is worn (D110).
     const notes = await skinNotes(id);
@@ -1190,6 +1208,22 @@
    * writing the folder, and a skin that fails is thrown away, as an import is.
    */
   let making = $state(false);
+  // Where the worn made skin's picture sits, or null when there is no choice
+  // to offer: not a made skin, or a picture that looks the same anywhere.
+  let picturePlace = $state<PicturePlace | null>(null);
+
+  /** Move the picture behind the three windows (D127). A manifest change, so
+   * it is instant and can be changed back. */
+  async function movePicture(at: PicturePlace) {
+    const id = skin;
+    try {
+      await placePicture(id, at);
+      picturePlace = at;
+      await invoke("set_skin", { id });
+    } catch (e) {
+      notice = `Couldn't move the picture: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
   async function makeSkin() {
     if (making) return;
     const picked = await openDialog({
@@ -1207,12 +1241,12 @@
       const bitmap = await createImageBitmap(new Blob([bytes]));
       const { palette, viscolor } = paletteFromPixels(pixelsOf(bitmap));
       const [one, two] = await Promise.all([backdropPng(bitmap, 1), backdropPng(bitmap, 2)]);
-      const pictureHeight = pictureHeightFor(bitmap.width, bitmap.height);
+      const picture = pictureFor(bitmap.width, bitmap.height);
       bitmap.close();
       id = (await invoke<{ id: string; dir: string }>("make_skin", { name })).id;
       await invoke("write_skin_picture", one, { headers: { "x-hp-skin": id, "x-hp-scale": "1" } });
       await invoke("write_skin_picture", two, { headers: { "x-hp-skin": id, "x-hp-scale": "2" } });
-      const manifest = madeManifest({ name, palette, viscolor, pictureHeight });
+      const manifest = madeManifest({ name, palette, viscolor, picture });
       // The same validator every skin goes through, before anything is worn.
       parseSkin(manifest);
       await invoke("write_skin_manifest", { id, json: JSON.stringify(manifest, null, 1) });
@@ -1342,6 +1376,14 @@
     >
       {making ? "Making…" : "Make a skin…"}
     </button>
+    {#if picturePlace}
+      <label class="conc skinpick" title="Which part of the picture shows behind the three windows">
+        picture
+        <select value={picturePlace} onchange={(e) => movePicture(e.currentTarget.value as PicturePlace)}>
+          {#each PLACES as p (p)}<option value={p}>{p}</option>{/each}
+        </select>
+      </label>
+    {/if}
   </header>
 
   <form onsubmit={(e) => { e.preventDefault(); add(); }}>
