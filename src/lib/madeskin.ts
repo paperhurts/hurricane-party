@@ -138,6 +138,34 @@ export function madeManifest(made: {
   return m;
 }
 
+/**
+ * A made skin, made again from what its manifest already holds (D124).
+ *
+ * A made skin copies Eyewall's layout the moment it is made, so it never got
+ * what Eyewall gained afterwards — SEL was the first thing that showed it,
+ * and the owner had been told to make the same skin again four times in one
+ * evening. Everything the maker used is in the manifest it wrote: the name,
+ * the six colours, the ramp, and the picture's height (where the playlist's
+ * backdrop ends). So the skin is rebuilt from Eyewall's current layout each
+ * time it is worn — a pure step, no picture decoded — the way an import is
+ * rebuilt when its importer improves (D107). The picture itself is not
+ * redrawn: it is the same sheet either way.
+ *
+ * Returns null for anything that is not a made skin.
+ */
+export function remade(written: Record<string, any>): Record<string, unknown> | null {
+  if (typeof written?.maker !== "number") return null;
+  const band = written.windows?.playlist?.elements?.backdrop?.sprite?.rect;
+  const pictureHeight = Array.isArray(band) && band.length === 4 ? band[1] + band[3] : PICTURE_H;
+  if (typeof written.name !== "string" || !written.palette || !Array.isArray(written.viscolor)) return null;
+  return madeManifest({
+    name: written.name,
+    palette: written.palette,
+    viscolor: written.viscolor,
+    pictureHeight,
+  });
+}
+
 // ---- the picture, in the webview ----
 
 /** Pixels for the palette: the picture shrunk to a small square, which is all
