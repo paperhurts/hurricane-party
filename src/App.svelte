@@ -317,6 +317,7 @@
     refreshJobs();
     refreshLibrary();
     invoke<string>("library_path").then((p) => (libraryPath = p));
+    refreshDownloadDir();
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
     invoke<string>("get_theme").then((t) => {
@@ -345,7 +346,11 @@
     });
 
     const subs = [
-      listen("jobs-changed", refreshJobs),
+      listen("jobs-changed", () => {
+        refreshJobs();
+        // A drive coming back, or a download waiting for one, shows here.
+        refreshDownloadDir();
+      }),
       // Purricane's Main has a calm pill of its own (D132); the box here
       // moves with it.
       listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "library" } }),
@@ -1197,6 +1202,42 @@
     return t.title.toLowerCase().startsWith(by.toLowerCase()) ? "" : by;
   }
 
+  /**
+   * Where downloads go (#154, D136). A folder a person picks takes the
+   * downloads queued from then on; the ones already queued, and everything
+   * already downloaded, stay where they were. A chosen folder that is missing
+   * (a drive unplugged) holds its downloads, and says so here.
+   */
+  let downloadDir = $state<{ path: string; chosen: boolean; present: boolean }>({
+    path: "",
+    chosen: false,
+    present: true,
+  });
+  function refreshDownloadDir() {
+    invoke<{ path: string; chosen: boolean; present: boolean }>("get_download_dir")
+      .then((d) => {
+        downloadDir = d;
+        libraryPath = d.path;
+      })
+      .catch(() => {});
+  }
+  async function pickDownloadDir() {
+    const picked = await openDialog({ directory: true, multiple: false, title: "Where should downloads go?" });
+    if (typeof picked !== "string") return;
+    try {
+      downloadDir = await invoke("set_download_dir", { path: picked });
+      libraryPath = downloadDir.path;
+      notice = `New downloads go to ${downloadDir.path}. What is already downloaded stays where it is.`;
+    } catch (e) {
+      notice = `That folder was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  async function resetDownloadDir() {
+    downloadDir = await invoke("set_download_dir", { path: "" });
+    libraryPath = downloadDir.path;
+    notice = "New downloads go to the app's own library folder again.";
+  }
+
   /** Open the library folder in Explorer (#155). Rust picks the folder. */
   async function openLibraryFolder() {
     try {
@@ -2042,10 +2083,17 @@
 
   <!-- The folder downloads go to, and a click opens it in Explorer (#155). -->
   <footer>
-    <span>Library</span>
+    <span>{downloadDir.chosen ? "Downloads go to" : "Library"}</span>
     <button class="path" onclick={openLibraryFolder} title="Open this folder in Explorer">
       <code>{libraryPath}</code>
     </button>
+    {#if !downloadDir.present}
+      <span class="missing">is not there: downloads for it wait until it is back</span>
+    {/if}
+    <button class="mini" onclick={pickDownloadDir} title="Send downloads you queue from now on to another folder">Change…</button>
+    {#if downloadDir.chosen}
+      <button class="mini" onclick={resetDownloadDir} title="Send new downloads to the app's own library folder again">&times;</button>
+    {/if}
   </footer>
 </main>
 
@@ -2263,4 +2311,6 @@
   footer .path { min-width: 0; display: flex; padding: 0; border: 0; background: none; font: inherit;
                  color: inherit; cursor: pointer; text-align: left; }
   footer .path:hover:not(:disabled) { background: none; color: var(--accent); text-decoration: underline; }
+  footer .missing { color: var(--warn); flex: 0 0 auto; }
+  footer .mini { flex: 0 0 auto; }
 </style>
