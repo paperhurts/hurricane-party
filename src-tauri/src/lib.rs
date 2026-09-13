@@ -801,7 +801,47 @@ const SKIN_SETTING: &str = "skin.current";
 
 #[tauri::command]
 fn import_skin(app: AppHandle, path: String) -> Result<skins::Unpacked, skins::SkinError> {
-    skins::unpack(std::path::Path::new(&path), &skins_dir(&app))
+    let p = std::path::Path::new(&path);
+    // A painted folder is picked by its manifest (#146), so the one dialog
+    // takes a `.wsz`, a zip of either kind, and a folder.
+    let manifest = p
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("manifest.json"));
+    if manifest {
+        skins::copy_folder(p, &skins_dir(&app))
+    } else {
+        skins::unpack(p, &skins_dir(&app))
+    }
+}
+
+/// Start a template to paint (#146): a new folder inside the one the person
+/// chose, remembered as the only place `write_template_file` may write.
+#[tauri::command]
+fn start_template(app: AppHandle, parent: String) -> Result<String, skins::SkinError> {
+    let dir = skins::start_template(std::path::Path::new(&parent), "my-skin")?;
+    *app.state::<skins::TemplateDir>().0.lock().unwrap() = Some(dir.clone());
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// One of the template's files, as a raw body with its name in a header.
+#[tauri::command]
+fn write_template_file(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("write_template_file: expected a raw body".into());
+    };
+    let name = request
+        .headers()
+        .get("x-hp-name")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("write_template_file: no x-hp-name")?;
+    let dir = app
+        .state::<skins::TemplateDir>()
+        .0
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("no template has been started")?;
+    skins::write_template_file(&dir, name, bytes).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1079,6 +1119,7 @@ pub fn run() {
         .manage(wm::Wm::default())
         .manage(video::SwitchAcks::default())
         .manage(video::OpenLock::default())
+        .manage(skins::TemplateDir::default())
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this
             // process computes after this line depends on the answer, so there
@@ -1178,6 +1219,8 @@ pub fn run() {
             delete_eq_preset,
             import_eqf,
             import_skin,
+            start_template,
+            write_template_file,
             write_skin_manifest,
             discard_skin,
             make_skin,
