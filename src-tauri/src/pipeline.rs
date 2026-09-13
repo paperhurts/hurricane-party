@@ -110,8 +110,13 @@ type Result<T> = std::result::Result<T, PipelineError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Probed {
     pub id: String,
+    /// The song when the video is one (#156, D134), else the video's title.
     pub title: String,
+    /// Who it is by: the song's artists when the video is the song, else the
+    /// uploader, which on YouTube is the channel.
     pub uploader: Option<String>,
+    /// The song's album, when the video is the song and YouTube names one.
+    pub album: Option<String>,
     pub duration_s: Option<f64>,
     pub extractor: String,
     /// Best-effort estimate; yt-dlp often can't know before downloading.
@@ -228,6 +233,59 @@ pub fn own_ffmpeg(app: &AppHandle) -> Option<PathBuf> {
 /// that ships.
 fn ffmpeg_for(app: &AppHandle) -> Option<PathBuf> {
     own_ffmpeg(app).or_else(bundled_ffmpeg)
+}
+
+/// "Artist - Song [Official Video]" as the artist and the song (D134), split
+/// at the first dash with a space either side, the song without the trailing
+/// tags a video title adds. None when there is no such dash, or nothing on
+/// one side of it.
+fn split_song(title: &str) -> Option<(String, String)> {
+    let at = [" - ", " \u{2013} ", " \u{2014} "]
+        .iter()
+        .filter_map(|sep| title.find(sep).map(|i| (i, sep.len())))
+        .min()?;
+    let artist = title[..at.0].trim();
+    let song = strip_video_tags(title[at.0 + at.1..].trim());
+    (!artist.is_empty() && !song.is_empty()).then(|| (artist.to_string(), song))
+}
+
+/// The bracketed tags a music video's title ends with that are not part of
+/// the song's name. A short list on purpose: "(feat. …)", "(Live)" and
+/// "(Remastered)" say which recording it is, and stay.
+fn strip_video_tags(song: &str) -> String {
+    const TAGS: [&str; 16] = [
+        "official video",
+        "official music video",
+        "official audio",
+        "official lyric video",
+        "official visualizer",
+        "lyric video",
+        "lyrics",
+        "audio",
+        "video",
+        "music video",
+        "visualizer",
+        "video oficial",
+        "audio oficial",
+        "hd",
+        "hq",
+        "4k",
+    ];
+    let mut s = song.trim().to_string();
+    loop {
+        let close = match s.chars().last() {
+            Some(')') => '(',
+            Some(']') => '[',
+            _ => break,
+        };
+        let Some(open) = s.rfind(close) else { break };
+        let inner = s[open + 1..s.len() - 1].trim().to_lowercase();
+        if !TAGS.contains(&inner.as_str()) {
+            break;
+        }
+        s = s[..open].trim_end().to_string();
+    }
+    s
 }
 
 /// Whether a file is named as an ffmpeg is, before it is run to ask (D133):
@@ -932,22 +990,73 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         .and_then(|a| a.first())
         .unwrap_or(&v);
 
-    let id = node
-        .get("id")
-        .and_then(|x| x.as_str())
-        .ok_or_else(|| PipelineError::Metadata("no id in yt-dlp output".into()))?
-        .to_string();
+    probed_from(node)
+}
+
+/// What a download is called and who it is by (#156, D134), from one video's
+/// metadata. Split out so the rule is tested without running yt-dlp.
+///
+/// YouTube knows a song's name, artists and album for many videos, and
+/// yt-dlp hands them over as `track`, `artists` and `album`. That is the name
+/// and the artist a library wants: the uploader is the channel, and a label's
+/// or a fan's upload of a song is not by the label or the fan. But YouTube
+/// lists the music *in* a video too, so a vlog with a licensed song under it
+/// carries that song's metadata as well. The song is taken only when the
+/// video's own title names the track or one of its artists.
+///
+/// A video with no music metadata that YouTube files under Music, and whose
+/// title reads "Artist - Song", is split there: a label's or an artist's own
+/// upload of a song carries no metadata at all, and its channel is not its
+/// artist (the owner's call, D134). Any other video keeps its title and its
+/// channel, as every download did before: a vlog is never split.
+fn probed_from(node: &serde_json::Value) -> Result<Probed> {
+    let text = |k: &str| {
+        node.get(k)
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let id = text("id").ok_or_else(|| PipelineError::Metadata("no id in yt-dlp output".into()))?;
+    let video_title = text("title").unwrap_or_else(|| id.clone());
+    let artists: Vec<String> = match node.get("artists").and_then(|a| a.as_array()) {
+        Some(list) => list
+            .iter()
+            .filter_map(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        None => text("artist").into_iter().collect(),
+    };
+    let track = text("track");
+    let named = |what: &str| video_title.to_lowercase().contains(&what.to_lowercase());
+    let is_the_song = track.as_deref().is_some_and(named) || artists.iter().any(|a| named(a));
+    let channel = text("uploader").or_else(|| text("channel"));
+    let music = node
+        .get("categories")
+        .and_then(|c| c.as_array())
+        .is_some_and(|c| c.iter().any(|x| x.as_str() == Some("Music")));
+    let (title, uploader, album) = match track {
+        Some(track) if is_the_song => (
+            track,
+            if artists.is_empty() {
+                channel
+            } else {
+                Some(artists.join(", "))
+            },
+            text("album"),
+        ),
+        _ => match split_song(&video_title).filter(|_| music) {
+            Some((artist, song)) => (song, Some(artist), None),
+            None => (video_title, channel, None),
+        },
+    };
 
     Ok(Probed {
-        title: node
-            .get("title")
-            .and_then(|x| x.as_str())
-            .unwrap_or(&id)
-            .to_string(),
-        uploader: node
-            .get("uploader")
-            .and_then(|x| x.as_str())
-            .map(str::to_string),
+        title,
+        uploader,
+        album,
         duration_s: node.get("duration").and_then(|x| x.as_f64()),
         extractor: node
             .get("extractor_key")
@@ -1555,6 +1664,11 @@ async fn extract_mp3(
         format!("title={}", probed.title),
         "-metadata".into(),
         format!("artist={}", probed.uploader.clone().unwrap_or_default()),
+        // yt-dlp tagged the source with the album of any song it found in the
+        // video, and `-map_metadata 0` carries it. Only a video that is the
+        // song keeps one (D134); an empty value removes it from the others.
+        "-metadata".into(),
+        format!("album={}", probed.album.clone().unwrap_or_default()),
         scratch.to_string_lossy().into_owned(),
     ]);
 
@@ -2069,6 +2183,121 @@ mod tests {
         assert!(!is_generated_list("PLWtysTkuEQDPa2kda8p6BYFQLCUz_cElx"));
         assert!(!is_generated_list("OLAK5uy_k"));
         assert!(!is_generated_list("UUabcdef"));
+    }
+
+    #[test]
+    fn a_video_that_is_the_song_is_named_by_it_and_a_video_with_a_song_in_it_is_not() {
+        let probe = |json: &str| probed_from(&serde_json::from_str(json).unwrap()).unwrap();
+
+        // A label's upload of a song: the song and its singer, not the label.
+        let song = probe(
+            r#"{"id": "a1", "title": "Some Singer - The Song [Official Video]",
+                "uploader": "A Record Label", "track": "The Song",
+                "artists": ["Some Singer", "A Guest"], "album": "The Album"}"#,
+        );
+        assert_eq!(song.title, "The Song");
+        assert_eq!(song.uploader.as_deref(), Some("Some Singer, A Guest"));
+        assert_eq!(song.album.as_deref(), Some("The Album"));
+
+        // Named by its artist even when the track is spelled differently.
+        let accent = probe(
+            r#"{"id": "a2", "title": "Some Singer - Canción (Live)", "uploader": "Label",
+                "track": "Cancion", "artists": ["Some Singer"]}"#,
+        );
+        assert_eq!(accent.title, "Cancion");
+        assert_eq!(accent.uploader.as_deref(), Some("Some Singer"));
+
+        // A vlog with a licensed song under it keeps its own title and channel.
+        let vlog = probe(
+            r#"{"id": "b1", "title": "Storm prep, day 3", "uploader": "Weather Channel Fan",
+                "track": "Clair de Lune", "artists": ["Claude Debussy"], "album": "Suite"}"#,
+        );
+        assert_eq!(vlog.title, "Storm prep, day 3");
+        assert_eq!(vlog.uploader.as_deref(), Some("Weather Channel Fan"));
+        assert_eq!(vlog.album, None);
+
+        // No music metadata: the title and the channel, falling back to the
+        // channel field and to the id, as before.
+        let plain = probe(r#"{"id": "c1", "title": "Plain video", "channel": "Somebody"}"#);
+        assert_eq!(plain.title, "Plain video");
+        assert_eq!(plain.uploader.as_deref(), Some("Somebody"));
+        assert_eq!(probe(r#"{"id": "c2"}"#).title, "c2");
+
+        // An older yt-dlp answer with `artist` as a string still counts.
+        let old = probe(
+            r#"{"id": "d1", "title": "The Song", "uploader": "Singer - Topic",
+                          "track": "The Song", "artist": "Singer"}"#,
+        );
+        assert_eq!(old.uploader.as_deref(), Some("Singer"));
+
+        assert!(probed_from(&serde_json::json!({"title": "no id"})).is_err());
+    }
+
+    #[test]
+    fn a_music_upload_with_no_metadata_is_split_at_its_dash_and_nothing_else_is() {
+        let probe = |json: &str| probed_from(&serde_json::from_str(json).unwrap()).unwrap();
+
+        // A label's upload, filed under Music: the singer and the song.
+        let label = probe(
+            r#"{"id": "e1", "title": "Some Singer - The Song Pt. 2 (feat. A Guest)",
+                "uploader": "A Label", "categories": ["Music"]}"#,
+        );
+        assert_eq!(label.uploader.as_deref(), Some("Some Singer"));
+        assert_eq!(label.title, "The Song Pt. 2 (feat. A Guest)");
+        assert_eq!(label.album, None);
+
+        // An artist's own channel: the video's tags come off the song.
+        let own = probe(
+            r#"{"id": "e2", "title": "Some Singer - The Song [Official Video]",
+                "uploader": "Some Singer", "categories": ["Music"]}"#,
+        );
+        assert_eq!(own.title, "The Song");
+
+        // A vlog or a news clip is never split, dash or no dash.
+        let vlog = probe(
+            r#"{"id": "e3", "title": "Preparing for the storm - Day 1 Vlog",
+                "uploader": "Somebody", "categories": ["People & Blogs"]}"#,
+        );
+        assert_eq!(vlog.title, "Preparing for the storm - Day 1 Vlog");
+        assert_eq!(vlog.uploader.as_deref(), Some("Somebody"));
+
+        // Music with no dash keeps its title and channel.
+        let nodash = probe(
+            r#"{"id": "e4", "title": "The Song", "uploader": "Someone", "categories": ["Music"]}"#,
+        );
+        assert_eq!(nodash.title, "The Song");
+        assert_eq!(nodash.uploader.as_deref(), Some("Someone"));
+
+        // Music metadata, when YouTube has it, still wins over the split.
+        let meta = probe(
+            r#"{"id": "e5", "title": "Some Singer - The Song", "uploader": "Label",
+                "categories": ["Music"], "track": "The Song", "artists": ["Some Singer", "Guest"]}"#,
+        );
+        assert_eq!(meta.uploader.as_deref(), Some("Some Singer, Guest"));
+    }
+
+    #[test]
+    fn splitting_a_title_keeps_what_names_the_recording() {
+        let split = |t: &str| split_song(t);
+        assert_eq!(
+            split("A - B - Live at C"),
+            Some(("A".into(), "B - Live at C".into()))
+        );
+        assert_eq!(
+            split("A \u{2013} B (Official Music Video) [HD]"),
+            Some(("A".into(), "B".into()))
+        );
+        assert_eq!(
+            split("A - B (Live) (Official Audio)"),
+            Some(("A".into(), "B (Live)".into()))
+        );
+        assert_eq!(
+            split("A - B (Remastered)"),
+            Some(("A".into(), "B (Remastered)".into()))
+        );
+        assert_eq!(split("A-B"), None);
+        assert_eq!(split(" - B"), None);
+        assert_eq!(split("A - [Official Video]"), None);
     }
 
     #[test]
