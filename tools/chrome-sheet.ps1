@@ -267,7 +267,7 @@ function Resolve-Recipe([string]$name) {
     if ($name.EndsWith("Well")) { return "solid" }
     # The EQ's eleven sliders share one rail, one fill and one thumb.
     if ($name -match '^eq(Pre|Band\d+)\.(track|fill|thumb)$') { return "eq.$($Matches[2])" }
-    # The playlist's six buttons share one box; each carries its own words.
+    # The playlist's seven buttons share one box; each carries its own words.
     if ($name -match '^(add|url|remove|library|shuffle|repeat)Button(\.on)?$') { return "plButton$($Matches[2])" }
     return $name
 }

@@ -69,11 +69,13 @@ export const ACTIONS = [
   "eqOn",
   "eqPresets",
   // The playlist's bottom bar (D99): add files, add a link, remove the
-  // selected rows, show the library.
+  // selected rows, show or put away the library (D123), and load the list
+  // selected in the library into this window (D124).
   "add",
   "addUrl",
   "remove",
   "library",
+  "loadSelected",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -1078,7 +1080,9 @@ export function actionTitle(action: Action | null, on: boolean): string {
     case "remove":
       return "Remove from this playlist";
     case "library":
-      return "Open the library window";
+      return "Show the library, or put it away if it is in front";
+    case "loadSelected":
+      return "Load the list selected in the library";
     case null:
       return "";
   }
