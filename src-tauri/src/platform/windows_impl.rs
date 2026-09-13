@@ -137,6 +137,39 @@ impl WindowPlatform for Win32Platform {
             .status();
     }
 
+    fn open_folder(&self, path: &std::path::Path) -> Result<(), String> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::{w, PCWSTR};
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        if !path.is_dir() {
+            return Err(format!("{} is not a folder", path.display()));
+        }
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: both strings are NUL-terminated and outlive the call; no
+        // window handle is passed, so no message is sent to another thread.
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(wide.as_ptr()),
+                None,
+                None,
+                SW_SHOWNORMAL,
+            )
+        };
+        // Anything above 32 is success; the rest are the shell's error codes.
+        if result.0 as isize > 32 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Windows would not open {} (error {})",
+                path.display(),
+                result.0 as isize
+            ))
+        }
+    }
+
     fn restore_no_activate(&self, w: NativeWindow) {
         // SW_SHOWNOACTIVATE rather than SW_RESTORE: the rescue runs from a
         // WM_DISPLAYCHANGE handler, and stealing focus because a monitor was
@@ -145,5 +178,20 @@ impl WindowPlatform for Win32Platform {
         unsafe {
             let _ = ShowWindow(hwnd(w), SW_SHOWNOACTIVATE);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Only the refusal is testable without a window opening on the desk.
+    #[test]
+    fn a_path_that_is_not_a_folder_is_refused_before_the_shell_sees_it() {
+        let here = std::env::temp_dir().join("hp-no-such-folder-155");
+        let why = Win32Platform.open_folder(&here).unwrap_err();
+        assert!(why.contains("not a folder"), "{why}");
+        let file = std::env::current_exe().unwrap();
+        assert!(Win32Platform.open_folder(&file).is_err());
     }
 }
