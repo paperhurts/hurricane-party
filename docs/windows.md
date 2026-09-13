@@ -4,6 +4,8 @@ You picked true multi-window. That's now the single highest-risk component in th
 
 I recommended against it and you overruled me. Fair — the hybrid would have looked like Winamp without *being* Winamp, and the difference is the whole point. But I want to be straight about what it costs and, more usefully, how to find out early whether it's going to work.
 
+> **Where this stands.** The spike below ran and returned **go** (D45), cross-scale included (stage 6, O14); the engine it proved is `src-tauri/src/bond.rs` and `wm.rs`, built through v0.4a and v0.4b. What is left of this document is the spec that survived, with the decisions that corrected it cited where they did. When a sentence here reads as a plan, `decisions.md` says what was done.
+
 ---
 
 ## Do this first: the gray rectangle spike
@@ -75,11 +77,11 @@ Three options:
 2. **Falls back to group-move.** Dragging the edge between two fixed windows moves the group. Consistent-feeling, slightly magic.
 3. **Cursor tells the truth.** Splitter cursor only appears on edges where at least one neighbor is resizable; elsewhere it's the move cursor. Nothing is inert because nothing is offered.
 
-**I'd take 3.** It's the only one where the interface never lies about what's available, and it costs one capability check at hover time.
+**I'd take 3.** It's the only one where the interface never lies about what's available, and it costs one capability check at hover time. *Taken: D35.*
 
 This also connects directly to your `.wal` note below — modern skins *are* resizable, so on a `.wal` skin most edges become live splitters and the interaction model comes fully alive. On a classic `.wsz` it degrades gracefully to mostly-move. Same engine, different skin capabilities. That's a clean story.
 
-**Consequence for the theme contract:** every window needs a per-skin `resizable` capability flag, and if resizable, a size step (sprite tiling) or a 9-slice definition. Design phase must lock this.
+**Consequence for the theme contract:** every window needs a per-skin `resizable` capability flag, and if resizable, a size step (sprite tiling) or a 9-slice definition. *Locked in `hp-skin/1`*: `resizable`, `resizeStep` and `minSize` on a window, and `nineslice` and `stretch` on its elements (`docs/skin-manifest.md`).
 
 ### 2. Z-order grouping
 
@@ -109,7 +111,7 @@ Every window can be on a different monitor at a different scale factor. Snap mat
 
 ### 5. Non-rectangular windows (`REGION.TXT`)
 
-Some skins define non-rectangular shapes. Defer this entirely to v0.5+ and treat it as best-effort. Options are transparent windows with per-pixel hit-testing, or `SetWindowRgn` on Windows. Most skins' main windows are rectangular; ship without it.
+Some skins define non-rectangular shapes. Defer this entirely to v0.5+ and treat it as best-effort. Options are transparent windows with per-pixel hit-testing, or `SetWindowRgn` on Windows. Most skins' main windows are rectangular; ship without it. *Still unbuilt*: the `.wsz` importer does not read `REGION.TXT`, and a classic skin wears as rectangles (D110).
 
 ---
 
@@ -153,9 +155,9 @@ Most MAKI in the wild is decorative: animations, transitions, custom config dial
 
 ### Recommendation: three tiers
 
-1. **Native format is primary.** JSON manifest + 9-slice PNGs + a `resizable` capability per window. Resizable by design, which is what the splitter model wants. This is what the default skin ships in and what new skins should target.
-2. **`.wsz` importer — full support.** Bounded, well-understood, and it's where the enormous existing skin library lives.
-3. **`.wal` importer — partial, explicitly.** Parse the XML layout, map what corresponds to native concepts, render the PNGs, **ignore the bytecode.** Document it as "many modern skins load; heavily scripted ones will look right but sit still."
+1. **Native format is primary.** JSON manifest + 9-slice PNGs + a `resizable` capability per window. Resizable by design, which is what the splitter model wants. This is what the default skin ships in and what new skins should target. *Built: `hp-skin/1`, and Eyewall ships in it (D90).*
+2. **`.wsz` importer — supported to a degree.** Bounded, well-understood, and it's where the enormous existing skin library lives. *Built at v0.5 (D102–D107, D109, D111). "Full support" was this page's first word for it; D110 changed it to "to a degree"*: a classic skin wears, anything that makes the app unusable is fixed, and what it draws that this app has no feature for is listed rather than promised. **Making your own skin is the headline instead** (D122).
+3. **`.wal` importer — partial, explicitly.** Parse the XML layout, map what corresponds to native concepts, render the PNGs, **ignore the bytecode.** Document it as "many modern skins load; heavily scripted ones will look right but sit still." *Not v0.5 (D110), and not yet scheduled.*
 
 "It's a feature, not the point" is exactly right — and tier 3 is how you keep it that way. Promising `.wal` fidelity is how it stops being a feature and becomes the point.
 
@@ -177,6 +179,8 @@ Design phase needs the native manifest schema locked, since both importers are m
 | Settings | arbitrary | **yes** | ❌ | ❌ |
 
 **The rule:** the three classic 275px windows are skinned, undecorated, and snap. Everything else is a normal OS window with modern chrome. Don't try to make the library window sprite-skinned — you'd be inventing sprite layouts Winamp never had, and no `.wsz` file contains art for it.
+
+*Built so far:* the three classic windows, the library, and the video window, which opens on demand. Downloads are the job list inside the library rather than a window of their own, and so are the settings — concurrency, glow, skin and cookies sit in the library's header. Prep mode is v0.6 (D27). The library goes to the tray rather than closing (D87), and the playlist's LIB button shows it or puts it away (D123).
 
 All dimensions above are at 1x. Double them for 2x mode.
 
@@ -235,7 +239,7 @@ The prediction was right and the magnitude was pessimistic.
 
 **Measured: four calls** (D44). Ownership get/set via `GWLP_HWNDPARENT` — the real gap, because Tauri exposes `owner()` on *builders* only and has no `set_owner` on a live window — plus `SetWindowPos` for D42's lazy application, plus the D37 DPI assertion. Everything else stages 0–5 needed was covered cross-platform and was already physical-first. **The trait is a file, not an archaeology project.**
 
-The spike returned **go** on the bond model (D45): drag costs one display frame with 0.2–0.8 px over the theoretical floor, owned HWNDs group z-order and re-parent in ~40 µs with no visual disturbance, and bonds form and break correctly with zero drift over twenty group drags and zero seam error across 61 splitter steps in both the model and the OS. The one open question is cross-scale behaviour (stage 6, O14), still blocked on hardware.
+The spike returned **go** on the bond model (D45): drag costs one display frame with 0.2–0.8 px over the theoretical floor, owned HWNDs group z-order and re-parent in ~40 µs with no visual disturbance, and bonds form and break correctly with zero drift over twenty group drags and zero seam error across 61 splitter steps in both the model and the OS. The question that was left, cross-scale behaviour (stage 6, O14), was answered once a second display was attached: a bonded group crosses a 100%/150% boundary and returns bit-identical (O14, and the v0.0 row of the milestone table in `decisions.md`).
 
 ### The trap that nearly ate the signature interaction
 
