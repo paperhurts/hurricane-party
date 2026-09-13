@@ -234,7 +234,9 @@ A sheet in the object form may say **`"art": "final"`**, and its sprites are dra
 
 An `image` may say **`"fit": "reveal"`** instead of the default `"stretch"`. A stretched sprite is scaled to its box; a revealed one is drawn at the box's width with its own proportions, from the top, so a box that grows taller uncovers more of a tall sprite instead of smearing a short one. Past the sprite's end the ground shows. A made skin's playlist backdrop is revealed: its sprite runs from the playlist's third of the picture to the bottom of the sheet, and dragging the window down shows the rest of the picture.
 
-A made skin carries `"maker": <version>` the way an imported one carries `generator` (D107). Only `generator` triggers a rebuild.
+A made skin carries `"maker": <version>` the way an imported one carries `generator` (D107). Only `generator` triggers a rebuild of the art; a made skin's manifest is made again from Eyewall's layout every time it is worn (D124), and it wears Eyewall's current sheets rather than the copies in its folder (D126).
+
+A made skin also records **where its picture is**, as `"picture": { "sheet", "top", "height", "at" }` (D127): the picture sheet's height, the band of it the picture fills, and `at`, `top`, `middle` or `bottom`, which part of it the three stacked windows show. It is the maker's own key, not part of the format, and the validator ignores it. A picture shorter than the windows is drawn with clear room above and below it, so moving it only moves the backdrops' sprite rectangles; the library's `picture` menu does that.
 
 ### Glow is declared, not assumed
 
