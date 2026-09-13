@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import tokens from "../../design/tokens.json";
 import { TOKENS } from "./skin";
-import { colorsFor, typeFor, viscolor, type ThemeName } from "./theme";
+import { colorsFor, colorsWorn, typeFor, viscolor, type ThemeName } from "./theme";
 
 // Issue #28 was a theme that filled its own set of colour names: every
 // `var(--surface)` under Purricane resolved to nothing, because `applyTheme`
@@ -37,5 +37,21 @@ describe("every theme", () => {
     if (!own) return;
     const labelled = Object.keys(own).filter((k) => k !== "$comment");
     expect(labelled.sort()).toEqual([...TOKENS].sort());
+  });
+});
+
+describe("what a classic window paints while wearing a skin (D101)", () => {
+  const palette = Object.fromEntries(TOKENS.map((t, i) => [t, `#00000${i}`])) as Record<string, string>;
+
+  it("a mask skin follows the theme, so one grey sheet wears any of them", () => {
+    expect(colorsWorn({ art: "mask", palette })).toEqual(colorsFor("eyewall"));
+    expect(colorsWorn({ art: "mask", palette }, "purricane")).toEqual(colorsFor("purricane"));
+  });
+
+  // Every imported .wsz is `final`: its PLEDIT.TXT colours are derived,
+  // written and validated, and until D101's condition ran they were never
+  // shown — the rows wore Eyewall's cyan and magenta over someone else's art.
+  it("a final skin brings the colours beside its pixels", () => {
+    expect(colorsWorn({ art: "final", palette })).toEqual(palette);
   });
 });

@@ -2,8 +2,8 @@
   import type { Snippet } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emitTo, listen } from "@tauri-apps/api/event";
-  import { applyTheme } from "../lib/theme";
-  import { elementsOf, type Element } from "../lib/skin";
+  import { applyTheme, colorsWorn } from "../lib/theme";
+  import { elementsOf, TOKENS, type Element, type Skin } from "../lib/skin";
   import { loadSkin, type LoadedSkin } from "../lib/skinsheet";
   import { currentSkin, EYEWALL, eyewallFile, windowNameOf } from "../lib/skins";
   import Sprite from "./Sprite.svelte";
@@ -23,6 +23,7 @@
     slots = {},
     onaction,
     onslide,
+    onskin,
   }: {
     label: string;
     title: string;
@@ -52,11 +53,35 @@
     onaction?: (action: string) => void;
     /** A slider moved, by binding name, 0..1 along its length. */
     onslide?: (bind: string, frac: number) => void;
+    /** The skin this window is now wearing, each time one loads: the window
+     * draws what the sheet cannot, and the analyser's ramp is the skin's. */
+    onskin?: (skin: Skin) => void;
   } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
   // a handful of custom properties on :root, from design/tokens.json.
   applyTheme();
+
+  /**
+   * D101's one condition, which the shell owed the format until now: the
+   * theme owns the app's palette, and **a skin whose art is `final` is the
+   * exception**. Its pixels cannot be tinted, so the colours that sit beside
+   * them are its own — the playlist's rows, the seam, every word these three
+   * windows draw. That is what `PLEDIT.TXT` was read for (D101, #107); until
+   * this ran, an imported skin's own colours were derived, written, validated
+   * and never shown, and its rows wore Eyewall's cyan and magenta.
+   *
+   * A `mask` skin declares a palette that stays validated and ignored, which
+   * is what lets one grey sheet wear whichever theme is on. Re-applying the
+   * theme first is what makes switching back from an imported skin work.
+   */
+  function paintFrom(s: Skin) {
+    applyTheme();
+    const worn = colorsWorn(s);
+    for (const t of TOKENS) {
+      document.documentElement.style.setProperty(`--${t}`, worn[t]);
+    }
+  }
 
   type Side = "top" | "right" | "bottom" | "left";
   // null = no bond on that edge, true = live splitter, false = bonded but the
@@ -87,6 +112,8 @@
   function reloadSkin() {
     currentSkin().then((w) => {
       if (w.instead) sayItCannotBeWorn(w.instead.id, w.instead.reason);
+      paintFrom(w.skin);
+      onskin?.(w.skin);
       loadSkin(w.skin, w.resolve, window.devicePixelRatio).then(
         (s) => (skin = s),
         (e) => {
@@ -96,6 +123,8 @@
           // so where a person is looking, and wear the one that always works.
           sayItCannotBeWorn(w.id, e instanceof Error ? e.message : String(e));
           if (w.id !== "eyewall") {
+            paintFrom(EYEWALL);
+            onskin?.(EYEWALL);
             loadSkin(EYEWALL, eyewallFile, window.devicePixelRatio).then(
               (s) => (skin = s),
               (e2) => console.error(e2),

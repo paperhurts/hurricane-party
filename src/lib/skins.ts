@@ -66,8 +66,11 @@ export async function currentSkin(): Promise<Wearable> {
     // importer that has learned something rebuilds it from the art rather
     // than leaving a person with what an older one managed (D107). The same
     // path catches a manifest that no longer parses at all.
-    const parsed =
-      written.generator === WSZ_GENERATION ? parseSkin(written) : await rebuild(id, on, "an older import");
+    // Only a manifest the .wsz importer wrote carries `generator` (D107). A
+    // made skin or a hand-written one has none and is worn as it is: rebuilding
+    // it would re-import art it never came from (#131).
+    const stale = typeof written.generator === "number" && written.generator !== WSZ_GENERATION;
+    const parsed = stale ? await rebuild(id, on, "an older import") : parseSkin(written);
     for (const w of parsed.warnings) console.warn(`${id}: ${w}`);
     return { id, skin: parsed.skin, resolve };
   } catch (e) {

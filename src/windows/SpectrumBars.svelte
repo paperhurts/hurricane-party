@@ -64,6 +64,16 @@
     if (!raf) draw();
   }
 
+  // The ramp is pre-rendered at resize, and a skin's ramp arrives after that:
+  // Main swaps `palette` once the worn skin loads (D101, D122). Without this
+  // the bars kept whichever ramp came first while the peak ticks, which read
+  // the palette live, already showed the new one — seen on a made skin, whose
+  // analyser drew Eyewall's radar greens under the picture's orange.
+  $effect(() => {
+    void palette;
+    ramp = renderRamp();
+  });
+
   function renderRamp(): HTMLCanvasElement | null {
     if (barW < 1 || H < 1 || palette.length === 0) return null;
     const c = document.createElement("canvas");
@@ -172,7 +182,9 @@
     display: block;
     width: 100%;
     height: 100%;
-    background: var(--surface);
+    /* The skin's well strength (D122): solid on Eyewall, a wash over a
+       made skin's picture. */
+    background: color-mix(in srgb, var(--surface) calc(var(--vis-well, 1) * 100%), transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
   }
 </style>
