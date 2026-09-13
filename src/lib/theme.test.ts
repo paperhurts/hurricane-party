@@ -89,7 +89,8 @@ describe("wearing a theme", () => {
     const worn = colorsShown("purricane");
     expect(worn.ground).toBe(raw.ground);
     expect(worn.surface).toBe(raw.surface);
-    // The mint was about 1.1:1 on sugar; it moves, and stays a green-blue.
+    // The pastel mint is about 2:1 on the pink window (D131); it deepens, and
+    // stays a green-blue.
     expect(worn.accent).not.toBe(raw.accent);
     const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const [r, g, bl] = rgb(worn.accent);

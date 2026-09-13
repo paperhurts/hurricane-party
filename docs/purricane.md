@@ -34,12 +34,14 @@ this document was written in them; the token a component reads is the role.
 
 | Token | Purricane calls it | Hex | Role |
 |---|---|---|---|
-| `--ground` | sugar | `#FFF4FB` | Field. Near-white with a pink cast — bright, not neutral |
-| `--surface` | floss | `#FF9FD6` | Hot pink. Insets, and this theme's loudest surface |
-| `--accent` | mint | `#7FFFD4` | Aquamarine. The live edge, where Eyewall glows cyan |
-| `--warn` | butter | `#FFE97F` | Pale yellow. Warmth, and warnings |
-| `--alert` | periwinkle | `#A99FFF` | Violet. Now-playing. The callback to paperhurts' base — same hue family as Eyewall's `--ground`, opposite end of the value scale |
+| `--ground` | floss | `#FF8FAB` | Pink. The window itself, and the first colour of a square harmony (D131) |
+| `--surface` | sugar | `#FFF4FB` | Near-white with a pink cast. Insets: the rows, the wells, the analyser's box |
+| `--accent` | mint | `#8CFDDF` | The live edge, where Eyewall glows cyan. A quarter turn from the pink |
+| `--warn` | butter | `#FADC8C` | Pale yellow. Warmth, and warnings |
+| `--alert` | periwinkle | `#8FAEFF` | Now-playing. The callback to paperhurts' base — same hue family as Eyewall's `--ground`, opposite end of the value scale |
 | `--text` | ink | `#4A2A5C` | Deep violet. Text |
+
+The hot pink this table first gave the insets read as Pepto-Bismol, and the owner flipped it onto the window (D131). On a pink window the three pastels cannot be read as edges, so what the windows wear is them deepened until they can (D130): mint as a deep green, periwinkle as a navy, butter as a brown. The pastels stay here, and in the tokens, as what the palette is.
 
 This is the one theme where text is dark on light rather than bright on dark. That's fine; don't fight it. Everything *else* still glows.
 
