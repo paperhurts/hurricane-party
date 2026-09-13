@@ -11,6 +11,8 @@ import {
   nextPreset,
   PRESETS,
   presetName,
+  SHIPPED,
+  shipsAs,
   saveEq,
   STORAGE_KEY,
   trimDb,
@@ -101,6 +103,27 @@ describe("presets", () => {
   it("ignores an unknown preset name", () => {
     const s = defaultEq();
     expect(applyPreset(s, "NOPE")).toBe(s);
+  });
+
+  // #145: the person's own presets, from the database or an .eqf, sit beside
+  // the four that ship and are matched and applied the same way.
+  it("names and applies a saved preset like one that ships", () => {
+    const mine = { id: 7, name: "Classical", preamp: 0, bands: [0, 0, 0, 0, 0, 0, -4.645, -4.645, -4.645, -6.194] };
+    const all = [...SHIPPED, mine];
+    const s = applyPreset(defaultEq(), mine);
+    expect(presetName(s, all)).toBe("Classical");
+    // Without the person's list, the same state is CUSTOM.
+    expect(presetName(s)).toBe(CUSTOM);
+    // By name, from the whole list.
+    expect(applyPreset(defaultEq(), "Classical", all)).toEqual(s);
+    // A preset that is not ten bands is not applied.
+    expect(applyPreset(defaultEq(), { name: "bad", preamp: 0, bands: [1, 2] })).toEqual(defaultEq());
+  });
+
+  it("knows the names that ship, without case", () => {
+    expect(shipsAs(" flat ")).toBe(true);
+    expect(shipsAs("Storm Watch")).toBe(true);
+    expect(shipsAs("Classical")).toBe(false);
   });
 
   it("cycles and wraps", () => {
