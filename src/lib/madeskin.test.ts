@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import eyewall from "../../skins/eyewall/manifest.json";
 import { colorsWorn } from "./theme";
-import { madeManifest, MAKER_VERSION, nameFrom, PICTURE_OPACITY, QUIET_FLOOR } from "./madeskin";
+import {
+  madeManifest,
+  MAKER_VERSION,
+  nameFrom,
+  PICTURE_H,
+  PICTURE_MAX_H,
+  PICTURE_OPACITY,
+  pictureHeightFor,
+  QUIET_FLOOR,
+} from "./madeskin";
 import { elementsOf, parseSkin, TOKENS, WINDOWS } from "./skin";
 import { paletteFromPixels } from "./palette";
 
@@ -55,16 +64,38 @@ describe("a skin made from a picture (#131)", () => {
   });
 
   it("lays one picture across the three stacked windows, as a wash under the chrome", () => {
-    const { skin } = parseSkin(madeManifest(made()));
+    const { skin } = parseSkin(madeManifest({ ...made(), pictureHeight: 900 }));
     const bands = WINDOWS.map((w) => {
-      const b = elementsOf(skin, w, false).elements[0] as { sprite: { rect: number[] }; opacity: number; stretch?: string };
+      const b = elementsOf(skin, w, false).elements[0] as {
+        sprite: { rect: number[] };
+        opacity: number;
+        stretch?: string;
+        fit: string;
+      };
       expect(b.opacity).toBe(PICTURE_OPACITY);
       return b;
     });
     expect(bands.map((b) => b.sprite.rect[1])).toEqual([0, 116, 232]);
-    // The playlist grows, so its third of the picture has to grow with it.
+    // Main and the equalizer take their third and never change size.
+    expect(bands[0].sprite.rect[3]).toBe(116);
+    expect(bands[0].fit).toBe("stretch");
+    // The owner dragged a made playlist taller and the picture stretched,
+    // though the picture had more below. The playlist takes everything from
+    // its third down, and reveals it as it grows rather than stretching.
+    expect(bands[2].sprite.rect[3]).toBe(900 - 232);
+    expect(bands[2].fit).toBe("reveal");
     expect(bands[2].stretch).toBe("xy");
-    expect(bands[0].stretch).toBeUndefined();
+  });
+
+  it("keeps a picture at the windows' width and its own height, within bounds", () => {
+    // A tall portrait keeps its height, so the playlist has something to reveal.
+    expect(pictureHeightFor(1000, 2000)).toBe(550);
+    // A wide landscape still covers all three windows.
+    expect(pictureHeightFor(4000, 1000)).toBe(PICTURE_H);
+    // A very tall strip stops at the cap.
+    expect(pictureHeightFor(100, 100000)).toBe(PICTURE_MAX_H);
+    // Nothing to measure is not a crash.
+    expect(pictureHeightFor(0, 0)).toBe(PICTURE_H);
   });
 
   // Seen on the first real made skin: Eyewall's quiet chrome (0.14 edges, 0.3
