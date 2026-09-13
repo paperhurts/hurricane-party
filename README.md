@@ -65,11 +65,12 @@ Release with the stable asset name the download page links to (#66).
 pnpm tauri dev                                              # run it
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\dev.ps1   # the same, after freeing port 1420 and a stray exe (#11)
 pnpm check                                                  # svelte-check + tsc
-pnpm test                                                   # vitest: the frontend's pure logic (analyser math)
+pnpm test                                                   # vitest: the frontend's pure logic (skins, importer, palette, play order, analyser)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main   # screenshot a running window into .sid/
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\keyout.ps1 -In art.jpg -Out icon.png   # flat background -> transparent square PNG, then: pnpm tauri icon icon.png
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Frame 64   # pose PNGs -> companion sprite sheet + manifest (docs/companion-art.md)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\chrome-sheet.ps1   # redraw skins/eyewall/*.png from its manifest (docs/skin-manifest.md)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make-test-wsz.ps1  # a synthetic classic .wsz with every sprite labelled, for testing the importer
 pnpm tauri build --no-bundle                                # release binary, no installer
 
 cargo test --manifest-path src-tauri/Cargo.toml --lib               # app tests
@@ -111,19 +112,21 @@ the two remaining Claude Code commands, are in `CLAUDE.md`.
 
 | Path | What |
 |---|---|
-| `src/` | Svelte frontend. One HTML entry point per OS window — `index.html`, `main.html`, `eq.html`, `playlist.html`, `video.html` |
+| `src/` | Svelte frontend. One HTML entry point per OS window — `index.html` (the library), `main.html`, `eq.html`, `playlist.html`, `video.html`, and `root.html`, the hidden window that owns the classic three (D41) |
 | `src-tauri/` | Rust core: window engine, pipeline, job queue, SQLite, control server |
 | `crates/hp-control/` | The public control protocol. Unstable until v1.0 |
+| `skins/eyewall/` | The skin that ships, in `hp-skin/1`, and the template to copy for your own (D90) |
 | `docs/` | Specs. `decisions.md` wins over everything |
 | `design/screens/` | Claude Design prototypes. **Visual reference only** — the prototype is not the spec |
-| `tools/` | Prerequisite check, sidecar fetch, git hooks, control-pipe harness, screenshot and real-input helpers, icon background remover, companion sheet packer |
+| `tools/` | Prerequisite check, sidecar fetch, dev launcher, git hooks, control-pipe and viz harnesses, screenshot and real-input helpers, the Eyewall sheet generator, a test `.wsz` maker, icon background remover, companion sheet packer |
 | `design/icon/` | The capybara. Icon source and README art |
 | `.github/` | CI, the on-demand release build, issue and PR templates |
 | `.claude/` | Claude Code skills, hooks, and agents for the workflow in `CLAUDE.md` |
 | `.sid/` | Scratch screenshots, gitignored |
 
-Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.db` and
-`library/`. Deleting that directory is a clean reset.
+Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.db`,
+`library/`, `skins/` (every skin imported or made), and `cookies.txt` once you have
+exported one from a browser (D113). Deleting that directory is a clean reset.
 
 ## Where the project is
 
@@ -135,6 +138,7 @@ Data lives in `%APPDATA%\dev.paperhurts.hurricane-party\` — `hurricane-party.d
 | v0.3 | Video window, local folder import, control API handshake + transport |
 | v0.4a | The window system: bonding, splitter, shade modes, grouped z-order, layout persistence, stranded-group rescue |
 | v0.4b | **Done 2026-09-11.** Chrome from tokens (D72), Main plays with the analyser on the radar ramp, 10-band EQ, the playlist window, seams that glow and discharge, 2x chrome, the playlist's corner grip, an oscilloscope, the viz stream on its own pipe (`hello` advertises `viz`; measured in `docs/control-api.md`), the windowshade as a mini-player, Main as the one transport (D81), the download page and tagged Releases (D82), the capybaras in their homes (#62), removing a track from the library (D83, D84), minimise as a group and the library to the tray (D86, D87), the captain's frames (`design/sprites/captain/`, `docs/companion-art.md`), three bond-model rules from hand tests (D85, D88, D89), and then the sprite renderer: all three windows drawn from `skins/eyewall/` through `hp-skin/1`, the skin that ships and the template a person copies to make their own (D90–D99). Along the way: Play from a standing start plays the list, shuffle is a lap and repeat is off, one or all (D97), a click on a library root rescans it (D95), 2x lives on Main's title bar (D96), and the glow is yours to turn off (D100) |
+| v0.5 | **In progress.** The `.wsz` loader, supported to a degree (D102–D111), and the headline: **Make a skin…** from any picture (D122, D124). Along the way: signing in for age-restricted videos with cookies from a file or a browser (D112, D113, D115, D118), importing a YouTube playlist with a picker (D114, D119), playlists renamed, deleted and ordered (D116), downloads paused and resumed (D117), the playing list kept apart from the list being browsed (D120), library search, filter and sort (D121), the role names every theme fills (D108), and the playlist bar's LIB and SEL (D123, D124). Still to come: Purricane and the kaleidoscope, `.eqf` import, and the paint-your-own half of the headline (`docs/decisions.md`, D27) |
 
 The canonical milestone table is in `docs/decisions.md` (D27).
 
