@@ -167,6 +167,63 @@ fn library_path(app: AppHandle) -> Result<String, pipeline::PipelineError> {
     Ok(pipeline::library_root(&app)?.to_string_lossy().to_string())
 }
 
+/// Where downloads go (#154, D136): the folder, whether a person chose it or
+/// it is the app's own, and whether it is there right now.
+#[derive(serde::Serialize)]
+struct DownloadDir {
+    path: String,
+    chosen: bool,
+    present: bool,
+}
+
+fn download_dir(app: &AppHandle) -> Result<DownloadDir, String> {
+    let chosen = pipeline::chosen_root(app);
+    let path = pipeline::library_root(app).map_err(|e| e.to_string())?;
+    Ok(DownloadDir {
+        present: path.is_dir(),
+        chosen: chosen.is_some(),
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+fn get_download_dir(app: AppHandle) -> Result<DownloadDir, String> {
+    download_dir(&app)
+}
+
+/// Send new downloads to another folder, or back to the app's own with "".
+///
+/// Downloads already queued keep the folder they were queued for, and what
+/// is already downloaded stays where it is (#154, the owner's calls). The
+/// folder must exist and take a file now, so a read-only or mistyped choice
+/// fails at the button. Its files are allowed to play at once, and the queue
+/// is woken in case downloads were waiting on a folder.
+#[tauri::command]
+fn set_download_dir(app: AppHandle, path: String) -> Result<DownloadDir, String> {
+    let p = path.trim();
+    if !p.is_empty() {
+        let dir = std::path::PathBuf::from(p);
+        if !dir.is_absolute() {
+            return Err("that path is not absolute".into());
+        }
+        if !dir.is_dir() {
+            return Err("there is no folder there".into());
+        }
+        let probe = dir.join(".hurricane-party-write-test");
+        std::fs::write(&probe, b"").map_err(|e| format!("the app cannot write there: {e}"))?;
+        let _ = std::fs::remove_file(&probe);
+        localimport::allow_root(&app, &dir);
+    }
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_setting(&conn, pipeline::DOWNLOAD_DIR_SETTING, p).map_err(|e| e.to_string())?;
+    }
+    app.state::<RunnerHandle>().notify.notify_one();
+    let _ = app.emit("jobs-changed", ());
+    download_dir(&app)
+}
+
 /// Open the library folder in Explorer (#155). It takes no path: the folder
 /// is the one downloads go to, so a page that asks can open that and nothing
 /// else. `library_root` makes the folder again if it has gone, as a download
@@ -1482,6 +1539,8 @@ pub fn run() {
             get_ffmpeg,
             set_ffmpeg,
             open_library_folder,
+            get_download_dir,
+            set_download_dir,
             radar_sites,
             get_radar,
             set_radar_site,

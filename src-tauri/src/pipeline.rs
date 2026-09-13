@@ -135,6 +135,8 @@ pub struct Track {
     pub filesize: u64,
     /// "audio" | "video" — decides whether playback needs the video window (D13).
     pub kind: String,
+    /// The library folder it landed in (#154), which its row is relative to.
+    pub root: String,
 }
 
 /// Progress for the UI. `stage` distinguishes the two sidecars, which matters
@@ -172,7 +174,7 @@ fn emit(app: &AppHandle, job_id: Option<i64>, p: Progress) {
 /// settings store yet (that's D32, v0.2), so this is the default, not a constant
 /// baked into call sites. It sits under APPDATA to stay inside the asset
 /// protocol scope declared in tauri.conf.json.
-pub fn library_root(app: &AppHandle) -> Result<PathBuf> {
+pub fn default_root(app: &AppHandle) -> Result<PathBuf> {
     let dir = app
         .path()
         .app_data_dir()
@@ -181,6 +183,32 @@ pub fn library_root(app: &AppHandle) -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)
         .map_err(|e| PipelineError::Io(format!("couldn't create {}: {e}", dir.display())))?;
     Ok(dir)
+}
+
+/// Where a person has chosen downloads go, when they have (#154, D136).
+/// Unset is the app's own folder.
+pub const DOWNLOAD_DIR_SETTING: &str = "library.download_dir";
+
+/// That folder as chosen, whether or not it is there right now: a drive that
+/// is unplugged is still the folder a person picked, and downloads wait for
+/// it rather than landing somewhere else.
+pub fn chosen_root(app: &AppHandle) -> Option<PathBuf> {
+    let state = app.state::<crate::Db>();
+    let raw = {
+        let conn = state.0.lock().unwrap();
+        crate::db::get_setting(&conn, DOWNLOAD_DIR_SETTING)
+    }?;
+    let p = PathBuf::from(raw.trim());
+    p.is_absolute().then_some(p)
+}
+
+/// The folder a download queued now goes to: the chosen one, else the app's
+/// own. The chosen one is not made if it is missing; the app's own always is.
+pub fn library_root(app: &AppHandle) -> Result<PathBuf> {
+    match chosen_root(app) {
+        Some(p) => Ok(p),
+        None => default_root(app),
+    }
 }
 
 /// Keep the last few lines of stderr so a failure can say what actually broke
@@ -1290,8 +1318,8 @@ async fn download_media(
     probed: &Probed,
     job_id: Option<i64>,
     want_video: bool,
+    root: &Path,
 ) -> Result<PathBuf> {
-    let root = library_root(app)?;
     // Grouped by extractor, flat within it (D49).
     //
     // architecture.md's template also nested by `%(uploader)s`, which was
@@ -1406,7 +1434,7 @@ async fn download_media(
 
     // Deterministic path is why the probe ran first: scan for <id>.* rather
     // than parsing the filename back out of yt-dlp's chatter.
-    downloaded_output(&root, &probed.id, want_video)
+    downloaded_output(root, &probed.id, want_video)
         .ok_or_else(|| PipelineError::MissingOutput(format!("{} [{}]", root.display(), probed.id)))
 }
 
@@ -1733,6 +1761,7 @@ pub async fn import_job(
     url: &str,
     job_id: i64,
     want_video: bool,
+    root: &Path,
 ) -> Result<Track> {
     let job_id = Some(job_id);
     let url = &validate_url(url)?;
@@ -1746,7 +1775,9 @@ pub async fn import_job(
         });
     }
 
-    let root = library_root(app)?;
+    // The folder the job was queued for (#154), not whatever is chosen now: a
+    // half-finished download resumes where its `.part` file is.
+    let root = root.to_path_buf();
 
     // Resume derives its recovery from what is on disk, not from the recorded
     // stage: a status column is written by a process that then died, possibly
@@ -1760,7 +1791,7 @@ pub async fn import_job(
         // source was tidied away, so this really does download again (D80).
         let file = match find_video_by_id(&root, &probed.id) {
             Some(p) => p,
-            None => download_media(app, url, &probed, job_id, true).await?,
+            None => download_media(app, url, &probed, job_id, true, &root).await?,
         };
         // Same cleanup the audio path gets. This branch returns early, so
         // without an explicit call the cover art yt-dlp wrote is left behind —
@@ -1789,6 +1820,7 @@ pub async fn import_job(
             path: file.to_string_lossy().to_string(),
             filesize,
             kind: "video".into(),
+            root: root.to_string_lossy().into_owned(),
         });
     }
 
@@ -1805,7 +1837,7 @@ pub async fn import_job(
         Some(source) => extract_mp3(app, url, &source, &probed, job_id).await?,
         // Either a `.part` (which `--continue` picks up mid-file) or nothing.
         None => {
-            let source = download_media(app, url, &probed, job_id, false).await?;
+            let source = download_media(app, url, &probed, job_id, false, &root).await?;
             extract_mp3(app, url, &source, &probed, job_id).await?
         }
     };
@@ -1838,6 +1870,7 @@ pub async fn import_job(
         path: mp3.to_string_lossy().to_string(),
         filesize,
         kind: "audio".into(),
+        root: root.to_string_lossy().into_owned(),
     })
 }
 
