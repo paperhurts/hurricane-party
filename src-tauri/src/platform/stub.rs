@@ -39,4 +39,8 @@ impl WindowPlatform for StubPlatform {
     // Elsewhere `CommandChild::kill`, which the caller always runs too, is
     // what there is.
     fn kill_tree(&self, _pid: u32) {}
+
+    fn open_folder(&self, _path: &std::path::Path) -> Result<(), String> {
+        Err("opening a folder is not supported on this platform".into())
+    }
 }

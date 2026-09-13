@@ -165,6 +165,16 @@ fn library_path(app: AppHandle) -> Result<String, pipeline::PipelineError> {
     Ok(pipeline::library_root(&app)?.to_string_lossy().to_string())
 }
 
+/// Open the library folder in Explorer (#155). It takes no path: the folder
+/// is the one downloads go to, so a page that asks can open that and nothing
+/// else. `library_root` makes the folder again if it has gone, as a download
+/// would.
+#[tauri::command]
+fn open_library_folder(app: AppHandle) -> Result<(), String> {
+    let dir = pipeline::library_root(&app).map_err(|e| e.to_string())?;
+    platform::platform().open_folder(&dir)
+}
+
 // ---- local folder import (D28 roots, D34 titles, D50 tags) -----------------
 
 #[tauri::command]
@@ -1430,6 +1440,7 @@ pub fn run() {
             get_cookies_file,
             get_ffmpeg,
             set_ffmpeg,
+            open_library_folder,
             get_cookies_from,
             set_cookies_file,
             show_library,
