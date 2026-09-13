@@ -19,6 +19,16 @@ const RECORD: usize = NAME_LEN + VALUES;
 /// near this is not an EQ file, and is not read into memory to find out.
 const MAX_FILE: u64 = 1024 * 1024;
 
+/// A preset that ships, as the frontend sends it: the four live in
+/// `src/lib/eq.ts`, and an import needs their names and values to know when
+/// a file's preset is one of them.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct Shipped {
+    pub name: String,
+    pub preamp: f64,
+    pub bands: Vec<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Preset {
     pub id: i64,
@@ -217,6 +227,8 @@ pub fn delete(conn: &Connection, id: i64) -> Result<(), DbError> {
 pub struct Imported {
     /// Presets read and saved, across every file.
     pub saved: usize,
+    /// Presets left out because one that ships is the same preset.
+    pub already: usize,
     /// Files that could not be read, and why, by file name.
     pub refused: Vec<(String, String)>,
     /// Files that ended part-way through a preset: what came before was read.
@@ -225,7 +237,13 @@ pub struct Imported {
 
 /// Import every preset in every file. A file that fails is reported and the
 /// rest go on; a preset with no name takes the file's.
-pub fn import(conn: &Connection, paths: &[String]) -> Imported {
+///
+/// A name that ships is not the person's to take, the same rule a save
+/// keeps. Winamp's own library has a Flat, and it is the FLAT that ships
+/// already, so a preset with a shipped name and the same values is left out;
+/// one with a shipped name and different values keeps its file's name
+/// beside its own, `Rock (winamp)`, so both can be told apart.
+pub fn import(conn: &Connection, paths: &[String], shipped: &[Shipped]) -> Imported {
     let mut out = Imported::default();
     for p in paths {
         let path = Path::new(p);
@@ -243,13 +261,26 @@ pub fn import(conn: &Connection, paths: &[String]) -> Imported {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "Preset".into());
                 for (i, fp) in presets.iter().enumerate() {
-                    let name = if !fp.name.is_empty() {
+                    let mut name = if !fp.name.is_empty() {
                         fp.name.clone()
                     } else if presets.len() == 1 {
                         stem.clone()
                     } else {
                         format!("{stem} {}", i + 1)
                     };
+                    if let Some(s) = shipped.iter().find(|s| s.name.eq_ignore_ascii_case(&name)) {
+                        let same = (s.preamp - fp.preamp).abs() < 1e-9
+                            && s.bands.len() == fp.bands.len()
+                            && s.bands
+                                .iter()
+                                .zip(&fp.bands)
+                                .all(|(a, b)| (a - b).abs() < 1e-9);
+                        if same {
+                            out.already += 1;
+                            continue;
+                        }
+                        name = format!("{name} ({stem})");
+                    }
                     match save(conn, &name, fp.preamp, &fp.bands) {
                         Ok(_) => out.saved += 1,
                         Err(e) => out.refused.push((file.clone(), e.to_string())),
@@ -393,6 +424,38 @@ mod tests {
     }
 
     #[test]
+    fn a_shipped_name_is_left_out_when_it_is_the_same_preset_and_renamed_when_not() {
+        let conn = fixture();
+        let dir = std::env::temp_dir().join(format!("hp-eqf-ship-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("winamp.eqf");
+        let mut loud = [0x00; 11];
+        loud[10] = 0x1F;
+        std::fs::write(
+            &path,
+            file(&[record("Flat", [0x1F; 11]), record("Full Loud", loud)]),
+        )
+        .unwrap();
+        let shipped = [
+            Shipped {
+                name: "FLAT".into(),
+                preamp: 0.0,
+                bands: vec![0.0; 10],
+            },
+            Shipped {
+                name: "FULL LOUD".into(),
+                preamp: 11.0,
+                bands: vec![12.0; 10],
+            },
+        ];
+        let got = import(&conn, &[path.to_string_lossy().into_owned()], &shipped);
+        assert_eq!((got.saved, got.already), (1, 1));
+        let names: Vec<String> = list(&conn).unwrap().into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["Full Loud (winamp)"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn import_reads_every_file_and_reports_the_ones_it_could_not() {
         let conn = fixture();
         let dir = std::env::temp_dir().join(format!("hp-eqf-{}", std::process::id()));
@@ -409,7 +472,7 @@ mod tests {
             good.to_string_lossy().into_owned(),
             bad.to_string_lossy().into_owned(),
         ];
-        let got = import(&conn, &paths);
+        let got = import(&conn, &paths, &[]);
         assert_eq!(got.saved, 2);
         assert_eq!(got.refused.len(), 1);
         assert_eq!(got.refused[0].0, "notes.eqf");
@@ -418,7 +481,7 @@ mod tests {
         // A nameless preset in a file of two takes the file's name and its place.
         assert_eq!(names, ["Club", "pack 2"]);
         // The same file again updates rather than doubles.
-        assert_eq!(import(&conn, &paths[..1]).saved, 2);
+        assert_eq!(import(&conn, &paths[..1], &[]).saved, 2);
         assert_eq!(list(&conn).unwrap().len(), 2);
         std::fs::remove_dir_all(&dir).ok();
     }

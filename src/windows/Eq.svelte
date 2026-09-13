@@ -146,12 +146,13 @@
     });
     const paths = picked === null ? [] : Array.isArray(picked) ? picked : [picked];
     if (!paths.length) return;
-    const got = await invoke<{ saved: number; refused: [string, string][]; cut_short: string[] }>("import_eqf", {
-      paths,
-    }).catch((e) => ({ saved: 0, refused: [["", String(e)]] as [string, string][], cut_short: [] }));
+    type Imported = { saved: number; already: number; refused: [string, string][]; cut_short: string[] };
+    const got = await invoke<Imported>("import_eqf", { paths, shipped: SHIPPED }).catch(
+      (e): Imported => ({ saved: 0, already: 0, refused: [["", String(e)]], cut_short: [] }),
+    );
     await loadMine();
     for (const [file, why] of got.refused) console.warn(`EQ import: ${file}: ${why}`);
-    if (got.saved === 0) say(got.refused.length ? "NOT AN EQF" : "NO PRESETS");
+    if (got.saved === 0) say(got.refused.length ? "NOT AN EQF" : got.already ? "ALREADY HERE" : "NO PRESETS");
     else say(`+${got.saved} PRESET${got.saved === 1 ? "" : "S"}${got.refused.length || got.cut_short.length ? ", SOME NOT" : ""}`);
     if (got.saved) menuOpen = true;
   }
