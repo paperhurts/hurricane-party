@@ -161,16 +161,17 @@ function standOff(c: Lab, grounds: Lab[], ratio: number): Lab {
   if (worst(c) >= ratio) return c;
   const up = lighterWins(grounds[0]);
   const out: Lab = [...c];
+  const c0 = chroma(c);
   for (let step = 0; step < 60 && worst(out) < ratio; step++) {
     out[0] = Math.min(0.99, Math.max(0.02, out[0] + (up ? 0.02 : -0.02)));
     // Very light and very dark colours cannot hold much chroma; let it fall
-    // rather than clip into a different hue.
-    const room = Math.min(out[0], 1 - out[0]) * 0.6;
-    const cNow = chroma(out);
-    if (cNow > room) {
-      out[1] *= room / cNow;
-      out[2] *= room / cNow;
-    }
+    // rather than clip into a different hue. Measured from the colour as it
+    // was, at the lightness it has now: cut step by step, a pale colour lost
+    // nearly all of its chroma on the first step and never got it back as it
+    // darkened, which turned Purricane's mint to sage and its butter to olive.
+    const k = c0 > 0 ? Math.min(1, (Math.min(out[0], 1 - out[0]) * 0.6) / c0) : 1;
+    out[1] = c[1] * k;
+    out[2] = c[2] * k;
   }
   return out;
 }
@@ -267,6 +268,33 @@ export function paletteFromPixels(pixels: Uint8ClampedArray): MadePalette {
     warn: hex(warn),
   };
   return { palette, viscolor: rampFrom(palette) };
+}
+
+/**
+ * A theme's six made legible the way a made skin's are (D122, #147): words at
+ * 4.5:1 against the ground and the recessed surface, the accent, the alert
+ * and the warning at 3:1 against the ground, each moved in lightness only as
+ * far as it has to and keeping its hue. A colour that already stands off is
+ * returned exactly as it was written, so a theme drawn to be legible, as
+ * Eyewall is, comes back unchanged to the last digit.
+ *
+ * Purricane is why: its mint accent is drawn on a near-white ground at about
+ * 1.1:1, which is a glow on paper, and every button edge and slider in a
+ * mask skin is drawn in the accent.
+ */
+export function legible(p: Record<Token, string>): Record<Token, string> {
+  const fit = (colour: string, grounds: string[], ratio: number) => {
+    if (Math.min(...grounds.map((g) => contrast(colour, g))) >= ratio) return colour;
+    return hex(standOff(labOf(colour), grounds.map(labOf), ratio));
+  };
+  return {
+    ground: p.ground,
+    surface: p.surface,
+    text: fit(p.text, [p.ground, p.surface], TEXT_CONTRAST),
+    accent: fit(p.accent, [p.ground], EDGE_CONTRAST),
+    alert: fit(p.alert, [p.ground], EDGE_CONTRAST),
+    warn: fit(p.warn, [p.ground], EDGE_CONTRAST),
+  };
 }
 
 /** 24 steps from the recessed surface up through the accent to the alert,

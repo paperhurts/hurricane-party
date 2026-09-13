@@ -3,7 +3,7 @@
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { emitTo, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { applyTheme } from "./lib/theme";
+  import { applyTheme, isWearable } from "./lib/theme";
   // The cooler capybara (#62): the "moved or deleted" state, here as in Main.
   import cooler from "./assets/capybara-cooler.png";
   // The video window's "Loading…" moment (#62): waiting with the boombox,
@@ -136,6 +136,12 @@
 
   onMount(() => {
     applyTheme("eyewall");
+    // The theme the person picked (#147), now and when it changes.
+    const wear = (t: unknown) => applyTheme(isWearable(t) ? t : "eyewall");
+    invoke<string>("get_theme").then(wear, () => {});
+    const themeSub = listen<string>("theme:changed", (e) => wear(e.payload), {
+      target: { kind: "WebviewWindow", label: "video" },
+    });
     const id = Number(new URLSearchParams(location.search).get("id"));
 
     // A switch arrives as an event and is acked with a command, because the
@@ -187,6 +193,7 @@
       pauseSub.then((unlisten) => unlisten()).catch(() => {});
       removedSub.then((unlisten) => unlisten()).catch(() => {});
       cmdSub.then((unlisten) => unlisten()).catch(() => {});
+      themeSub.then((unlisten) => unlisten()).catch(() => {});
     };
   });
 </script>

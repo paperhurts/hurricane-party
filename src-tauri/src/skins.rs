@@ -80,9 +80,15 @@ pub struct Unpacked {
     pub manifest: Option<String>,
 }
 
+/// The skins that ship inside the app rather than in a folder (D90, D132).
+/// No imported skin may take one of their ids: the app would list it twice
+/// and only ever wear the one it carries.
+pub const SHIPPED: &[&str] = &["eyewall", "purricane"];
+
 /// A folder name from a skin's file name: lower case, and nothing that could
 /// mean something to a path. A collision takes a number, so importing two
-/// skins called `base` keeps both.
+/// skins called `base` keeps both, and a skin called Purricane is
+/// `purricane-2` beside the one that ships.
 fn slug_for(root: &Path, stem: &str) -> String {
     let mut base: String = stem
         .chars()
@@ -99,12 +105,13 @@ fn slug_for(root: &Path, stem: &str) -> String {
         base = "skin".into();
     }
     base.truncate(48);
-    if !root.join(&base).exists() {
+    let taken = |c: &str| SHIPPED.contains(&c) || root.join(c).exists();
+    if !taken(&base) {
         return base;
     }
     for n in 2..1000 {
         let candidate = format!("{base}-{n}");
-        if !root.join(&candidate).exists() {
+        if !taken(&candidate) {
             return candidate;
         }
     }
@@ -528,7 +535,11 @@ pub fn installed(skins_dir: &Path) -> Vec<String> {
     for e in entries.flatten() {
         if e.path().join("manifest.json").is_file() {
             if let Some(name) = e.file_name().to_str() {
-                out.push(name.to_string());
+                // A folder left from before an id shipped is shadowed by the
+                // skin that did, so it is not offered as a second of it.
+                if !SHIPPED.contains(&name) {
+                    out.push(name.to_string());
+                }
             }
         }
     }
@@ -786,6 +797,22 @@ mod tests {
         assert_eq!(a.id, "base");
         assert_eq!(b.id, "base-2");
         assert_eq!(fs::read(skins.join("base/main.bmp")).unwrap(), b"BM one");
+    }
+
+    #[test]
+    fn a_skin_named_after_one_that_ships_gets_a_number_and_is_listed_once() {
+        let t = temp();
+        let skins = t.join("skins");
+        let zip = write_zip(&t, "Purricane.wsz", &[("main.bmp", b"BM pink")]);
+        assert_eq!(unpack(&zip, &skins).unwrap().id, "purricane-2");
+        assert_eq!(make(&skins, "Eyewall").unwrap().id, "eyewall-2");
+        // A folder that took a shipped id before it shipped is not offered.
+        for id in ["purricane", "purricane-2", "eyewall-2"] {
+            fs::create_dir_all(skins.join(id)).unwrap();
+            fs::write(skins.join(id).join("manifest.json"), "{}").unwrap();
+        }
+        assert_eq!(installed(&skins), vec!["eyewall-2", "purricane-2"]);
+        fs::remove_dir_all(&t).ok();
     }
 
     #[test]

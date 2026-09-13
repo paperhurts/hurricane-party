@@ -411,6 +411,106 @@ pub fn set_glow(conn: &Connection, on: bool) -> Result<(), DbError> {
     set_setting(conn, GLOW_SETTING, if on { "1" } else { "0" })
 }
 
+/// The theme the app wears (#147): which theme in `design/tokens.json`
+/// paints the library and every mask skin. The frontend has the tokens and
+/// says which names are themes; here a name is only ever a short slug, so a
+/// setting nobody could have written reads as Eyewall.
+pub const THEME_SETTING: &str = "theme.current";
+
+fn is_theme_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+}
+
+pub fn theme(conn: &Connection) -> String {
+    get_setting(conn, THEME_SETTING)
+        .filter(|t| is_theme_name(t))
+        .unwrap_or_else(|| "eyewall".into())
+}
+
+pub fn set_theme(conn: &Connection, name: &str) -> Result<(), DbError> {
+    if !is_theme_name(name) {
+        return Err(DbError::Io(format!("{name:?} is not a theme name")));
+    }
+    set_setting(conn, THEME_SETTING, name)
+}
+
+/// Calm (#147, `docs/purricane.md`): the kaleidoscope as a still mandala that
+/// answers the music in size only, no rotation and no bloom. Off unless a
+/// person turns it on; `prefers-reduced-motion` gives the same whatever this
+/// says.
+pub const CALM_SETTING: &str = "vis.calm";
+
+pub fn calm(conn: &Connection) -> bool {
+    get_setting(conn, CALM_SETTING).is_some_and(|v| v == "1")
+}
+
+pub fn set_calm(conn: &Connection, on: bool) -> Result<(), DbError> {
+    set_setting(conn, CALM_SETTING, if on { "1" } else { "0" })
+}
+
+/// How many segments the kaleidoscope is cut into, when a person has picked
+/// on Purricane's Main (D132): six or eight, the two `design/tokens.json`
+/// allows. None until then, and the theme's number stands.
+pub const SEGMENTS_SETTING: &str = "vis.segments";
+
+pub fn segments(conn: &Connection) -> Option<u8> {
+    get_setting(conn, SEGMENTS_SETTING)
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n == 6 || *n == 8)
+}
+
+pub fn set_segments(conn: &Connection, n: u8) -> Result<(), DbError> {
+    if n != 6 && n != 8 {
+        return Err(DbError::Io(format!("{n} segments: six or eight")));
+    }
+    set_setting(conn, SEGMENTS_SETTING, &n.to_string())
+}
+
+/// The skin a person wears, by id: `eyewall`, `purricane`, or an imported
+/// folder's name.
+pub const SKIN_SETTING: &str = "skin.current";
+
+/// The skin that ships with a theme and is that theme's look (D132). Wearing
+/// the theme wears the skin, and wearing the skin wears the theme.
+const PAIRS: &[(&str, &str)] = &[("purricane", "purricane")];
+
+pub fn skin(conn: &Connection) -> String {
+    get_setting(conn, SKIN_SETTING).unwrap_or_else(|| "eyewall".into())
+}
+
+/// Wear a theme, and its skin with it (D132). Leaving a paired theme for
+/// one without a skin of its own takes its skin off too, back to Eyewall:
+/// Purricane's pink chrome under another theme's library is neither. Any
+/// other skin stays on, since its colours are already its own or follow the
+/// theme. The skin worn afterwards, and whether it changed.
+pub fn wear_theme(conn: &Connection, name: &str) -> Result<(String, bool), DbError> {
+    set_theme(conn, name)?;
+    let was = skin(conn);
+    let now = match PAIRS.iter().find(|(theme, _)| *theme == name) {
+        Some((_, paired)) => (*paired).to_string(),
+        None if PAIRS.iter().any(|(_, paired)| *paired == was) => "eyewall".to_string(),
+        None => was.clone(),
+    };
+    if now != was {
+        set_setting(conn, SKIN_SETTING, &now)?;
+    }
+    Ok((now.clone(), now != was))
+}
+
+/// Wear a skin, and its theme with it when it has one (D132). The theme
+/// worn afterwards, and whether it changed.
+pub fn wear_skin(conn: &Connection, id: &str) -> Result<(String, bool), DbError> {
+    set_setting(conn, SKIN_SETTING, id)?;
+    let was = theme(conn);
+    match PAIRS.iter().find(|(_, paired)| *paired == id) {
+        Some((paired, _)) if *paired != was => {
+            set_theme(conn, paired)?;
+            Ok((paired.to_string(), true))
+        }
+        _ => Ok((was, false)),
+    }
+}
+
 /// The schema, exposed for in-memory test fixtures.
 #[cfg(test)]
 pub fn schema_for_tests() -> &'static str {
@@ -501,6 +601,71 @@ mod tests {
         // Only an explicit off is off.
         set_setting(&conn, GLOW_SETTING, "maybe").unwrap();
         assert!(glow(&conn));
+    }
+
+    #[test]
+    fn the_theme_is_eyewall_until_a_theme_name_is_saved_and_calm_is_off() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        assert_eq!(theme(&conn), "eyewall");
+        set_theme(&conn, "purricane").unwrap();
+        assert_eq!(theme(&conn), "purricane");
+        assert!(set_theme(&conn, "../../etc").is_err());
+        assert!(set_theme(&conn, "").is_err());
+        // A value written some other way than set_theme reads as Eyewall.
+        set_setting(&conn, THEME_SETTING, "Not A Theme!").unwrap();
+        assert_eq!(theme(&conn), "eyewall");
+        assert!(!calm(&conn));
+        set_calm(&conn, true).unwrap();
+        assert!(calm(&conn));
+    }
+
+    #[test]
+    fn segments_are_six_or_eight_or_the_themes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        assert_eq!(segments(&conn), None);
+        set_segments(&conn, 8).unwrap();
+        assert_eq!(segments(&conn), Some(8));
+        assert!(set_segments(&conn, 7).is_err());
+        assert_eq!(segments(&conn), Some(8));
+        set_setting(&conn, SEGMENTS_SETTING, "12").unwrap();
+        assert_eq!(segments(&conn), None);
+    }
+
+    #[test]
+    fn purricane_the_theme_and_purricane_the_skin_are_worn_together() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        // The theme puts its skin on, over whatever was worn.
+        set_setting(&conn, SKIN_SETTING, "skellyoops-2").unwrap();
+        assert_eq!(
+            wear_theme(&conn, "purricane").unwrap(),
+            ("purricane".into(), true)
+        );
+        assert_eq!(skin(&conn), "purricane");
+        // Back to Eyewall takes it off.
+        assert_eq!(
+            wear_theme(&conn, "eyewall").unwrap(),
+            ("eyewall".into(), true)
+        );
+        // A skin of a person's own stays on through a change of theme.
+        wear_skin(&conn, "skellyoops-2").unwrap();
+        assert_eq!(
+            wear_theme(&conn, "eyewall").unwrap(),
+            ("skellyoops-2".into(), false)
+        );
+        // The skin puts its theme on, and Eyewall's skin leaves the theme be.
+        assert_eq!(
+            wear_skin(&conn, "purricane").unwrap(),
+            ("purricane".into(), true)
+        );
+        assert_eq!(theme(&conn), "purricane");
+        assert_eq!(
+            wear_skin(&conn, "eyewall").unwrap(),
+            ("purricane".into(), false)
+        );
+        assert_eq!(theme(&conn), "purricane");
     }
 
     fn root(conn: &Connection, id: i64, path: &str) {

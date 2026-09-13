@@ -111,7 +111,8 @@
    * the glyphs' height, not the page's 14 px in a 10 px row. */
   function fontStyle(name: string): string {
     const f = skin.skin.fonts[name];
-    if (f?.type === "system") return `font-size:${f.size}px;letter-spacing:${f.tracking}em`;
+    // Times the theme's scale (#147): Comic Sans sits small at Iosevka's size.
+    if (f?.type === "system") return `font-size:calc(${f.size}px * var(--type-scale, 1));letter-spacing:${f.tracking}em`;
     if (f?.type === "bitmap") return `font-size:${f.glyphSize[1]}px`;
     return "";
   }
@@ -243,6 +244,30 @@
   });
   // …and the frame dies with the element, and only then.
   $effect(() => () => cancelAnimationFrame(pending));
+
+  // A line wider than its box, in a face wider than the one the box was
+  // measured for — Purricane's Comic Sans in boxes sized for Iosevka (#147) —
+  // is squeezed across to fit rather than cut to an ellipsis: PLAY PAUSE STOP
+  // read as PL… PA… ST…. Down to 60%, below which the ellipsis says more than
+  // squashed letters. Measured without resetting first, since `scrollWidth`
+  // is the words' own width however the span is drawn, so a clock that ticks
+  // does not flicker. A new skin or theme reloads the skin, which re-measures.
+  let squeeze = $state(1);
+  $effect(() => {
+    void shown;
+    void skin;
+    const host = textBox;
+    if (el.type !== "text" || el.overflow === "scroll" || !host || glyphs) return;
+    const id = requestAnimationFrame(() => {
+      const span = host.querySelector<HTMLElement>(".t");
+      if (!span) return;
+      const room = host.clientWidth;
+      const words = span.scrollWidth;
+      const k = words > room + 1 ? room / words : 1;
+      squeeze = k >= 0.6 ? k : 1;
+    });
+    return () => cancelAnimationFrame(id);
+  });
 
   // ---- slider ----
 
@@ -490,7 +515,7 @@
         {shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
       </span>
     {:else}
-      <span class="t">{shown}</span>
+      <span class="t" class:fit={squeeze < 1} style={squeeze < 1 ? `--squeeze:${squeeze}` : undefined}>{shown}</span>
     {/if}
   </div>
 {:else if el.type === "slider"}
@@ -534,8 +559,13 @@
   </div>
 {:else if el.type === "visualizer"}
   <!-- `--vis-well` reaches the analyser inside: how strongly its well paints
-       behind the bars (D122). -->
-  <div class="sp-vis" style="{box};--vis-well:{el.well}">
+       behind the bars (D122). A round box is a circle, and `--vis-radius`
+       rounds the wells inside it to match (D132). -->
+  <div
+    class="sp-vis"
+    class:round={el.shape === "round"}
+    style="{box};--vis-well:{el.well}{el.shape === 'round' ? ';--vis-radius:50%' : ''}"
+  >
     {#if slot}{@render slot()}{/if}
   </div>
 {:else if el.type === "list"}

@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emitTo, listen } from "@tauri-apps/api/event";
-  import { applyTheme, colorsWorn } from "../lib/theme";
+  import { applyTheme, colorsWorn, isWearable, type ThemeName } from "../lib/theme";
   import { elementsOf, TOKENS, type Element, type Skin } from "../lib/skin";
   import { loadSkin, type LoadedSkin } from "../lib/skinsheet";
   import { currentSkin, EYEWALL, eyewallFile, windowNameOf } from "../lib/skins";
@@ -55,7 +55,7 @@
     onslide?: (bind: string, frac: number) => void;
     /** The skin this window is now wearing, each time one loads: the window
      * draws what the sheet cannot, and the analyser's ramp is the skin's. */
-    onskin?: (skin: Skin) => void;
+    onskin?: (skin: Skin, theme: ThemeName) => void;
   } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
@@ -75,9 +75,13 @@
    * is what lets one grey sheet wear whichever theme is on. Re-applying the
    * theme first is what makes switching back from an imported skin work.
    */
+  // The theme the person picked (#147), read with every skin load so a
+  // theme change and a skin change take one path.
+  let theme: ThemeName = "eyewall";
+
   function paintFrom(s: Skin) {
-    applyTheme();
-    const worn = colorsWorn(s);
+    applyTheme(theme);
+    const worn = colorsWorn(s, theme);
     for (const t of TOKENS) {
       document.documentElement.style.setProperty(`--${t}`, worn[t]);
     }
@@ -110,10 +114,12 @@
   let skin = $state<LoadedSkin | null>(null);
   let win = $derived(windowNameOf(label));
   function reloadSkin() {
-    currentSkin().then((w) => {
+    const asked = invoke<string>("get_theme").catch(() => "eyewall");
+    Promise.all([currentSkin(), asked]).then(([w, t]) => {
+      theme = isWearable(t) ? t : "eyewall";
       if (w.instead) sayItCannotBeWorn(w.instead.id, w.instead.reason);
       paintFrom(w.skin);
-      onskin?.(w.skin);
+      onskin?.(w.skin, theme);
       loadSkin(w.skin, w.resolve, window.devicePixelRatio).then(
         (s) => (skin = s),
         (e) => {
@@ -124,7 +130,7 @@
           sayItCannotBeWorn(w.id, e instanceof Error ? e.message : String(e));
           if (w.id !== "eyewall") {
             paintFrom(EYEWALL);
-            onskin?.(EYEWALL);
+            onskin?.(EYEWALL, theme);
             loadSkin(EYEWALL, eyewallFile, window.devicePixelRatio).then(
               (s) => (skin = s),
               (e2) => console.error(e2),
@@ -187,6 +193,8 @@
       // A skin the person picked or imported (#107): worn now, not at the
       // next launch.
       listen("skin:changed", () => reloadSkin(), { target: { kind: "WebviewWindow", label } }),
+      // A theme the person picked (#147): the same reload, which reads it.
+      listen("theme:changed", () => reloadSkin(), { target: { kind: "WebviewWindow", label } }),
     ];
     return () => {
       for (const s of subs) s.then((off) => off());

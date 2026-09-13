@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import tokens from "../../design/tokens.json";
 import { TOKENS } from "./skin";
-import { colorsFor, colorsWorn, typeFor, viscolor, type ThemeName } from "./theme";
+import { contrast } from "./palette";
+import {
+  colorsFor,
+  colorsShown,
+  colorsWorn,
+  kaleidoscopeFor,
+  rampWorn,
+  typeFor,
+  typeScale,
+  viscolor,
+  visualizerFor,
+  WEARABLE,
+  type ThemeName,
+} from "./theme";
 
 // Issue #28 was a theme that filled its own set of colour names: every
 // `var(--surface)` under Purricane resolved to nothing, because `applyTheme`
@@ -23,10 +36,11 @@ describe("every theme", () => {
   });
 
   // Cone has no palette of its own and `extends` Eyewall, so the ramp walk is
-  // what gives it one. Purricane draws a kaleidoscope and has no ramp yet.
+  // what gives it one. Purricane's is the designer's hue drift (D132).
   it("inherits the radar ramp through extends", () => {
     expect(viscolor("eyewall")).toHaveLength(24);
     expect(viscolor("cone")).toEqual(viscolor("eyewall"));
+    expect(viscolor("purricane")).toHaveLength(24);
   });
 
   // A theme may keep its own words for the six — Eyewall's void and filament,
@@ -45,7 +59,9 @@ describe("what a classic window paints while wearing a skin (D101)", () => {
 
   it("a mask skin follows the theme, so one grey sheet wears any of them", () => {
     expect(colorsWorn({ art: "mask", palette })).toEqual(colorsFor("eyewall"));
-    expect(colorsWorn({ art: "mask", palette }, "purricane")).toEqual(colorsFor("purricane"));
+    // The theme as it is worn: legible (#147), which for Purricane moves its
+    // pale accents off its near-white ground.
+    expect(colorsWorn({ art: "mask", palette }, "purricane")).toEqual(colorsShown("purricane"));
   });
 
   // Every imported .wsz is `final`: its PLEDIT.TXT colours are derived,
@@ -53,5 +69,60 @@ describe("what a classic window paints while wearing a skin (D101)", () => {
   // shown — the rows wore Eyewall's cyan and magenta over someone else's art.
   it("a final skin brings the colours beside its pixels", () => {
     expect(colorsWorn({ art: "final", palette })).toEqual(palette);
+  });
+});
+
+// #147: a theme a person can pick is worn legible, and brings its analyser.
+describe("wearing a theme", () => {
+  it("wears Eyewall exactly as the tokens write it", () => {
+    expect(colorsShown("eyewall")).toEqual(colorsFor("eyewall"));
+  });
+
+  it.each(WEARABLE)("%s is legible: words 4.5:1 on ground and surface, the rest 3:1 on the ground", (name) => {
+    const c = colorsShown(name);
+    expect(contrast(c.text, c.ground)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(c.text, c.surface)).toBeGreaterThanOrEqual(4.5);
+    for (const t of ["accent", "alert", "warn"] as const) expect(contrast(c[t], c.ground)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps Purricane's ground, surface and ink as written, and its accent's hue", () => {
+    const raw = colorsFor("purricane");
+    const worn = colorsShown("purricane");
+    expect(worn.ground).toBe(raw.ground);
+    expect(worn.surface).toBe(raw.surface);
+    expect(worn.text).toBe(raw.text);
+    // The designer's floss is under 2:1 on the sugar window (D132); in the
+    // library it deepens, and stays a pink: red first, then blue, then green.
+    expect(worn.accent).not.toBe(raw.accent);
+    const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const [r, g, bl] = rgb(worn.accent);
+    expect(r).toBeGreaterThan(bl);
+    expect(bl).toBeGreaterThan(g);
+  });
+
+  it("sets Comic Sans larger, and leaves Eyewall's sizes alone", () => {
+    expect(typeScale("eyewall")).toBe(1);
+    expect(typeScale("purricane")).toBeGreaterThan(1);
+  });
+
+  const mask = { art: "mask", palette: {}, viscolor: ["a"], visualizer: { component: "spectrum-bars" } };
+  const own = { ...mask, art: "final" };
+
+  it("gives a mask skin the theme's analyser and ramp, and a skin with its own colours its own", () => {
+    expect(visualizerFor(mask, "eyewall")).toBe("spectrum-bars");
+    expect(visualizerFor(mask, "purricane")).toBe("kaleidoscope");
+    expect(visualizerFor(own, "purricane")).toBe("spectrum-bars");
+    expect(rampWorn(mask, "eyewall")).toEqual(viscolor("eyewall"));
+    expect(rampWorn(own, "purricane")).toEqual(["a"]);
+    // Purricane's ramp is its own in the tokens (D132).
+    expect(rampWorn(mask, "purricane")).toEqual(viscolor("purricane"));
+    expect(colorsWorn({ art: "mask", palette: {} }, "purricane")).toEqual(colorsShown("purricane"));
+  });
+
+  it("caps the kaleidoscope where the tokens could ask for more", () => {
+    const k = kaleidoscopeFor("purricane");
+    expect([6, 8]).toContain(k.segments);
+    expect(k.degPerSec).toBeLessThanOrEqual(10);
+    expect(k.maxBloomHz).toBeLessThanOrEqual(3);
   });
 });

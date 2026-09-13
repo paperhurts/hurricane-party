@@ -1,0 +1,172 @@
+{
+  "format": "hp-skin/1",
+  "name": "Purricane",
+  "author": "hurricane-party",
+  "authoredScale": 1,
+  "sheets": {
+    "chrome": {"1": "chrome.png", "2": "chrome@2x.png"}
+  },
+  "art": "final",
+  "colors": "own",
+  "glow": "baked",
+  "palette": {"ground": "#FFF4FB", "surface": "#FFFFFF", "text": "#4A2A5C", "accent": "#7A4A92", "alert": "#E0489E", "warn": "#9E8906"},
+  "viscolor": [
+    "#FF8FD0", "#FF8FE8", "#FF8FFF", "#E88FFF", "#D08FFF", "#B98FFF",
+    "#A28FFF", "#8F98FF", "#8FB4FF", "#8FD0FF", "#8FECFF", "#8FFFF6",
+    "#8FFFDA", "#8FFFB7", "#8FFF95", "#ABFF8F", "#CDFF8F", "#EFFF8F",
+    "#FFEC8F", "#FFD28F", "#FFB78F", "#FF9D8F", "#FF8F9B", "#FF8FB6"
+  ],
+  "visualizer": {
+    "component": "kaleidoscope",
+    "options": {}
+  },
+  "fonts": {
+    "chrome": {"type": "system", "size": 7, "case": "none", "tracking": 0.02},
+    "clock": {"type": "system", "size": 16, "case": "none", "tracking": -0.02},
+    "strip": {"type": "system", "size": 10, "case": "none", "tracking": 0},
+    "meta": {"type": "system", "size": 6, "case": "none", "tracking": 0.04},
+    "pill": {"type": "system", "size": 6, "case": "upper", "tracking": 0.04},
+    "scale": {"type": "system", "size": 6, "case": "none", "tracking": 0.02},
+    "row": {"type": "system", "size": 8, "case": "none", "tracking": 0}
+  },
+  "windows": {
+    "main": {
+      "size": [275, 116],
+      "resizable": false,
+      "elements": {
+        "frame": {"type": "nineslice", "rect": "fill", "sprite": {"sheet": "chrome", "rect": [0, 0, 8, 8]}, "insets": [1, 1, 1, 1]},
+        "titlebar": {"type": "image", "rect": [0, 0, 275, 16], "sprite": {"sheet": "chrome", "rect": [10, 0, 8, 16]}, "inactive": {"sheet": "chrome", "rect": [20, 0, 8, 16]}, "role": "drag"},
+        "dot": {"type": "image", "rect": [1, 2, 10, 11], "sprite": {"sheet": "chrome", "rect": [60, 0, 10, 11]}},
+        "title": {"type": "text", "rect": [12, 0, 176, 15], "font": "chrome", "tint": "accent", "value": "Purricane — Main"},
+        "calm": {"type": "toggle", "rect": [191, 1, 29, 13], "sprite": {"sheet": "chrome", "rect": [0, 66, 29, 13]}, "hover": {"sheet": "chrome", "rect": [31, 66, 29, 13]}, "active": {"sheet": "chrome", "rect": [62, 66, 29, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [93, 66, 29, 13]}, "hover": {"sheet": "chrome", "rect": [124, 66, 29, 13]}, "active": {"sheet": "chrome", "rect": [155, 66, 29, 13]}}, "action": "calm", "bind": "calm", "when": "on", "label": {"font": "pill", "value": "CALM", "tint": "accent", "on": "text"}},
+        "minimize": {"type": "button", "rect": [221, 1, 12, 13], "sprite": {"sheet": "chrome", "rect": [0, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [14, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [28, 50, 12, 13]}, "action": "minimize"},
+        "shade": {"type": "toggle", "rect": [234, 1, 12, 13], "sprite": {"sheet": "chrome", "rect": [84, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [98, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [112, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [126, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [140, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [154, 50, 12, 13]}}, "action": "shade"},
+        "zoom": {"type": "toggle", "rect": [247, 1, 12, 13], "sprite": {"sheet": "chrome", "rect": [168, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [182, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [196, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [210, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [224, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [238, 50, 12, 13]}}, "action": "zoom"},
+        "close": {"type": "button", "rect": [260, 1, 12, 13], "sprite": {"sheet": "chrome", "rect": [42, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [56, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [70, 50, 12, 13]}, "action": "close"},
+        "vis": {"type": "visualizer", "rect": [5, 23, 34, 34], "shape": "round"},
+        "visRing": {"type": "image", "rect": [1, 19, 42, 42], "sprite": {"sheet": "chrome", "rect": [96, 0, 42, 42]}},
+        "clock": {"type": "text", "rect": [45, 27, 60, 18], "font": "clock", "bind": "elapsed", "tint": "text"},
+        "segments6": {"type": "toggle", "rect": [205, 28, 32, 14], "sprite": {"sheet": "chrome", "rect": [0, 81, 32, 14]}, "hover": {"sheet": "chrome", "rect": [34, 81, 32, 14]}, "active": {"sheet": "chrome", "rect": [68, 81, 32, 14]}, "on": {"sprite": {"sheet": "chrome", "rect": [102, 81, 32, 14]}, "hover": {"sheet": "chrome", "rect": [136, 81, 32, 14]}, "active": {"sheet": "chrome", "rect": [170, 81, 32, 14]}}, "action": "segments6", "bind": "segments", "when": "6", "label": {"font": "pill", "value": "6 SEG", "tint": "accent", "on": "ground"}},
+        "segments8": {"type": "toggle", "rect": [238, 28, 32, 14], "sprite": {"sheet": "chrome", "rect": [0, 81, 32, 14]}, "hover": {"sheet": "chrome", "rect": [34, 81, 32, 14]}, "active": {"sheet": "chrome", "rect": [68, 81, 32, 14]}, "on": {"sprite": {"sheet": "chrome", "rect": [102, 81, 32, 14]}, "hover": {"sheet": "chrome", "rect": [136, 81, 32, 14]}, "active": {"sheet": "chrome", "rect": [170, 81, 32, 14]}}, "action": "segments8", "bind": "segments", "when": "8", "label": {"font": "pill", "value": "8 SEG", "tint": "accent", "on": "ground"}},
+        "visMotion": {"type": "text", "rect": [190, 43, 80, 9], "font": "meta", "bind": "visMotion", "tint": "accent", "opacity": 0.85, "align": "right"},
+        "stripWell": {"type": "nineslice", "rect": [5, 63, 265, 16], "sprite": {"sheet": "chrome", "rect": [140, 0, 17, 16]}, "insets": [8, 8, 8, 8]},
+        "trackTitle": {"type": "text", "rect": [11, 63, 253, 16], "font": "strip", "bind": "trackTitle", "tint": "text", "overflow": "scroll"},
+        "seekWell": {"type": "nineslice", "rect": [5, 83, 265, 8], "sprite": {"sheet": "chrome", "rect": [180, 0, 9, 8]}, "insets": [4, 4, 4, 4]},
+        "seek": {"type": "slider", "rect": [7, 84, 261, 6], "orientation": "horizontal", "bind": "position", "fill": {"sheet": "chrome", "rect": [140, 20, 32, 6]}, "thumb": {"sheet": "chrome", "rect": [176, 20, 10, 16]}},
+        "prev": {"type": "button", "rect": [4, 94, 18, 17], "sprite": {"sheet": "chrome", "rect": [0, 97, 18, 17]}, "hover": {"sheet": "chrome", "rect": [20, 97, 18, 17]}, "active": {"sheet": "chrome", "rect": [40, 97, 18, 17]}, "action": "prev"},
+        "play": {"type": "toggle", "rect": [22, 94, 18, 17], "sprite": {"sheet": "chrome", "rect": [120, 97, 18, 17]}, "hover": {"sheet": "chrome", "rect": [140, 97, 18, 17]}, "active": {"sheet": "chrome", "rect": [160, 97, 18, 17]}, "on": {"sprite": {"sheet": "chrome", "rect": [180, 97, 18, 17]}, "hover": {"sheet": "chrome", "rect": [200, 97, 18, 17]}, "active": {"sheet": "chrome", "rect": [220, 97, 18, 17]}}, "action": "play", "bind": "playState", "when": "playing"},
+        "pause": {"type": "toggle", "rect": [40, 94, 18, 17], "sprite": {"sheet": "chrome", "rect": [0, 116, 18, 17]}, "hover": {"sheet": "chrome", "rect": [20, 116, 18, 17]}, "active": {"sheet": "chrome", "rect": [40, 116, 18, 17]}, "on": {"sprite": {"sheet": "chrome", "rect": [60, 116, 18, 17]}, "hover": {"sheet": "chrome", "rect": [80, 116, 18, 17]}, "active": {"sheet": "chrome", "rect": [100, 116, 18, 17]}}, "action": "pause", "bind": "playState", "when": "paused"},
+        "stop": {"type": "toggle", "rect": [58, 94, 18, 17], "sprite": {"sheet": "chrome", "rect": [120, 116, 18, 17]}, "hover": {"sheet": "chrome", "rect": [140, 116, 18, 17]}, "active": {"sheet": "chrome", "rect": [160, 116, 18, 17]}, "on": {"sprite": {"sheet": "chrome", "rect": [180, 116, 18, 17]}, "hover": {"sheet": "chrome", "rect": [200, 116, 18, 17]}, "active": {"sheet": "chrome", "rect": [220, 116, 18, 17]}}, "action": "stop", "bind": "playState", "when": "stopped"},
+        "next": {"type": "button", "rect": [76, 94, 18, 17], "sprite": {"sheet": "chrome", "rect": [60, 97, 18, 17]}, "hover": {"sheet": "chrome", "rect": [80, 97, 18, 17]}, "active": {"sheet": "chrome", "rect": [100, 97, 18, 17]}, "action": "next"},
+        "volWell": {"type": "nineslice", "rect": [98, 96, 129, 6], "sprite": {"sheet": "chrome", "rect": [192, 0, 7, 6]}, "insets": [3, 3, 3, 3]},
+        "volume": {"type": "slider", "rect": [99, 97, 127, 4], "orientation": "horizontal", "bind": "volume", "fill": {"sheet": "chrome", "rect": [140, 28, 32, 4]}},
+        "volLabel": {"type": "text", "rect": [98, 103, 129, 9], "font": "meta", "value": "VOL {}", "bind": "volumePercent", "tint": "accent", "opacity": 0.85},
+        "eq": {"type": "toggle", "rect": [231, 94, 20, 17], "sprite": {"sheet": "chrome", "rect": [0, 135, 20, 17]}, "hover": {"sheet": "chrome", "rect": [22, 135, 20, 17]}, "active": {"sheet": "chrome", "rect": [44, 135, 20, 17]}, "on": {"sprite": {"sheet": "chrome", "rect": [66, 135, 20, 17]}, "hover": {"sheet": "chrome", "rect": [88, 135, 20, 17]}, "active": {"sheet": "chrome", "rect": [110, 135, 20, 17]}}, "action": "eq", "bind": "eqOpen", "when": "on", "label": {"font": "pill", "value": "EQ", "tint": "accent", "on": "ground"}},
+        "pl": {"type": "toggle", "rect": [251, 94, 20, 17], "sprite": {"sheet": "chrome", "rect": [0, 135, 20, 17]}, "hover": {"sheet": "chrome", "rect": [22, 135, 20, 17]}, "active": {"sheet": "chrome", "rect": [44, 135, 20, 17]}, "on": {"sprite": {"sheet": "chrome", "rect": [66, 135, 20, 17]}, "hover": {"sheet": "chrome", "rect": [88, 135, 20, 17]}, "active": {"sheet": "chrome", "rect": [110, 135, 20, 17]}}, "action": "playlist", "bind": "plOpen", "when": "on", "label": {"font": "pill", "value": "PL", "tint": "accent", "on": "ground"}}
+      },
+      "shade": {
+        "size": [275, 14],
+        "elements": {
+          "frame": {"type": "nineslice", "rect": "fill", "sprite": {"sheet": "chrome", "rect": [0, 0, 8, 8]}, "insets": [1, 1, 1, 1]},
+          "titlebar": {"type": "image", "rect": [0, 0, 275, 14], "sprite": {"sheet": "chrome", "rect": [30, 0, 8, 14]}, "inactive": {"sheet": "chrome", "rect": [40, 0, 8, 14]}, "role": "drag"},
+          "dot": {"type": "image", "rect": [1, 1, 10, 11], "sprite": {"sheet": "chrome", "rect": [60, 0, 10, 11]}},
+          "title": {"type": "text", "rect": [12, 0, 206, 14], "font": "chrome", "tint": "accent", "bind": "windowTitle"},
+          "minimize": {"type": "button", "rect": [221, 0, 12, 13], "sprite": {"sheet": "chrome", "rect": [0, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [14, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [28, 50, 12, 13]}, "action": "minimize"},
+          "shade": {"type": "toggle", "rect": [234, 0, 12, 13], "sprite": {"sheet": "chrome", "rect": [84, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [98, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [112, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [126, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [140, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [154, 50, 12, 13]}}, "action": "shade"},
+          "zoom": {"type": "toggle", "rect": [247, 0, 12, 13], "sprite": {"sheet": "chrome", "rect": [168, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [182, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [196, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [210, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [224, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [238, 50, 12, 13]}}, "action": "zoom"},
+          "close": {"type": "button", "rect": [260, 0, 12, 13], "sprite": {"sheet": "chrome", "rect": [42, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [56, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [70, 50, 12, 13]}, "action": "close"}
+        }
+      }
+    },
+    "equalizer": {
+      "size": [275, 116],
+      "resizable": false,
+      "elements": {
+        "frame": {"type": "nineslice", "rect": "fill", "sprite": {"sheet": "chrome", "rect": [0, 0, 8, 8]}, "insets": [1, 1, 1, 1]},
+        "titlebar": {"type": "image", "rect": [0, 0, 275, 16], "sprite": {"sheet": "chrome", "rect": [10, 0, 8, 16]}, "inactive": {"sheet": "chrome", "rect": [20, 0, 8, 16]}, "role": "drag"},
+        "dot": {"type": "image", "rect": [1, 2, 10, 11], "sprite": {"sheet": "chrome", "rect": [72, 0, 10, 11]}},
+        "title": {"type": "text", "rect": [12, 0, 244, 15], "font": "chrome", "tint": "accent", "value": "Purricane — Equalizer"},
+        "shade": {"type": "toggle", "rect": [260, 1, 12, 13], "sprite": {"sheet": "chrome", "rect": [84, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [98, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [112, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [126, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [140, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [154, 50, 12, 13]}}, "action": "shade"},
+        "eqOnButton": {"type": "toggle", "rect": [3, 19, 60, 14], "sprite": {"sheet": "chrome", "rect": [54, 169, 60, 14]}, "hover": {"sheet": "chrome", "rect": [116, 169, 60, 14]}, "active": {"sheet": "chrome", "rect": [178, 169, 60, 14]}, "on": {"sprite": {"sheet": "chrome", "rect": [54, 185, 60, 14]}, "hover": {"sheet": "chrome", "rect": [116, 185, 60, 14]}, "active": {"sheet": "chrome", "rect": [178, 185, 60, 14]}}, "action": "eqOn", "bind": "eqOn", "when": "on", "label": {"font": "pill", "value": "EQ {}", "bind": "eqOn", "tint": "accent", "on": "text"}},
+        "eqPresetButton": {"type": "toggle", "rect": [3, 35, 60, 14], "sprite": {"sheet": "chrome", "rect": [54, 201, 60, 14]}, "hover": {"sheet": "chrome", "rect": [116, 201, 60, 14]}, "active": {"sheet": "chrome", "rect": [178, 201, 60, 14]}, "on": {"sprite": {"sheet": "chrome", "rect": [240, 201, 60, 14]}}, "action": "eqPresets", "bind": "eqMenu", "when": "open"},
+        "eqPresetName": {"type": "text", "rect": [9, 35, 48, 14], "font": "meta", "bind": "eqPreset", "tint": "text"},
+        "eqCurveWell": {"type": "image", "rect": [4, 51, 58, 46], "sprite": {"sheet": "chrome", "rect": [202, 0, 58, 46]}},
+        "eqPre": {"type": "slider", "rect": [69, 19, 17, 66], "orientation": "vertical", "bind": "eqPre", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqPreLabel": {"type": "text", "rect": [69, 87, 17, 9], "font": "scale", "value": "PRE", "align": "center", "tint": "accent", "opacity": 1},
+        "eqBand1": {"type": "slider", "rect": [87, 19, 17, 66], "orientation": "vertical", "bind": "eqBand1", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand1Label": {"type": "text", "rect": [87, 87, 17, 9], "font": "scale", "value": "60", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand2": {"type": "slider", "rect": [106, 19, 17, 66], "orientation": "vertical", "bind": "eqBand2", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand2Label": {"type": "text", "rect": [106, 87, 17, 9], "font": "scale", "value": "170", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand3": {"type": "slider", "rect": [124, 19, 17, 66], "orientation": "vertical", "bind": "eqBand3", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand3Label": {"type": "text", "rect": [124, 87, 17, 9], "font": "scale", "value": "310", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand4": {"type": "slider", "rect": [143, 19, 17, 66], "orientation": "vertical", "bind": "eqBand4", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand4Label": {"type": "text", "rect": [143, 87, 17, 9], "font": "scale", "value": "600", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand5": {"type": "slider", "rect": [161, 19, 17, 66], "orientation": "vertical", "bind": "eqBand5", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand5Label": {"type": "text", "rect": [161, 87, 17, 9], "font": "scale", "value": "1k", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand6": {"type": "slider", "rect": [180, 19, 17, 66], "orientation": "vertical", "bind": "eqBand6", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand6Label": {"type": "text", "rect": [180, 87, 17, 9], "font": "scale", "value": "3k", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand7": {"type": "slider", "rect": [198, 19, 17, 66], "orientation": "vertical", "bind": "eqBand7", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand7Label": {"type": "text", "rect": [198, 87, 17, 9], "font": "scale", "value": "6k", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand8": {"type": "slider", "rect": [217, 19, 17, 66], "orientation": "vertical", "bind": "eqBand8", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand8Label": {"type": "text", "rect": [217, 87, 17, 9], "font": "scale", "value": "12k", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand9": {"type": "slider", "rect": [235, 19, 17, 66], "orientation": "vertical", "bind": "eqBand9", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand9Label": {"type": "text", "rect": [235, 87, 17, 9], "font": "scale", "value": "14k", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqBand10": {"type": "slider", "rect": [254, 19, 17, 66], "orientation": "vertical", "bind": "eqBand10", "origin": 0.5, "track": {"sheet": "chrome", "rect": [0, 169, 17, 66]}, "fill": {"sheet": "chrome", "rect": [19, 169, 17, 8]}, "thumb": {"sheet": "chrome", "rect": [38, 169, 14, 10]}, "lit": {"bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4}},
+        "eqBand10Label": {"type": "text", "rect": [254, 87, 17, 9], "font": "scale", "value": "16k", "align": "center", "tint": "accent", "opacity": 0.85},
+        "eqTrim": {"type": "text", "rect": [4, 100, 160, 12], "font": "meta", "value": "TRIM {}", "bind": "eqTrim", "tint": "accent", "opacity": 0.85},
+        "eqClipLamp": {"type": "toggle", "rect": [241, 100, 30, 13], "sprite": {"sheet": "chrome", "rect": [54, 217, 30, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [86, 217, 30, 13]}}, "bind": "eqClip", "when": "on", "label": {"font": "pill", "value": "CLIP", "tint": "accent", "on": "ground"}}
+      },
+      "shade": {
+        "size": [275, 14],
+        "elements": {
+          "frame": {"type": "nineslice", "rect": "fill", "sprite": {"sheet": "chrome", "rect": [0, 0, 8, 8]}, "insets": [1, 1, 1, 1]},
+          "titlebar": {"type": "image", "rect": [0, 0, 275, 14], "sprite": {"sheet": "chrome", "rect": [30, 0, 8, 14]}, "inactive": {"sheet": "chrome", "rect": [40, 0, 8, 14]}, "role": "drag"},
+          "dot": {"type": "image", "rect": [1, 1, 10, 11], "sprite": {"sheet": "chrome", "rect": [72, 0, 10, 11]}},
+          "title": {"type": "text", "rect": [12, 0, 244, 14], "font": "chrome", "tint": "accent", "bind": "windowTitle"},
+          "shade": {"type": "toggle", "rect": [260, 0, 12, 13], "sprite": {"sheet": "chrome", "rect": [84, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [98, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [112, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [126, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [140, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [154, 50, 12, 13]}}, "action": "shade"}
+        }
+      }
+    },
+    "playlist": {
+      "size": [275, 116],
+      "resizable": true,
+      "resizeStep": [25, 29],
+      "minSize": [275, 116],
+      "elements": {
+        "frame": {"type": "nineslice", "rect": "fill", "sprite": {"sheet": "chrome", "rect": [0, 0, 8, 8]}, "insets": [1, 1, 1, 1]},
+        "titlebar": {"type": "image", "rect": [0, 0, 275, 16], "sprite": {"sheet": "chrome", "rect": [10, 0, 8, 16]}, "inactive": {"sheet": "chrome", "rect": [20, 0, 8, 16]}, "role": "drag", "stretch": "x"},
+        "dot": {"type": "image", "rect": [1, 2, 10, 11], "sprite": {"sheet": "chrome", "rect": [84, 0, 10, 11]}},
+        "title": {"type": "text", "rect": [12, 0, 244, 15], "font": "chrome", "tint": "accent", "stretch": "x", "value": "Purricane — Playlist"},
+        "shade": {"type": "toggle", "rect": [260, 1, 12, 13], "anchor": "right", "sprite": {"sheet": "chrome", "rect": [84, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [98, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [112, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [126, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [140, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [154, 50, 12, 13]}}, "action": "shade"},
+        "listWell": {"type": "nineslice", "rect": [3, 19, 269, 78], "stretch": "xy", "sprite": {"sheet": "chrome", "rect": [160, 0, 17, 17]}, "insets": [8, 8, 8, 8]},
+        "list": {"type": "list", "rect": [6, 21, 263, 74], "stretch": "xy", "rowHeight": 11, "font": "row", "tint": "text", "opacity": 1, "current": "alert", "selected": "accent"},
+        "bottomBar": {"type": "image", "rect": [0, 100, 275, 16], "anchor": "bottom", "stretch": "x", "sprite": {"sheet": "chrome", "rect": [50, 0, 8, 16]}},
+        "addButton": {"type": "button", "rect": [3, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [156, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [182, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [208, 154, 24, 13]}, "action": "add", "label": {"font": "pill", "value": "ADD", "tint": "accent"}},
+        "urlButton": {"type": "button", "rect": [27, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [0, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [26, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [52, 154, 24, 13]}, "action": "addUrl", "label": {"font": "pill", "value": "URL", "tint": "accent"}},
+        "removeButton": {"type": "button", "rect": [51, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [0, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [26, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [52, 154, 24, 13]}, "action": "remove", "label": {"font": "pill", "value": "REM", "tint": "accent"}, "disabled": {"bind": "plCanRemove", "when": "no"}},
+        "libraryButton": {"type": "button", "rect": [75, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [0, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [26, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [52, 154, 24, 13]}, "action": "library", "label": {"font": "pill", "value": "LIB", "tint": "accent"}},
+        "selectButton": {"type": "button", "rect": [99, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [0, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [26, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [52, 154, 24, 13]}, "action": "loadSelected", "label": {"font": "pill", "value": "SEL", "tint": "accent"}},
+        "shuffleButton": {"type": "toggle", "rect": [123, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [0, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [26, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [52, 154, 24, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [78, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [104, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [130, 154, 24, 13]}}, "action": "shuffle", "bind": "shuffle", "when": "on", "label": {"font": "pill", "value": "RND", "tint": "accent", "on": "text"}},
+        "repeatButton": {"type": "toggle", "rect": [147, 102, 24, 13], "anchor": "bottom", "sprite": {"sheet": "chrome", "rect": [0, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [26, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [52, 154, 24, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [78, 154, 24, 13]}, "hover": {"sheet": "chrome", "rect": [104, 154, 24, 13]}, "active": {"sheet": "chrome", "rect": [130, 154, 24, 13]}}, "action": "repeat", "bind": "repeatOn", "when": "on", "label": {"font": "pill", "bind": "repeatLabel", "tint": "accent", "on": "text"}},
+        "listStatus": {"type": "slot", "rect": [175, 102, 96, 13], "anchor": "bottom", "stretch": "x"},
+        "urlField": {"type": "slot", "rect": [4, 102, 267, 13], "anchor": "bottom", "stretch": "x"}
+      },
+      "shade": {
+        "size": [275, 14],
+        "elements": {
+          "frame": {"type": "nineslice", "rect": "fill", "sprite": {"sheet": "chrome", "rect": [0, 0, 8, 8]}, "insets": [1, 1, 1, 1]},
+          "titlebar": {"type": "image", "rect": [0, 0, 275, 14], "sprite": {"sheet": "chrome", "rect": [30, 0, 8, 14]}, "inactive": {"sheet": "chrome", "rect": [40, 0, 8, 14]}, "role": "drag", "stretch": "x"},
+          "dot": {"type": "image", "rect": [1, 1, 10, 11], "sprite": {"sheet": "chrome", "rect": [84, 0, 10, 11]}},
+          "title": {"type": "text", "rect": [12, 0, 244, 14], "font": "chrome", "tint": "accent", "stretch": "x", "bind": "windowTitle"},
+          "shade": {"type": "toggle", "rect": [260, 0, 12, 13], "anchor": "right", "sprite": {"sheet": "chrome", "rect": [84, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [98, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [112, 50, 12, 13]}, "on": {"sprite": {"sheet": "chrome", "rect": [126, 50, 12, 13]}, "hover": {"sheet": "chrome", "rect": [140, 50, 12, 13]}, "active": {"sheet": "chrome", "rect": [154, 50, 12, 13]}}, "action": "shade"}
+        }
+      }
+    }
+  },
+  "seam": {
+    "thickness": 1,
+    "hoverThickness": 2,
+    "color": "alert",
+    "discharge": {"durationMs": 120, "peakThickness": 4}
+  }
+}
