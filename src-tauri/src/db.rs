@@ -126,7 +126,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   playlist_id   INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
   profile_id    INTEGER NOT NULL DEFAULT 1,
   created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
+  updated_at    INTEGER NOT NULL,
+  -- The folder this download was queued for (#154, D136). NULL on a job
+  -- queued before a person could choose, which is the app's own folder.
+  download_root TEXT
 );
 
 CREATE TABLE IF NOT EXISTS play_history (
@@ -193,6 +196,10 @@ pub fn open(path: &PathBuf) -> Result<Connection, DbError> {
 /// description rather than a version counter, so running it twice, or against
 /// a database made yesterday, is a no-op.
 pub fn migrate(conn: &Connection) -> Result<(), DbError> {
+    // `id` is on every jobs table there has been, so its absence is no table.
+    if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", "download_root")? {
+        conn.execute_batch("ALTER TABLE jobs ADD COLUMN download_root TEXT;")?;
+    }
     if !has_column(conn, "playlists", "position")? {
         // The order a person already sees is creation order, so that is the
         // order the new column starts in.
@@ -618,6 +625,21 @@ mod tests {
         assert!(!calm(&conn));
         set_calm(&conn, true).unwrap();
         assert!(calm(&conn));
+    }
+
+    #[test]
+    fn an_old_jobs_table_gains_its_download_folder() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlists (id INTEGER PRIMARY KEY, position INTEGER);
+             CREATE TABLE jobs (id INTEGER PRIMARY KEY, url TEXT NOT NULL);",
+        )
+        .unwrap();
+        assert!(!has_column(&conn, "jobs", "download_root").unwrap());
+        migrate(&conn).unwrap();
+        assert!(has_column(&conn, "jobs", "download_root").unwrap());
+        // Twice is a no-op.
+        migrate(&conn).unwrap();
     }
 
     #[test]
