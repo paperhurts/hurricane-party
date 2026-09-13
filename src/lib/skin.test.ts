@@ -276,7 +276,7 @@ describe("the Eyewall manifest", () => {
     expect(by("eqCurveWell")).toMatchObject({ type: "image", rect: [4, 42, 60, 55] });
   });
 
-  it("draws the playlist's interior: the rows, six buttons, the count and the link field (D99)", () => {
+  it("draws the playlist's interior: the rows, seven buttons, the count and the link field (D99, D124)", () => {
     const { skin } = parseSkin(eyewall);
     const els = elementsOf(skin, "playlist", false).elements;
     const by = (n: string) => els.find((e) => e.name === n);
@@ -298,8 +298,18 @@ describe("the Eyewall manifest", () => {
       current: "alert",
       selected: "accent",
     });
-    // Six buttons on the bottom edge, one box between them, each with its words.
-    const buttons = ["addButton", "urlButton", "removeButton", "libraryButton", "shuffleButton", "repeatButton"];
+    // Seven buttons on the bottom edge, one box between them, each with its
+    // words, side by side 23 px apart.
+    const buttons = [
+      "addButton",
+      "urlButton",
+      "removeButton",
+      "libraryButton",
+      "selectButton",
+      "shuffleButton",
+      "repeatButton",
+    ];
+    expect(buttons.map((n) => by(n)?.rect[0])).toEqual([4, 27, 50, 73, 96, 119, 142]);
     const box = by("addButton");
     for (const name of buttons) {
       const b = by(name);
@@ -324,6 +334,8 @@ describe("the Eyewall manifest", () => {
       label: { hover: "alert" },
     });
     expect(by("libraryButton")).toMatchObject({ action: "library" });
+    // SEL loads the list selected in the library, beside the button that opens it.
+    expect(by("selectButton")).toMatchObject({ type: "button", action: "loadSelected", label: { value: "SEL" } });
     // The play order's switches light from what the library says (#115).
     expect(by("shuffleButton")).toMatchObject({ type: "toggle", action: "shuffle", bind: "shuffle", when: "on" });
     expect(by("repeatButton")).toMatchObject({
@@ -340,6 +352,9 @@ describe("the Eyewall manifest", () => {
     expect(names.at(-1)).toBe("urlField");
     const status = by("listStatus")!;
     expect(status.rect[0] + status.rect[2]).toBe(271);
+    // And starts after the last button, so the count never sits under REP.
+    const rep = by("repeatButton")!;
+    expect(status.rect[0]).toBeGreaterThanOrEqual(rep.rect[0] + rep.rect[2]);
   });
 
   it("lights a playlist switch with a fill and leaves the unlit box empty", () => {

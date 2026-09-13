@@ -497,9 +497,11 @@
           "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "surface" } },
         "libraryWell": { "type": "image", "rect": [73, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
           "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "surface" } },
-        "shuffleWell": { "type": "image", "rect": [96, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+        "selectWell":  { "type": "image", "rect": [96, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
           "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "surface" } },
-        "repeatWell":  { "type": "image", "rect": [119, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+        "shuffleWell": { "type": "image", "rect": [119, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
+          "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "surface" } },
+        "repeatWell":  { "type": "image", "rect": [142, 100, 21, 13], "anchor": "bottom", "opacity": 0.3,
           "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "surface" } },
 
         "addButton": { "type": "button", "rect": [4, 100, 21, 13], "anchor": "bottom",
@@ -531,7 +533,14 @@
           "action": "library",
           "label": { "font": "label", "value": "LIB", "tint": "text", "opacity": 0.7, "hover": "accent" } },
 
-        "shuffleButton": { "type": "toggle", "rect": [96, 100, 21, 13], "anchor": "bottom",
+        "selectButton": { "type": "button", "rect": [96, 100, 21, 13], "anchor": "bottom",
+          "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "accent" },
+          "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "accent" },
+          "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "accent" },
+          "action": "loadSelected",
+          "label": { "font": "label", "value": "SEL", "tint": "text", "opacity": 0.7, "hover": "accent" } },
+
+        "shuffleButton": { "type": "toggle", "rect": [119, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "accent" },
           "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "accent" },
           "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "accent" },
@@ -543,7 +552,7 @@
           "action": "shuffle", "bind": "shuffle", "when": "on",
           "label": { "font": "label", "value": "RND", "tint": "text", "opacity": 0.7, "hover": "accent", "on": "accent" } },
 
-        "repeatButton": { "type": "toggle", "rect": [119, 100, 21, 13], "anchor": "bottom",
+        "repeatButton": { "type": "toggle", "rect": [142, 100, 21, 13], "anchor": "bottom",
           "sprite": { "sheet": "chrome", "rect": [164, 176, 21, 13], "tint": "accent" },
           "hover":  { "sheet": "chrome", "rect": [186, 176, 21, 13], "tint": "accent" },
           "active": { "sheet": "chrome", "rect": [208, 176, 21, 13], "tint": "accent" },
@@ -555,7 +564,7 @@
           "action": "repeat", "bind": "repeatOn", "when": "on",
           "label": { "font": "label", "bind": "repeatLabel", "tint": "text", "opacity": 0.7, "hover": "accent", "on": "accent" } },
 
-        "listStatus": { "type": "slot", "rect": [146, 100, 125, 13], "anchor": "bottom", "stretch": "x" },
+        "listStatus": { "type": "slot", "rect": [169, 100, 102, 13], "anchor": "bottom", "stretch": "x" },
 
         "urlField": { "type": "slot", "rect": [4, 100, 267, 13], "anchor": "bottom", "stretch": "x" }
       },

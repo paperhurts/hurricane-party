@@ -285,6 +285,9 @@
     else if (name === "remove") remove();
     // A toggle (D123): puts away a library that was in front, brings back any other.
     else if (name === "library") invoke("toggle_library");
+    // SEL (D124): the library owns which list is the queue (D120), so this
+    // asks it to make the list it is showing the one this window plays.
+    else if (name === "loadSelected") emitTo("library", "queue:load-selected").catch(() => {});
     // The library owns the order (D74); these only ask it to change, and the
     // buttons light from what it says back over `play:mode`.
     else if (name === "shuffle") emitTo("library", "play:shuffle").catch(() => {});
