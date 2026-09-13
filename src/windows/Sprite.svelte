@@ -245,6 +245,30 @@
   // …and the frame dies with the element, and only then.
   $effect(() => () => cancelAnimationFrame(pending));
 
+  // A line wider than its box, in a face wider than the one the box was
+  // measured for — Purricane's Comic Sans in boxes sized for Iosevka (#147) —
+  // is squeezed across to fit rather than cut to an ellipsis: PLAY PAUSE STOP
+  // read as PL… PA… ST…. Down to 60%, below which the ellipsis says more than
+  // squashed letters. Measured without resetting first, since `scrollWidth`
+  // is the words' own width however the span is drawn, so a clock that ticks
+  // does not flicker. A new skin or theme reloads the skin, which re-measures.
+  let squeeze = $state(1);
+  $effect(() => {
+    void shown;
+    void skin;
+    const host = textBox;
+    if (el.type !== "text" || el.overflow === "scroll" || !host || glyphs) return;
+    const id = requestAnimationFrame(() => {
+      const span = host.querySelector<HTMLElement>(".t");
+      if (!span) return;
+      const room = host.clientWidth;
+      const words = span.scrollWidth;
+      const k = words > room + 1 ? room / words : 1;
+      squeeze = k >= 0.6 ? k : 1;
+    });
+    return () => cancelAnimationFrame(id);
+  });
+
   // ---- slider ----
 
   let frac = $derived.by(() => {
@@ -491,7 +515,7 @@
         {shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;{shown}&nbsp;&nbsp;&nbsp;///&nbsp;&nbsp;&nbsp;
       </span>
     {:else}
-      <span class="t">{shown}</span>
+      <span class="t" class:fit={squeeze < 1} style={squeeze < 1 ? `--squeeze:${squeeze}` : undefined}>{shown}</span>
     {/if}
   </div>
 {:else if el.type === "slider"}
