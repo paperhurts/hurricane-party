@@ -8,6 +8,8 @@
   import { parseSkin } from "./lib/skin";
   import { measureSheets, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
+  import { backdropPng, madeManifest, nameFrom, pictureHeightFor, pixelsOf } from "./lib/madeskin";
+  import { paletteFromPixels } from "./lib/palette";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
@@ -1177,6 +1179,50 @@
    * reason in front of the person who chose it — never half-loaded
    * (skin-manifest.md).
    */
+  /**
+   * Make a skin from a picture (#131, D122): pick any image, and get a skin in
+   * its colours with the picture behind the chrome. Nothing is drawn — the
+   * sheets are Eyewall's — so what could fail is only reading the picture or
+   * writing the folder, and a skin that fails is thrown away, as an import is.
+   */
+  let making = $state(false);
+  async function makeSkin() {
+    if (making) return;
+    const picked = await openDialog({
+      multiple: false,
+      title: "Make a skin from a picture",
+      filters: [{ name: "Picture", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (typeof picked !== "string") return;
+    const name = nameFrom(picked);
+    making = true;
+    notice = `Making ${name} from that picture…`;
+    let id: string | null = null;
+    try {
+      const bytes = await invoke<ArrayBuffer>("read_picture", { path: picked });
+      const bitmap = await createImageBitmap(new Blob([bytes]));
+      const { palette, viscolor } = paletteFromPixels(pixelsOf(bitmap));
+      const [one, two] = await Promise.all([backdropPng(bitmap, 1), backdropPng(bitmap, 2)]);
+      const pictureHeight = pictureHeightFor(bitmap.width, bitmap.height);
+      bitmap.close();
+      id = (await invoke<{ id: string; dir: string }>("make_skin", { name })).id;
+      await invoke("write_skin_picture", one, { headers: { "x-hp-skin": id, "x-hp-scale": "1" } });
+      await invoke("write_skin_picture", two, { headers: { "x-hp-skin": id, "x-hp-scale": "2" } });
+      const manifest = madeManifest({ name, palette, viscolor, pictureHeight });
+      // The same validator every skin goes through, before anything is worn.
+      parseSkin(manifest);
+      await invoke("write_skin_manifest", { id, json: JSON.stringify(manifest, null, 1) });
+      skins = await invoke<string[]>("list_skins");
+      await setSkin(id, name);
+      notice = `${name} is on: Eyewall's chrome in that picture's colours, with the picture behind it. Pick another skin to go back; ${name} stays in the list.`;
+    } catch (e) {
+      if (id) await invoke("discard_skin", { id }).catch(() => {});
+      notice = `Couldn't make a skin from that picture: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      making = false;
+    }
+  }
+
   async function importSkin() {
     const picked = await openDialog({
       multiple: false,
@@ -1284,6 +1330,14 @@
       </select>
     </label>
     <button class="mini" onclick={importSkin} title="A .wsz, or a zip of one">Import skin…</button>
+    <button
+      class="mini"
+      onclick={makeSkin}
+      disabled={making}
+      title="Pick any picture and get a skin in its colours, with the picture behind the windows"
+    >
+      {making ? "Making…" : "Make a skin…"}
+    </button>
   </header>
 
   <form onsubmit={(e) => { e.preventDefault(); add(); }}>

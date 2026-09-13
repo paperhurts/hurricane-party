@@ -226,6 +226,16 @@ A `list` is the box the playlist's rows are drawn in, and the skin says how they
 
 A `slot` is a placed box with nothing drawn in it: where the window puts something the skin has no element for. Eyewall's playlist has two, the count and running time, and the link field that lies over the whole bar while it is open. A slot lets the pointer through; what the window puts in it takes the pointer back where it needs it.
 
+### Whose colours, and a sheet that is a picture (D122)
+
+**`colors`** is `"own"` or `"theme"`: whose palette the classic windows paint. Left out, it follows `art` — a `final` skin brings its own and a `mask` skin follows the theme, which is D101 — so no skin that already exists changes. A skin made from a picture (#131) is `mask` art with `"colors": "own"`: Eyewall's sheets, painted in the picture's six roles.
+
+A sheet in the object form may say **`"art": "final"`**, and its sprites are drawn as the pixels they are even in a `mask` skin: `"picture": { "1": "picture.png", "2": "picture@2x.png", "art": "final" }`. That is how a made skin's picture sits behind the tinted chrome without being tinted into a silhouette of itself. A sheet named by a bare file name follows the skin's `art`.
+
+An `image` may say **`"fit": "reveal"`** instead of the default `"stretch"`. A stretched sprite is scaled to its box; a revealed one is drawn at the box's width with its own proportions, from the top, so a box that grows taller uncovers more of a tall sprite instead of smearing a short one. Past the sprite's end the ground shows. A made skin's playlist backdrop is revealed: its sprite runs from the playlist's third of the picture to the bottom of the sheet, and dragging the window down shows the rest of the picture.
+
+A made skin carries `"maker": <version>` the way an imported one carries `generator` (D107). Only `generator` triggers a rebuild.
+
 ### Glow is declared, not assumed
 
 Two top-level fields say what kind of art this is (D73). **`glow`** is `"baked"` — the halo is in the pixels and the renderer adds none — or `"renderer"`, where the renderer paints a halo from the palette's `accent` behind glow-eligible chrome and the user's glow toggle applies: a `glow` checkbox in the library's header until there is a settings window, saved in `settings` and heard by all three classic windows at once (D100). Off, the renderer adds no halo anywhere in a classic window, a text's `glow` included, and the windows drop the halos they draw themselves; a `baked` skin is untouched either way, since its halo is in its pixels. **`art`** is `"final"` — full-colour pixels, drawn as they are — or `"mask"`, alpha masks the renderer tints from the palette, so a theme change reaches the whole chrome rather than only its halo. Both importers produce `art: final, glow: baked`, which is what their source art is, so an imported skin never double-glows and native and imported skins take one rendering path.

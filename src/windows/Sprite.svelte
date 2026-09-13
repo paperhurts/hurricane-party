@@ -49,7 +49,11 @@
     onslide?: (frac: number) => void;
   } = $props();
 
-  let mask = $derived(skin.skin.art === "mask");
+  // A mask skin tints its art, except a sheet that says it is final (D122): a
+  // made skin's picture is drawn as the picture, not as a silhouette of it.
+  let mask = $derived(
+    skin.skin.art === "mask" && !("sprite" in el && skin.skin.finalSheets.includes(el.sprite.sheet)),
+  );
   // The renderer's halo (D73): only for a skin that leaves the glow to it,
   // and only while the person has it on (D100). A `baked` skin's halo is in
   // its pixels either way.
@@ -390,6 +394,7 @@
     class="sp sp-image"
     class:mask
     class:final={!mask}
+    class:reveal={el.fit === "reveal"}
     class:drag={el.role === "drag"}
     style="{box};opacity:{el.opacity};{vars(states)}"
     {onpointerdown}
@@ -523,7 +528,9 @@
     {/if}
   </div>
 {:else if el.type === "visualizer"}
-  <div class="sp-vis" style={box}>
+  <!-- `--vis-well` reaches the analyser inside: how strongly its well paints
+       behind the bars (D122). -->
+  <div class="sp-vis" style="{box};--vis-well:{el.well}">
     {#if slot}{@render slot()}{/if}
   </div>
 {:else if el.type === "list"}

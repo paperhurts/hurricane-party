@@ -77,6 +77,20 @@ body {
   background-size: 100% 100%;
   background-repeat: no-repeat;
 }
+/* `fit: "reveal"` (D122): the box's width, the sprite's own proportions, from
+ * the top. A taller box uncovers more of a tall sprite rather than stretching
+ * it; past the sprite's end the ground shows, which is honest about where the
+ * picture stops. */
+.sp.final.reveal {
+  background-size: 100% auto;
+  background-position: top left;
+}
+.sp.mask.reveal {
+  -webkit-mask-size: 100% auto;
+  -webkit-mask-position: top left;
+  mask-size: 100% auto;
+  mask-position: top left;
+}
 .chrome[data-active="false"] :where(.sp.mask) {
   background-color: var(--tc-i, var(--tc));
   -webkit-mask-image: var(--sp-i, var(--sp));

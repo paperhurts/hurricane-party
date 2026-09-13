@@ -800,6 +800,39 @@ fn write_skin_manifest(app: AppHandle, id: String, json: String) -> Result<(), s
     skins::write_manifest(&skins_dir(&app), &id, &json)
 }
 
+/// Start a skin made from a picture (#131): a folder with Eyewall's sheets.
+#[tauri::command]
+fn make_skin(app: AppHandle, name: String) -> Result<skins::Made, skins::SkinError> {
+    skins::make(&skins_dir(&app), name.trim())
+}
+
+/// The bytes of a picture the person chose, for the webview to decode. Raw, so
+/// a large photo does not become a JSON array of numbers on the way (#131).
+#[tauri::command]
+fn read_picture(path: String) -> Result<tauri::ipc::Response, skins::SkinError> {
+    skins::read_picture(std::path::Path::new(&path)).map(tauri::ipc::Response::new)
+}
+
+/// The backdrop the webview cropped, as a raw PNG body with the skin and the
+/// scale in headers — the same shape `viz_frame` uses for bytes (#131).
+#[tauri::command]
+fn write_skin_picture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("write_skin_picture: expected a raw body".into());
+    };
+    let h = request.headers();
+    let header = |name: &str| {
+        h.get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let id = header("x-hp-skin").ok_or("write_skin_picture: no skin")?;
+    let scale: u8 = header("x-hp-scale")
+        .and_then(|s| s.parse().ok())
+        .ok_or("write_skin_picture: no scale")?;
+    skins::write_picture(&skins_dir(&app), &id, scale, bytes).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn discard_skin(app: AppHandle, id: String) -> Result<(), skins::SkinError> {
     skins::discard(&skins_dir(&app), &id)
@@ -1084,6 +1117,9 @@ pub fn run() {
             import_skin,
             write_skin_manifest,
             discard_skin,
+            make_skin,
+            read_picture,
+            write_skin_picture,
             list_skins,
             get_skin,
             set_skin,
