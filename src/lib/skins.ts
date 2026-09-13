@@ -208,24 +208,48 @@ export async function skinNotes(id: string): Promise<string[]> {
  * A skin made before D127 recorded nothing, and a picture shorter than the
  * windows filled the top of a sheet with no room around it — which is most
  * of the skins the owner had made. So the first time one is asked about, its
- * sheet is given that room here, once, and the windows are told to wear it:
- * it looks exactly as it did, and can move from then on. A picture that
- * really is three windows tall is measured and left as it is.
+ * sheet is given that room here, once: it looks exactly as it did, and can
+ * move from then on. A picture that really is three windows tall is measured
+ * and left as it is.
+ *
+ * `redrawn` says the sheet changed under the manifest. Ask before telling the
+ * windows to wear a skin, never after: the first try told them first, and a
+ * window that read the skin while its sheets were half rewritten refused it
+ * and put the owner back in Eyewall. When a window may already be wearing it
+ * (the library opening), tell them again once this says `redrawn`.
  */
-export async function picturePlaceOf(id: string): Promise<PicturePlace | null> {
-  if (id === "eyewall") return null;
+export function readyPicture(id: string): Promise<{ at: PicturePlace | null; redrawn: boolean }> {
+  // One at a time per skin. Two at once was how the first try broke: the
+  // second saw the first's new 1x sheet beside its old 2x one, took the skin
+  // for done and wrote the new manifest before the 2x sheet existed.
+  const running = readying.get(id);
+  if (running) return running;
+  const run = readyOnce(id).finally(() => readying.delete(id));
+  readying.set(id, run);
+  return run;
+}
+
+const readying = new Map<string, Promise<{ at: PicturePlace | null; redrawn: boolean }>>();
+
+async function readyOnce(id: string): Promise<{ at: PicturePlace | null; redrawn: boolean }> {
+  const none = { at: null, redrawn: false };
+  if (id === "eyewall") return none;
   try {
     const on = await invoke<SkinOnDisk>("read_skin", { id });
     const written = JSON.parse(on.manifest) as Record<string, any>;
-    if (typeof written.maker !== "number") return null;
+    if (typeof written.maker !== "number") return none;
     let p = pictureOf(written);
+    let redrawn = false;
     // No room around it: made before D127 (the windows may already have
     // written it a record that says so), or a picture exactly this tall.
-    if (p.sheet === PICTURE_H && p.top === 0) p = await giveRoom(id, on, written);
-    return canMove(p) ? p.at : null;
+    if (p.sheet === PICTURE_H && p.top === 0) {
+      p = await giveRoom(id, on, written);
+      redrawn = p.top > 0;
+    }
+    return { at: canMove(p) ? p.at : null, redrawn };
   } catch (e) {
     console.warn(`${id}: where its picture sits could not be read:`, e);
-    return null;
+    return none;
   }
 }
 
@@ -255,11 +279,11 @@ async function giveRoom(id: string, on: SkinOnDisk, written: Record<string, any>
   const rows = usedRows(one);
   const tall = one.naturalHeight;
   let p: Picture;
-  if (tall > PICTURE_H && tall < 2 * PICTURE_H) {
+  if (tall > PICTURE_H && tall < 2 * PICTURE_H && two.naturalHeight === 2 * tall) {
     // Already redrawn, and the record of it lost: a window that read the old
     // manifest wrote it back. The room is in the sheet's own height.
     p = { sheet: tall, top: tall - PICTURE_H, height: 2 * PICTURE_H - tall, at: "top" };
-  } else if (tall === PICTURE_H && rows > 0 && rows < PICTURE_H) {
+  } else if (tall === PICTURE_H && two.naturalHeight === 2 * PICTURE_H && rows > 0 && rows < PICTURE_H) {
     p = pictureFor(PICTURE_W, rows);
     for (const [img, scale] of [
       [one, 1],
@@ -271,15 +295,14 @@ async function giveRoom(id: string, on: SkinOnDisk, written: Record<string, any>
       await invoke("write_skin_picture", bytes, { headers: { "x-hp-skin": id, "x-hp-scale": String(scale) } });
     }
   } else {
+    // Exactly three windows tall, or two sheets that do not agree: left
+    // alone. Nothing is written from a sheet this cannot account for.
     return { sheet: PICTURE_H, top: 0, height: PICTURE_H, at: "top" };
   }
   const again = remade(written, p);
   if (!again) return p;
   parseSkin(again);
   await invoke("write_skin_manifest", { id, json: JSON.stringify(again, null, 1) });
-  // At the top, where it always was: nothing on screen moves, but the sheet
-  // under the windows has, so they read it again.
-  await invoke("set_skin", { id });
   console.info(`${id}: picture given room to move (${rows} rows, now in a ${p.sheet}-row sheet)`);
   return p;
 }

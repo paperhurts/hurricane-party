@@ -6,7 +6,7 @@
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { applyTheme } from "./lib/theme";
   import { parseSkin } from "./lib/skin";
-  import { measureSheets, picturePlaceOf, placePicture, skinNotes } from "./lib/skins";
+  import { measureSheets, placePicture, readyPicture, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
   import {
     backdropPng,
@@ -301,7 +301,10 @@
     invoke<boolean>("get_glow").then((on) => (glow = on));
     invoke<string>("get_skin").then(async (s) => {
       skin = s;
-      picturePlace = await picturePlaceOf(s);
+      const ready = await readyPicture(s);
+      picturePlace = ready.at;
+      // The windows opened wearing it before its sheet was given room: again.
+      if (ready.redrawn) await invoke("set_skin", { id: s });
     });
     invoke<string[]>("list_skins").then((s) => (skins = s));
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
@@ -353,6 +356,7 @@
         if (skin === "eyewall") return;
         notice = `${e.payload.id} could not be worn, so the windows kept Eyewall: ${e.payload.reason}`;
         skin = "eyewall";
+        picturePlace = null;
         invoke("set_skin", { id: "eyewall" }).catch(() => {});
       }),
       // The classic playlist window mirrors the list showing here. It asks
@@ -1175,8 +1179,10 @@
   let skinSaid = false;
   async function setSkin(id: string, name = id) {
     skin = id;
+    // Before the windows are told, so none of them reads a sheet that is
+    // still being given its room (D127).
+    picturePlace = (await readyPicture(id)).at;
     await invoke("set_skin", { id });
-    picturePlace = await picturePlaceOf(id);
     // What this app could not use of it, every time it is worn (D110).
     const notes = await skinNotes(id);
     if (notes.length) {
