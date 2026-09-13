@@ -69,7 +69,7 @@ Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` 
 {"event":"palette_changed", "viscolor":["#000000","#0f0f0f", "…24 entries…"]}
 ```
 
-**Built:** `now_playing_changed` and `state_changed`. `palette_changed` is placed at v0.5 below and is not built yet, although skins can now change at runtime (the `.wsz` importer and the skin maker both shipped); `layout_changed` is v1.0.
+**Built:** `now_playing_changed` and `state_changed`. `palette_changed` was placed at v0.5 below, and v0.5 shipped without it, although skins and themes now change at runtime (the `.wsz` importer, the skin maker and Purricane all shipped). It has no milestone until someone picks it up; `layout_changed` is v1.0.
 
 `palette_changed` is the one worth calling out. When you switch skins, the LED wall changes color scheme to match. That's a genuinely nice thing that costs almost nothing to ship, and it's the kind of detail that makes people want to build against your API. The payload is the same 24-entry `viscolor` array the skin manifest defines (`skin-manifest.md`) — one definition, three consumers: analyser, Cone backdrop, and this event.
 
@@ -202,7 +202,7 @@ Ship the example client. Someone with an LED strip and a Raspberry Pi should be 
 |---|---|
 | v0.3 | Control channel only: handshake, transport, events. Proves the pipe, no public commitment yet |
 | v0.4 | Viz channel — lands with the analyser, since it's the same data |
-| v0.5 | `palette_changed` — lands with the skin loader, since that's when palettes become dynamic. *The loader shipped; the event has not* |
+| v0.5 | `palette_changed` — lands with the skin loader, since that's when palettes become dynamic. *v0.5 shipped the loader without the event, which has no milestone now* |
 | v1.0 | `layout_changed`. Freeze protocol v1. Publish docs + example client |
 
 This table is the control API's internal phasing and is consistent with the canonical milestone table in `decisions.md` (D27). If they ever disagree, `decisions.md` wins.
