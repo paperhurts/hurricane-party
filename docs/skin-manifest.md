@@ -96,7 +96,7 @@ Required by **D20**. The manifest names a component the app implements; it never
 |---|---|---|
 | `spectrum-bars` | v0.4b | Eyewall. Bars on the `viscolor` ramp |
 | `oscilloscope` | v0.4b | The waveform. Main's display cycles between the two (and off) whatever the skin names |
-| `kaleidoscope` | v0.5, **not built yet** | Purricane. Honors the accessibility clamps in `purricane.md` — those are enforced by the app, not configurable by the skin. Until it exists, a skin that names it gets `spectrum-bars` and the warning below |
+| `kaleidoscope` | v0.5 | Purricane. Honors the accessibility clamps in `purricane.md` — those are enforced by the app (`lib/kaleidoscope.ts`), not configurable by the skin. It draws in the bars' place in Main's cycle. A skin that wears the theme draws the theme's analyser, and a skin with its own colours its own (D130) |
 
 An unknown `component` falls back to `spectrum-bars` with a warning. This is the one place a soft failure is right: a skin that names a visualizer from a future version should still load and look mostly correct.
 

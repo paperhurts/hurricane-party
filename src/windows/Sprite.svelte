@@ -111,7 +111,8 @@
    * the glyphs' height, not the page's 14 px in a 10 px row. */
   function fontStyle(name: string): string {
     const f = skin.skin.fonts[name];
-    if (f?.type === "system") return `font-size:${f.size}px;letter-spacing:${f.tracking}em`;
+    // Times the theme's scale (#147): Comic Sans sits small at Iosevka's size.
+    if (f?.type === "system") return `font-size:calc(${f.size}px * var(--type-scale, 1));letter-spacing:${f.tracking}em`;
     if (f?.type === "bitmap") return `font-size:${f.glyphSize[1]}px`;
     return "";
   }

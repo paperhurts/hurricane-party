@@ -411,6 +411,43 @@ pub fn set_glow(conn: &Connection, on: bool) -> Result<(), DbError> {
     set_setting(conn, GLOW_SETTING, if on { "1" } else { "0" })
 }
 
+/// The theme the app wears (#147): which theme in `design/tokens.json`
+/// paints the library and every mask skin. The frontend has the tokens and
+/// says which names are themes; here a name is only ever a short slug, so a
+/// setting nobody could have written reads as Eyewall.
+pub const THEME_SETTING: &str = "theme.current";
+
+fn is_theme_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+}
+
+pub fn theme(conn: &Connection) -> String {
+    get_setting(conn, THEME_SETTING)
+        .filter(|t| is_theme_name(t))
+        .unwrap_or_else(|| "eyewall".into())
+}
+
+pub fn set_theme(conn: &Connection, name: &str) -> Result<(), DbError> {
+    if !is_theme_name(name) {
+        return Err(DbError::Io(format!("{name:?} is not a theme name")));
+    }
+    set_setting(conn, THEME_SETTING, name)
+}
+
+/// Calm (#147, `docs/purricane.md`): the kaleidoscope as a still mandala that
+/// answers the music in size only, no rotation and no bloom. Off unless a
+/// person turns it on; `prefers-reduced-motion` gives the same whatever this
+/// says.
+pub const CALM_SETTING: &str = "vis.calm";
+
+pub fn calm(conn: &Connection) -> bool {
+    get_setting(conn, CALM_SETTING).is_some_and(|v| v == "1")
+}
+
+pub fn set_calm(conn: &Connection, on: bool) -> Result<(), DbError> {
+    set_setting(conn, CALM_SETTING, if on { "1" } else { "0" })
+}
+
 /// The schema, exposed for in-memory test fixtures.
 #[cfg(test)]
 pub fn schema_for_tests() -> &'static str {
@@ -501,6 +538,23 @@ mod tests {
         // Only an explicit off is off.
         set_setting(&conn, GLOW_SETTING, "maybe").unwrap();
         assert!(glow(&conn));
+    }
+
+    #[test]
+    fn the_theme_is_eyewall_until_a_theme_name_is_saved_and_calm_is_off() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        assert_eq!(theme(&conn), "eyewall");
+        set_theme(&conn, "purricane").unwrap();
+        assert_eq!(theme(&conn), "purricane");
+        assert!(set_theme(&conn, "../../etc").is_err());
+        assert!(set_theme(&conn, "").is_err());
+        // A value written some other way than set_theme reads as Eyewall.
+        set_setting(&conn, THEME_SETTING, "Not A Theme!").unwrap();
+        assert_eq!(theme(&conn), "eyewall");
+        assert!(!calm(&conn));
+        set_calm(&conn, true).unwrap();
+        assert!(calm(&conn));
     }
 
     fn root(conn: &Connection, id: i64, path: &str) {

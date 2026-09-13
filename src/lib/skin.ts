@@ -133,7 +133,7 @@ export type Bind = (typeof BINDS)[number];
 
 /** The visualizer components the app has (D20). An unknown one falls back
  * to the first with a warning: a skin naming a future component still loads. */
-export const VISUALIZERS = ["spectrum-bars", "oscilloscope"] as const;
+export const VISUALIZERS = ["spectrum-bars", "oscilloscope", "kaleidoscope"] as const;
 
 export type Scale = 1 | 2;
 

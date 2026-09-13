@@ -8,11 +8,13 @@
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
   import Oscilloscope from "./Oscilloscope.svelte";
+  import Kaleidoscope from "./Kaleidoscope.svelte";
   import { untrack } from "svelte";
   import { AudioGraph } from "../lib/audio";
   import { sourceFromAnalyser, VizCapture, type Demand } from "../lib/vizstream";
   import { loadEq, type EqState } from "../lib/eq";
-  import { viscolor } from "../lib/theme";
+  import { colorsShown, colorsWorn, kaleidoscopeFor, rampWorn, viscolor, visualizerFor } from "../lib/theme";
+  import type { Token } from "../lib/skin";
   import { loadVisMode, nextVisMode, saveVisMode, type VisMode } from "../lib/vis";
   // The cooler capybara's home (#62): the display, while a file cannot be
   // opened. The analyser has nothing to draw then, and he has a drink.
@@ -37,6 +39,14 @@
   // (D101): `VISCOLOR.TXT` is read at import for this, and an imported skin
   // that brings a green-on-black ramp should not draw Eyewall's radar.
   let palette = $state(viscolor("eyewall"));
+  // What draws in the bars' place, and in which colours (#147): the theme's
+  // analyser for a skin that wears the theme, Purricane's kaleidoscope among
+  // them, and the skin's own for a skin with its own colours.
+  let component = $state("spectrum-bars");
+  let worn = $state(colorsShown("eyewall"));
+  let kaleido = $state(kaleidoscopeFor("eyewall"));
+  // Calm: the kaleidoscope still (#147). The library holds the switch.
+  let calm = $state(false);
   // The EQ window owns the sliders and the saved copy; this is the applied
   // copy. Same saved state at mount, then live updates over eq:set.
   let eq: EqState = loadEq(localStorage);
@@ -294,6 +304,7 @@
     // every change after. A reload of this window while a video plays must
     // come back showing the video, not a blank clock.
     invoke<Remote>("transport_state").then(absorbCurrent).catch(() => {});
+    invoke<boolean>("get_calm").then((on) => (calm = on)).catch(() => {});
     const subs = [
       listen<Remote>("player:current", (e) => absorbCurrent(e.payload), {
         target: { kind: "WebviewWindow", label: "main" },
@@ -310,6 +321,7 @@
         eq = e.payload;
         graph?.applyEq(eq);
       }),
+      listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "main" } }),
       // Targeted at this window: Rust routes a transport command to whichever
       // window is the transport (D70), and a listener with no target would
       // also receive the ones aimed at the video window.
@@ -517,13 +529,23 @@
       }
     }}
     title={visMode === "bars"
-      ? "Spectrum. Click for scope"
+      ? `${component === "kaleidoscope" ? "Kaleidoscope" : "Spectrum"}. Click for scope`
       : visMode === "scope"
         ? "Scope. Click for off"
-        : "Off. Click for spectrum"}
+        : `Off. Click for ${component === "kaleidoscope" ? "kaleidoscope" : "spectrum"}`}
   >
     {#if error}
       <img class="oops" src={cooler} alt="" draggable="false" />
+    {:else if visMode === "bars" && component === "kaleidoscope"}
+      <Kaleidoscope
+        {analyser}
+        colours={worn}
+        active={playing}
+        {calm}
+        segments={kaleido.segments}
+        degPerSec={kaleido.degPerSec}
+        maxBloomHz={kaleido.maxBloomHz}
+      />
     {:else if visMode === "bars"}
       <SpectrumBars {analyser} {palette} active={playing} />
     {:else if visMode === "scope"}
@@ -555,7 +577,12 @@
   slots={error ? { vis, trackTitle: strip } : { vis }}
   onaction={action}
   onslide={slide}
-  onskin={(s) => (palette = s.viscolor)}
+  onskin={(s, t) => {
+    palette = rampWorn(s, t);
+    component = visualizerFor(s, t);
+    worn = colorsWorn(s, t) as Record<Token, string>;
+    kaleido = kaleidoscopeFor(t);
+  }}
 />
 
 <!-- crossorigin is load-bearing. The file comes from the asset protocol,
