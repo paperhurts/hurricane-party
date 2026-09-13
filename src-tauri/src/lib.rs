@@ -957,6 +957,49 @@ fn get_glow(app: AppHandle) -> bool {
     db::glow(&conn)
 }
 
+// ---- the theme (#147) ---------------------------------------------------------
+
+/// The theme the app wears. Every window asks at mount and hears
+/// `theme:changed`, so the library, the three classic windows and the video
+/// window turn over together, the way a skin change does.
+#[tauri::command]
+fn get_theme(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::theme(&conn)
+}
+
+#[tauri::command]
+fn set_theme(app: AppHandle, name: String) -> Result<(), db::DbError> {
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_theme(&conn, &name)?;
+    }
+    let _ = app.emit("theme:changed", &name);
+    Ok(())
+}
+
+/// Calm: the kaleidoscope still (#147). Main asks at mount and hears
+/// `vis:calm`.
+#[tauri::command]
+fn get_calm(app: AppHandle) -> bool {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::calm(&conn)
+}
+
+#[tauri::command]
+fn set_calm(app: AppHandle, on: bool) -> Result<(), db::DbError> {
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_calm(&conn, on)?;
+    }
+    let _ = app.emit("vis:calm", on);
+    Ok(())
+}
+
 // ---- EQ presets (#145) --------------------------------------------------------
 
 /// The person's own EQ presets, oldest first. The four that ship are the
@@ -1217,6 +1260,10 @@ pub fn run() {
             set_play_mode,
             get_glow,
             set_glow,
+            get_theme,
+            set_theme,
+            get_calm,
+            set_calm,
             eq_presets,
             save_eq_preset,
             delete_eq_preset,

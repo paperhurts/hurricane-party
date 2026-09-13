@@ -4,7 +4,15 @@
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { applyTheme, colorsFor } from "./lib/theme";
+  import {
+    applyTheme,
+    colorsFor,
+    isWearable,
+    themeLabel,
+    themeVisualizer,
+    WEARABLE,
+    type Wearable,
+  } from "./lib/theme";
   import { checkSheetBounds, parseSkin, type Token } from "./lib/skin";
   import { guideSheet, paintableSheet, templateManifest, templateParts, templateReadme } from "./lib/template";
   import { eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
@@ -116,6 +124,10 @@
   // setting until there is a settings window; Rust saves it and tells the
   // three classic windows.
   let glow = $state(true);
+  // The theme the app wears (#147), and calm, the kaleidoscope's still switch,
+  // offered while the theme's analyser is one.
+  let theme = $state<Wearable>("eyewall");
+  let calm = $state(false);
   // The skin the classic windows wear, and the ones there are to pick (#107).
   // Eyewall ships and is always first (D90); the rest were imported here.
   let skin = $state("eyewall");
@@ -306,6 +318,11 @@
     invoke<string>("library_path").then((p) => (libraryPath = p));
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
+    invoke<string>("get_theme").then((t) => {
+      theme = isWearable(t) ? t : "eyewall";
+      applyTheme(theme);
+    });
+    invoke<boolean>("get_calm").then((on) => (calm = on));
     invoke<string>("get_skin").then(async (s) => {
       skin = s;
       const ready = await readyPicture(s);
@@ -1094,6 +1111,19 @@
     await invoke("set_glow", { on });
   }
 
+  /** Wear a theme (#147): this window now, the others when they hear it. */
+  async function setTheme(name: string) {
+    if (!isWearable(name)) return;
+    theme = name;
+    applyTheme(name);
+    await invoke("set_theme", { name });
+  }
+
+  async function setCalm(on: boolean) {
+    calm = on;
+    await invoke("set_calm", { on });
+  }
+
   /**
    * The signed-in session yt-dlp uses for the videos that need one (D112).
    * Here beside the other settings until there is a settings window, the same
@@ -1445,6 +1475,18 @@
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
     </label>
+    <label class="conc skinpick" title="The colours and type of the library, and of every skin that wears the theme">
+      theme
+      <select value={theme} onchange={(e) => setTheme(e.currentTarget.value)}>
+        {#each WEARABLE as t (t)}<option value={t}>{themeLabel(t)}</option>{/each}
+      </select>
+    </label>
+    {#if themeVisualizer(theme) === "kaleidoscope"}
+      <label class="glow" title="A still kaleidoscope: no turning, no bloom, one colour, and only its size answers the music">
+        <input type="checkbox" checked={calm} onchange={(e) => setCalm(e.currentTarget.checked)} />
+        calm
+      </label>
+    {/if}
     <label class="conc skinpick" title="What the three classic windows wear">
       skin
       <select

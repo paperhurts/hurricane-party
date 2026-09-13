@@ -549,10 +549,12 @@ describe("parseSkin warns on the soft cases", () => {
   });
 
   it("an unknown visualizer falls back to bars", () => {
-    const { skin, warnings } = parseSkin(broken((m) => (m.visualizer.component = "kaleidoscope")));
+    const { skin, warnings } = parseSkin(broken((m) => (m.visualizer.component = "vectrex")));
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/kaleidoscope/);
+    expect(warnings[0]).toMatch(/vectrex/);
     expect(skin.visualizer.component).toBe("spectrum-bars");
+    // The kaleidoscope is one the app has now (#147).
+    expect(parseSkin(broken((m) => (m.visualizer.component = "kaleidoscope"))).warnings).toEqual([]);
   });
 
   it("gives a list with only a face and a row height the usual colours (D99)", () => {
