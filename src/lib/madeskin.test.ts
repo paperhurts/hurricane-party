@@ -4,6 +4,7 @@ import { colorsWorn } from "./theme";
 import {
   DISPLAY_WELL,
   madeManifest,
+  remade,
   MAKER_VERSION,
   nameFrom,
   PICTURE_H,
@@ -159,6 +160,31 @@ describe("a skin made from a picture (#131)", () => {
     const m = madeManifest(made()) as Record<string, any>;
     m.windows.main.elements.vis.well = 2;
     expect(() => parseSkin(m)).toThrow(/well/);
+  });
+
+  it("is made again, unchanged, from its own manifest", () => {
+    const m = madeManifest({ ...made(), pictureHeight: 700 });
+    expect(remade(JSON.parse(JSON.stringify(m)))).toEqual(m);
+  });
+
+  // SEL was the first thing Eyewall gained that made skins never got: they
+  // copied Eyewall's layout when they were made (D124).
+  it("picks up what Eyewall has gained since the skin was made", () => {
+    const old = madeManifest({ ...made(), pictureHeight: 500 }) as Record<string, any>;
+    delete old.windows.playlist.elements.selectButton;
+    delete old.windows.playlist.elements.selectWell;
+    const again = remade(old) as Record<string, any>;
+    expect(again.windows.playlist.elements.selectButton).toMatchObject({ action: "loadSelected" });
+    // And keeps what the maker chose: the colours, and how tall its picture is.
+    expect(again.palette).toEqual(old.palette);
+    const band = again.windows.playlist.elements.backdrop.sprite.rect;
+    expect(band[1] + band[3]).toBe(500);
+    expect(() => parseSkin(again)).not.toThrow();
+  });
+
+  it("leaves anything that is not a made skin alone", () => {
+    expect(remade(eyewall as Record<string, unknown>)).toBeNull();
+    expect(remade({ generator: 4, name: "an import" })).toBeNull();
   });
 
   it("carries a maker stamp and no importer stamp, so it is never rebuilt as a .wsz", () => {

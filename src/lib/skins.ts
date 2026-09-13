@@ -14,6 +14,7 @@ import chrome1 from "../../skins/eyewall/chrome.png";
 import chrome2 from "../../skins/eyewall/chrome@2x.png";
 import { parseSkin, type Skin, type WindowName } from "./skin";
 import { wszManifest, WSZ_GENERATION } from "./wsz";
+import { remade } from "./madeskin";
 
 const FILES: Record<string, string> = {
   "chrome.png": chrome1,
@@ -70,7 +71,18 @@ export async function currentSkin(): Promise<Wearable> {
     // made skin or a hand-written one has none and is worn as it is: rebuilding
     // it would re-import art it never came from (#131).
     const stale = typeof written.generator === "number" && written.generator !== WSZ_GENERATION;
-    const parsed = stale ? await rebuild(id, on, "an older import") : parseSkin(written);
+    // A made skin is made again from Eyewall's current layout every time it is
+    // worn, so it has whatever Eyewall has now (D124), and the folder is
+    // brought up to date when that changed anything.
+    const again = remade(written as Record<string, any>);
+    if (again) {
+      const json = JSON.stringify(again, null, 1);
+      if (json !== on.manifest) {
+        await invoke("write_skin_manifest", { id, json }).catch(() => {});
+        console.info(`${id}: made skin brought up to Eyewall's current layout`);
+      }
+    }
+    const parsed = again ? parseSkin(again) : stale ? await rebuild(id, on, "an older import") : parseSkin(written);
     for (const w of parsed.warnings) console.warn(`${id}: ${w}`);
     return { id, skin: parsed.skin, resolve };
   } catch (e) {
