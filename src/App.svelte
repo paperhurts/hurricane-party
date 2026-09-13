@@ -1155,6 +1155,16 @@
       notice = `That cookies file was refused: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
+  /** Who a row is by, for the library list (#156): the artist, or for a
+   * download without music metadata the channel. Left off when the title
+   * already starts with it ("Artist - Song"), where it would only say it
+   * twice. */
+  function byline(t: { title: string; uploader: string | null }): string {
+    const by = t.uploader?.trim();
+    if (!by) return "";
+    return t.title.toLowerCase().startsWith(by.toLowerCase()) ? "" : by;
+  }
+
   /** Open the library folder in Explorer (#155). Rust picks the folder. */
   async function openLibraryFolder() {
     try {
@@ -1913,7 +1923,9 @@
           {:else}
             <button class="play" onclick={() => playFromView(t)}>▶</button>
           {/if}
-          <span class="title">{t.title}</span>
+          <span class="title"
+            >{t.title}{#if byline(t)}<span class="by"> · {byline(t)}</span>{/if}</span
+          >
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
           {#if selectedList == null}
             <!-- Pointerdowns inside stay inside, so the window-level
@@ -2174,6 +2186,7 @@
   .plmenu { right: 0; top: 24px; min-width: 150px; }
   .menu .danger { color: var(--warn); }
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title .by { color: color-mix(in srgb, var(--text) 50%, transparent); }
   .meta { font-size: 11px; color: color-mix(in srgb, var(--text) 45%, transparent); flex: 0 0 auto; }
 
   footer { display: flex; gap: 8px; align-items: baseline; font-size: 11px;

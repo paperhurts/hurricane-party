@@ -110,8 +110,13 @@ type Result<T> = std::result::Result<T, PipelineError>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Probed {
     pub id: String,
+    /// The song when the video is one (#156, D134), else the video's title.
     pub title: String,
+    /// Who it is by: the song's artists when the video is the song, else the
+    /// uploader, which on YouTube is the channel.
     pub uploader: Option<String>,
+    /// The song's album, when the video is the song and YouTube names one.
+    pub album: Option<String>,
     pub duration_s: Option<f64>,
     pub extractor: String,
     /// Best-effort estimate; yt-dlp often can't know before downloading.
@@ -932,22 +937,61 @@ pub async fn probe(app: &AppHandle, url: &str, job_id: Option<i64>) -> Result<Pr
         .and_then(|a| a.first())
         .unwrap_or(&v);
 
-    let id = node
-        .get("id")
-        .and_then(|x| x.as_str())
-        .ok_or_else(|| PipelineError::Metadata("no id in yt-dlp output".into()))?
-        .to_string();
+    probed_from(node)
+}
+
+/// What a download is called and who it is by (#156, D134), from one video's
+/// metadata. Split out so the rule is tested without running yt-dlp.
+///
+/// YouTube knows a song's name, artists and album for many videos, and
+/// yt-dlp hands them over as `track`, `artists` and `album`. That is the name
+/// and the artist a library wants: the uploader is the channel, and a label's
+/// or a fan's upload of a song is not by the label or the fan. But YouTube
+/// lists the music *in* a video too, so a vlog with a licensed song under it
+/// carries that song's metadata as well. The song is taken only when the
+/// video's own title names the track or one of its artists; otherwise the
+/// video keeps its title and its channel, as every download did before.
+fn probed_from(node: &serde_json::Value) -> Result<Probed> {
+    let text = |k: &str| {
+        node.get(k)
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let id = text("id").ok_or_else(|| PipelineError::Metadata("no id in yt-dlp output".into()))?;
+    let video_title = text("title").unwrap_or_else(|| id.clone());
+    let artists: Vec<String> = match node.get("artists").and_then(|a| a.as_array()) {
+        Some(list) => list
+            .iter()
+            .filter_map(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        None => text("artist").into_iter().collect(),
+    };
+    let track = text("track");
+    let named = |what: &str| video_title.to_lowercase().contains(&what.to_lowercase());
+    let is_the_song = track.as_deref().is_some_and(named) || artists.iter().any(|a| named(a));
+    let channel = text("uploader").or_else(|| text("channel"));
+    let (title, uploader, album) = match track {
+        Some(track) if is_the_song => (
+            track,
+            if artists.is_empty() {
+                channel
+            } else {
+                Some(artists.join(", "))
+            },
+            text("album"),
+        ),
+        _ => (video_title, channel, None),
+    };
 
     Ok(Probed {
-        title: node
-            .get("title")
-            .and_then(|x| x.as_str())
-            .unwrap_or(&id)
-            .to_string(),
-        uploader: node
-            .get("uploader")
-            .and_then(|x| x.as_str())
-            .map(str::to_string),
+        title,
+        uploader,
+        album,
         duration_s: node.get("duration").and_then(|x| x.as_f64()),
         extractor: node
             .get("extractor_key")
@@ -1555,6 +1599,11 @@ async fn extract_mp3(
         format!("title={}", probed.title),
         "-metadata".into(),
         format!("artist={}", probed.uploader.clone().unwrap_or_default()),
+        // yt-dlp tagged the source with the album of any song it found in the
+        // video, and `-map_metadata 0` carries it. Only a video that is the
+        // song keeps one (D134); an empty value removes it from the others.
+        "-metadata".into(),
+        format!("album={}", probed.album.clone().unwrap_or_default()),
         scratch.to_string_lossy().into_owned(),
     ]);
 
@@ -2069,6 +2118,54 @@ mod tests {
         assert!(!is_generated_list("PLWtysTkuEQDPa2kda8p6BYFQLCUz_cElx"));
         assert!(!is_generated_list("OLAK5uy_k"));
         assert!(!is_generated_list("UUabcdef"));
+    }
+
+    #[test]
+    fn a_video_that_is_the_song_is_named_by_it_and_a_video_with_a_song_in_it_is_not() {
+        let probe = |json: &str| probed_from(&serde_json::from_str(json).unwrap()).unwrap();
+
+        // A label's upload of a song: the song and its singer, not the label.
+        let song = probe(
+            r#"{"id": "a1", "title": "Some Singer - The Song [Official Video]",
+                "uploader": "A Record Label", "track": "The Song",
+                "artists": ["Some Singer", "A Guest"], "album": "The Album"}"#,
+        );
+        assert_eq!(song.title, "The Song");
+        assert_eq!(song.uploader.as_deref(), Some("Some Singer, A Guest"));
+        assert_eq!(song.album.as_deref(), Some("The Album"));
+
+        // Named by its artist even when the track is spelled differently.
+        let accent = probe(
+            r#"{"id": "a2", "title": "Some Singer - Canción (Live)", "uploader": "Label",
+                "track": "Cancion", "artists": ["Some Singer"]}"#,
+        );
+        assert_eq!(accent.title, "Cancion");
+        assert_eq!(accent.uploader.as_deref(), Some("Some Singer"));
+
+        // A vlog with a licensed song under it keeps its own title and channel.
+        let vlog = probe(
+            r#"{"id": "b1", "title": "Storm prep, day 3", "uploader": "Weather Channel Fan",
+                "track": "Clair de Lune", "artists": ["Claude Debussy"], "album": "Suite"}"#,
+        );
+        assert_eq!(vlog.title, "Storm prep, day 3");
+        assert_eq!(vlog.uploader.as_deref(), Some("Weather Channel Fan"));
+        assert_eq!(vlog.album, None);
+
+        // No music metadata: the title and the channel, falling back to the
+        // channel field and to the id, as before.
+        let plain = probe(r#"{"id": "c1", "title": "Plain video", "channel": "Somebody"}"#);
+        assert_eq!(plain.title, "Plain video");
+        assert_eq!(plain.uploader.as_deref(), Some("Somebody"));
+        assert_eq!(probe(r#"{"id": "c2"}"#).title, "c2");
+
+        // An older yt-dlp answer with `artist` as a string still counts.
+        let old = probe(
+            r#"{"id": "d1", "title": "The Song", "uploader": "Singer - Topic",
+                          "track": "The Song", "artist": "Singer"}"#,
+        );
+        assert_eq!(old.uploader.as_deref(), Some("Singer"));
+
+        assert!(probed_from(&serde_json::json!({"title": "no id"})).is_err());
     }
 
     #[test]
