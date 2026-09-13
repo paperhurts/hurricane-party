@@ -645,6 +645,14 @@ fn show_library(app: AppHandle) {
     tray::reveal_library(&app);
 }
 
+/// The playlist's LIB button (D123): put away a library that was in front, and
+/// bring back any other. `show_library` stays for what only ever shows it —
+/// Main's eject, and the tray.
+#[tauri::command]
+fn toggle_library(app: AppHandle) {
+    tray::toggle_library(&app);
+}
+
 // ---- playlists --------------------------------------------------------------
 
 #[tauri::command]
@@ -993,6 +1001,12 @@ fn wire_library_close(app: &AppHandle) {
     };
     let handle = app.clone();
     win.on_window_event(move |event| {
+        // LIB's toggle needs to know the library was in front a moment ago
+        // (D123), and losing focus is how it finds out.
+        if let tauri::WindowEvent::Focused(false) = event {
+            tray::library_lost_focus();
+            return;
+        }
         let tauri::WindowEvent::CloseRequested { api, .. } = event else {
             return;
         };
@@ -1156,6 +1170,7 @@ pub fn run() {
             get_cookies_from,
             set_cookies_file,
             show_library,
+            toggle_library,
             wm_hello,
             wm_toggle_shade,
             wm_seam_down,

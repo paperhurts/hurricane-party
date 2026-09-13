@@ -283,7 +283,8 @@
     if (name === "add") addFolder();
     else if (name === "addUrl") openUrl();
     else if (name === "remove") remove();
-    else if (name === "library") invoke("show_library");
+    // A toggle (D123): puts away a library that was in front, brings back any other.
+    else if (name === "library") invoke("toggle_library");
     // The library owns the order (D74); these only ask it to change, and the
     // buttons light from what it says back over `play:mode`.
     else if (name === "shuffle") emitTo("library", "play:shuffle").catch(() => {});
