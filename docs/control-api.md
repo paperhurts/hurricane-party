@@ -38,6 +38,8 @@ Why a separate pipe rather than interleaving on one: mixing framed binary with n
 
 Clients check `protocol_version` and refuse to proceed on mismatch. Server rejects unknown major versions rather than guessing.
 
+**As built**, `capabilities` is `["transport", "viz"]`: `library` arrives with `queue_playlist` and `search`, and `palette` with `palette_changed`, each when it is built. A client should look for the capability, not the version, before it relies on either.
+
 ### Transport
 
 ```jsonc
@@ -49,7 +51,7 @@ Clients check `protocol_version` and refuse to proceed on mismatch. Server rejec
 {"id":6, "cmd":"status"}
 ```
 
-Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `queue_playlist` `search`
+Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `queue_playlist` `search`. **Built:** `hello`, `status`, the transport eight and `subscribe_viz` (`Command` in `crates/hp-control/src/lib.rs`). `queue_playlist` and `search` are not built yet, and today answer as unknown commands.
 
 **Video (D69, D70).** One thing plays at a time: starting a video pauses the track, starting a track pauses the video, and nothing resumes. `status` and `now_playing_changed` carry **`kind`**, `"audio"` or `"video"`, and describe whichever last started playing; a pause from the other side does not take the channel back. `play` `pause` `toggle` `stop` `seek` `volume` act on whatever is playing (`stop` on a video is pause-and-rewind; the window stays open on its first frame). `next` and `prev` step the library's list, which walks over videos and tracks alike. Closing the video window hands the channel back to the track: `status` describes the audio side again, paused or stopped, which is what a `play` would resume. `kind` is additive; absent means audio. The Main window's own buttons, seek bar and volume go through the same router as these commands (D81), so what a client sees and what the user sees never disagree.
 
@@ -66,6 +68,8 @@ Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` 
 {"event":"state_changed", "state":"paused"}
 {"event":"palette_changed", "viscolor":["#000000","#0f0f0f", "…24 entries…"]}
 ```
+
+**Built:** `now_playing_changed` and `state_changed`. `palette_changed` is placed at v0.5 below and is not built yet, although skins can now change at runtime (the `.wsz` importer and the skin maker both shipped); `layout_changed` is v1.0.
 
 `palette_changed` is the one worth calling out. When you switch skins, the LED wall changes color scheme to match. That's a genuinely nice thing that costs almost nothing to ship, and it's the kind of detail that makes people want to build against your API. The payload is the same 24-entry `viscolor` array the skin manifest defines (`skin-manifest.md`) — one definition, three consumers: analyser, Cone backdrop, and this event.
 
@@ -176,7 +180,7 @@ This is the one place my earlier "use HTML5 audio" recommendation costs you some
 
 Any local process can connect to the named pipe. For a personal offline media player that's the correct tradeoff — the alternative is a token dance that makes third-party integration annoying, to protect against an attacker who already has code execution on your machine.
 
-But be aware the surface includes `queue_playlist` and `search`, not just viz. If that ever bothers you, the fix is capability scoping at handshake (`{"cmd":"hello", "want":["viz"]}`) rather than authentication. Don't build it now.
+But be aware the surface will include `queue_playlist` and `search` once they are built, not just transport and viz. If that ever bothers you, the fix is capability scoping at handshake (`{"cmd":"hello", "want":["viz"]}`) rather than authentication. Don't build it now.
 
 ---
 
@@ -198,7 +202,7 @@ Ship the example client. Someone with an LED strip and a Raspberry Pi should be 
 |---|---|
 | v0.3 | Control channel only: handshake, transport, events. Proves the pipe, no public commitment yet |
 | v0.4 | Viz channel — lands with the analyser, since it's the same data |
-| v0.5 | `palette_changed` — lands with the skin loader, since that's when palettes become dynamic |
+| v0.5 | `palette_changed` — lands with the skin loader, since that's when palettes become dynamic. *The loader shipped; the event has not* |
 | v1.0 | `layout_changed`. Freeze protocol v1. Publish docs + example client |
 
 This table is the control API's internal phasing and is consistent with the canonical milestone table in `decisions.md` (D27). If they ever disagree, `decisions.md` wins.

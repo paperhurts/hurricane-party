@@ -24,9 +24,9 @@ Everything below follows from that.
 |---|---|---|
 | Shell | **Tauri v2** | ~10 MB bundle vs Electron's ~150 MB. "Lightweight" is in the brief. Also: you already know it from doc-md. |
 | UI | **Svelte 5 + Vite** | Same reason. No reason to learn a second frontend stack. |
-| DB | **SQLite** (`tauri-plugin-sql` or raw `rusqlite`) | Library metadata, playlists, job queue. WAL mode for crash safety. |
-| Fetch | **yt-dlp** as Tauri sidecar (`externalBin`) | 1800+ site extractors, maintained by people who fight YouTube full-time. Do not write your own. |
-| Transcode | **ffmpeg** as sidecar | Extract MP3 from downloaded video, normalize, generate waveform peaks. |
+| DB | **SQLite** through `rusqlite` (bundled) | Library metadata, playlists, job queue, settings. WAL mode for crash safety. |
+| Fetch | **yt-dlp** as Tauri sidecar (`externalBin`), with **deno** beside it for YouTube's JS challenges (D46) | 1800+ site extractors, maintained by people who fight YouTube full-time. Do not write your own. |
+| Transcode | **ffmpeg** as sidecar | Derive the MP3 from the downloaded file and attach its cover art. |
 | Playback | **HTML5 `<audio>` / `<video>`** via `convertFileSrc()` | See below — this is a real decision, not a default. |
 
 ### Why HTML5 audio instead of Rust-side (rodio/symphonia)
@@ -51,8 +51,8 @@ Route: `<audio>` element → `MediaElementAudioSourceNode` → EQ filter chain �
 │  Rust core                                  │
 │  · SQLite (library, playlists, job queue)   │
 │  · job runner: spawns yt-dlp / ffmpeg       │
-│  · file watcher, integrity checker          │
-│  · storage budget accounting                │
+│  · library scan, control pipe, viz stream   │
+│  · v0.6: watcher, integrity, storage budget │
 └──────────────┬──────────────────────────────┘
                │ sidecar spawn
         ┌──────▼──────┐  ┌────────────┐
@@ -60,11 +60,13 @@ Route: `<audio>` element → `MediaElementAudioSourceNode` → EQ filter chain �
         └─────────────┘  └────────────┘
 ```
 
-Job runner emits progress over Tauri events. One yt-dlp process per item, bounded concurrency (2–3 default; more will get you rate-limited, not faster).
+Job runner emits progress over Tauri events. One yt-dlp process per item, bounded concurrency (default 2, adjustable 1–4 in the library header; more gets you rate-limited, not faster — O12).
 
 ---
 
 ## Data model
+
+The schema that runs is `SCHEMA` in `src-tauri/src/db.rs`; this is the same shape with the reasons written beside it. When the two disagree, the code is what is on disk and this block is stale.
 
 ```sql
 -- what you imported from
@@ -102,7 +104,7 @@ CREATE TABLE media (
   -- the library browser cannot render a row for a file she already owned
   title         TEXT NOT NULL,
   uploader      TEXT,
-  duration_s    INTEGER,
+  duration_s    REAL,                 -- seconds, fractional, as the probe reports them
 
   container     TEXT,                 -- 'mp3', 'mp4', 'opus'
   bitrate_kbps  INTEGER,
@@ -121,7 +123,8 @@ CREATE TABLE playlists (
   is_smart      INTEGER DEFAULT 0,
   rule_json     TEXT,                 -- for smart playlists
   profile_id    INTEGER NOT NULL DEFAULT 1,   -- O9. free now, a migration later
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  position      INTEGER               -- the order a person arranged the lists in (D116)
 );
 
 CREATE TABLE playlist_items (
@@ -139,15 +142,16 @@ CREATE TABLE playlist_items (
 CREATE TABLE jobs (
   id            INTEGER PRIMARY KEY,
   url           TEXT NOT NULL,
-  want_video    INTEGER NOT NULL DEFAULT 1,
+  want_video    INTEGER NOT NULL DEFAULT 0,   -- audio unless the video box is ticked
   want_audio    INTEGER NOT NULL DEFAULT 1,
   status        TEXT NOT NULL CHECK (status IN ('queued','running','done','failed','paused')),
 
   -- resume, not restart (D26). which recovery to run depends on where it died
   stage         TEXT NOT NULL DEFAULT 'probe'
                 CHECK (stage IN ('probe','download','extract','verify')),
+  title         TEXT,                 -- from the probe, so the row reads before it lands
+  video_id      TEXT,                 -- the source's id, the [id] in the file name
   outtmpl       TEXT,                 -- resolved output path, so --continue finds the .part
-  part_path     TEXT,                 -- the partial yt-dlp was writing
 
   progress      REAL NOT NULL DEFAULT 0,
   bytes_done    INTEGER NOT NULL DEFAULT 0,
@@ -170,7 +174,7 @@ CREATE TABLE play_history (
 -- settings live in the DB, not a side file (D32), so a hard power loss
 -- can't desync them from the library they describe
 CREATE TABLE settings (
-  key           TEXT PRIMARY KEY,     -- 'storage.budget_bytes', 'chrome.scale', 'skin.active'
+  key           TEXT PRIMARY KEY,     -- 'skin.current', 'chrome.glow', 'play.shuffle', 'ytdlp.cookies'
   value         TEXT NOT NULL         -- JSON
 );
 
@@ -213,10 +217,14 @@ CREATE TABLE eq_presets (
 
 ### Migration note
 
-This is the v0.2 schema and there is no deployed data yet, so it ships as one initial
-migration rather than a chain. The columns that exist purely to avoid a painful retrofit
-later — `profile_id` (O9), `library_roots` + `relpath` (D28), `media.title` (D34) — are
-the whole reason to get this right before v0.2 writes the first migration file.
+This was the v0.2 schema, written before there was any deployed data, so it shipped as
+one `CREATE TABLE IF NOT EXISTS` batch rather than a chain of migrations. The columns
+that exist purely to avoid a painful retrofit later — `profile_id` (O9), `library_roots` +
+`relpath` (D28), `media.title` (D34) — are why it was worth getting right first.
+
+There is deployed data now (the v0.4 Releases), so a column added since goes through
+`db::migrate`, which runs on every open and adds what an older database lacks:
+`playlists.position` (D116) is the first.
 
 The one data fix since is `db::normalize_roots`, run on every open (D83): a root the
 scanner stored in Windows' verbatim form (`\\?\C:\…`) is folded into the plain-path twin
@@ -253,7 +261,7 @@ The EQ window is in the design brief and the window inventory, but the audio sid
 
 `60 · 170 · 310 · 600 · 1k · 3k · 6k · 12k · 14k · 16k`
 
-First band as `lowshelf`, last as `highshelf`, the middle eight as `peaking` with Q around 1.0–1.4. Verify the exact frequency set against a reference before locking the UI labels.
+First band as `lowshelf`, last as `highshelf`, the middle eight as `peaking` at Q 1.2 (D75, `src/lib/audio.ts`). The frequency set is verified against the classic (D21, D31).
 
 **Range** — ±12 dB per band, ±12 dB preamp. Matching the classic range means imported `.eqf` preset files map 1:1 with no rescaling.
 
@@ -266,13 +274,15 @@ A `DynamicsCompressorNode` as a limiter is the lazier option and it colors the s
 
 **Per-track EQ** — the `auto` toggle on the EQ window means "load this track's saved preset on play." That's what `media.eq_preset_id` is for. Null means use the global setting.
 
-**`.eqf` import** — Winamp's EQ preset format is small and simple, and importing it is cheap. Worth doing alongside `.wsz` in v0.5.
+**`.eqf` import** — Winamp's EQ preset format is small and simple, and importing it is cheap. It is in v0.5 (D27), and D31 has the byte layout verified; it is not built yet.
 
 **Deliberately not in the control API v1.** No `set_eq` command. The public surface stays small; EQ is an in-app control, and adding it later is additive rather than breaking.
 
+### Recovering the job queue
+
 On launch: `UPDATE jobs SET status='queued' WHERE status='running'` — recover anything interrupted.
 
-**That means "re-enter the runner," not "start over" (D26).** The row keeps its `stage`, `outtmpl`, and `part_path`, and the runner picks the recovery that matches where it died:
+**That means "re-enter the runner," not "start over" (D26).** The row keeps its `stage`, `outtmpl` and `video_id`, and the runner picks the recovery that matches where it died:
 
 | Died in | Recovery |
 |---|---|
@@ -305,16 +315,20 @@ For each selected item:
 
 ```bash
 yt-dlp \
-  -f "bv*+ba/b" \
-  --embed-metadata --embed-thumbnail \
-  --write-info-json --write-thumbnail \
+  --ffmpeg-location <bundled ffmpeg> \
+  -f "bv*+ba/b" \                      # "bestaudio/best" when only audio is wanted
+  --embed-metadata \
+  --write-thumbnail --convert-thumbnails jpg \
   --no-playlist \
   --continue \
   --newline \
-  --progress-template "download:%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s" \
-  -o "%(extractor)s/%(title)s [%(id)s].%(ext)s" \
-  "<url>"
+  --progress-template "download:HPPROG|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s|%(progress.status)s" \
+  --merge-output-format mp4 \
+  -o "<root>/%(extractor)s/%(title)s [%(id)s].%(ext)s" \
+  -- "<url>"
 ```
+
+The arguments that run are in `src-tauri/src/pipeline.rs`. Two differ from the first draft of this page, both found by running them: **no `--embed-thumbnail`**, which hard-errors on the webm/opus intermediate and fails a job after a good download (the cover is attached at the ffmpeg step instead, where the container is MP3), and a **`HPPROG` marker** at the front of the progress template, so a progress line can never be mistaken for anything else yt-dlp prints. The `cookies` arguments below are prepended to all of it when set.
 
 **On the output template (D49):** the `%(uploader)s` level that used to sit between extractor and title is gone. On YouTube the uploader is the channel, not the artist, so it produced roughly one folder per file. It's still stored on `media.uploader`, and the library browser is a DB query (O6) rather than a directory listing.
 
@@ -329,16 +343,19 @@ yt-dlp \
 Don't download twice. You already have the best audio stream inside the video file:
 
 ```bash
-ffmpeg -i "input.mp4" -vn -c:a libmp3lame -q:a 0 "output.mp3"
+ffmpeg -i "<downloaded file>" [-i cover.jpg -map 1 ...] -map 0:a -map_metadata 0 \
+       -c:a libmp3lame -q:a 2 -metadata title=... -metadata artist=... "<scratch>.mp3"
 ```
 
-Saves bandwidth and a round-trip. If the user only wants audio, skip video entirely with `-x --audio-format mp3 --audio-quality 0`.
+Saves bandwidth and a round-trip. When only audio is wanted, the download is already `bestaudio/best` rather than a video, and the same step turns it into the MP3; yt-dlp's own `-x` is not used, so there is one extraction path. The written thumbnail becomes the MP3's front cover, and the title and artist come from the probe rather than whatever tags the stream carried.
 
-### The PoToken problem — resolved as D25
+### The PoToken problem — D25, superseded by D46
+
+**This section is history.** D25 bundled a PO token provider; tested on 2026-08-30, yt-dlp needed no PO token at all, and what it did need was a JavaScript runtime for YouTube's challenges. So the third sidecar is **deno** (D46), not a token provider, and the reasoning below survives only as the case for keeping any such helper pinned and swappable.
 
 YouTube requires a Proof-of-Origin Token per request now. Without it you get downgraded formats or outright failures. It's the single most likely thing to break this app six months from now.
 
-**Decision (D25): bundle `bgutil-ytdlp-pot-provider` as a third sidecar, in script mode.**
+**Decision (D25, superseded): bundle `bgutil-ytdlp-pot-provider` as a third sidecar, in script mode.**
 
 Script mode invokes the provider per request rather than running a long-lived HTTP listener. Server mode is marginally faster across a big prep run, but it means a localhost socket sitting open — and D11's zero-network guarantee is worth more as a by-construction property than as a benchmark. A listener that's "only local" is exactly the kind of thing that erodes into an exception.
 
@@ -365,11 +382,13 @@ You said "like old Winamp." There are two very different things that could mean,
 
 **Build the sprite-sheet abstraction from day one, ship CSS themes first.**
 
-Concretely: make the player chrome a fixed **275 × 116 logical-pixel canvas** with absolutely-positioned elements at Winamp's known coordinates, scaled by an integer factor (1x/2x/3x) for modern displays. The theme layer supplies *either* sprite offsets into a bitmap *or* CSS colors and vectors.
+Concretely: make the player chrome a fixed **275 × 116 logical-pixel canvas** with absolutely-positioned elements at Winamp's known coordinates, scaled by an integer factor (1x or 2x, O3) for modern displays. The theme layer supplies *either* sprite offsets into a bitmap *or* CSS colors and vectors.
 
 Do that and `.wsz` support later is a **loader**, not a rewrite. Skip it and you'll be trying to retrofit fixed-pixel sprite positioning onto a flexbox app, which is genuinely miserable.
 
 Ship **your own** default skin — don't bundle third-party Winamp skins, those are other people's copyrighted art. Let users load their own `.wsz` files from disk.
+
+**What was built.** The recommendation held. The three classic windows are drawn from `hp-skin/1` manifests (`docs/skin-manifest.md`): Eyewall, the skin that ships, is mask sheets tinted from the theme (D73, D90); a `.wsz` is mapped into the same format by an importer, supported **to a degree** — it wears, and what it draws that this app has no feature for is said out loud (D102–D111); and **making your own is the headline** (D110): *Make a skin…* turns any picture into a skin with Eyewall's chrome in the picture's colours and the picture behind the windows (D122).
 
 ---
 
@@ -387,7 +406,7 @@ Ship **your own** default skin — don't bundle third-party Winamp skins, those 
 
 - The **webview CSP forbids remote origins outright.** `connect-src`, `img-src`, `font-src`, and `script-src` allow only `self` and Tauri's `asset:` scheme. No CDN font, no remote thumbnail, no analytics can be added later by accident — it fails at load, loudly, in development
 - **All egress lives in Rust**, behind a single allowlisted command for the Cone radar fetch (D19). There is exactly one function in the codebase that opens a socket to the internet, and it's greppable
-- **A test runs the app with the interface down** and asserts no connection is attempted
+- **A test runs the app with the interface down** and asserts no connection is attempted. *That test is not written yet*; the CSP (`src-tauri/tauri.conf.json`) is what enforces the property today
 
 Anything that needs the network degrades silently, not spins. The CSP is doing the real work here: it turns "we intend not to make requests" into "requests cannot be made," which is the difference between a guarantee and a habit.
 
@@ -397,7 +416,7 @@ Anything that needs the network degrades silently, not spins. The CSP is doing t
 
 yt-dlp handles Bandcamp, SoundCloud, Vimeo, Internet Archive, Mixcloud, and ~1800 others out of the box. Your `extractor` column already stores which one was used. **The work is UI affordances, not backend** — per-site auth for things like Bandcamp purchases, and sensible format defaults per extractor. Don't build site-specific code paths until a site actually forces you to.
 
-Also worth doing early and cheaply: **import a local folder.** Scan, read tags via ffprobe, insert into `media` with a null `source_id`. Suddenly the app is useful for the music she already owns, not just YouTube.
+Also worth doing early and cheaply: **import a local folder.** Scan, read tags via ffprobe, insert into `media` with a null `source_id`. Suddenly the app is useful for the music she already owns, not just YouTube. *Built at v0.3*, as *Add folder* in the library; a click on a root rescans it (D95).
 
 ---
 
