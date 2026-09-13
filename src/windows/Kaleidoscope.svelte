@@ -134,8 +134,10 @@
       for (let k = 0; k < segments; k++) {
         g.save();
         g.rotate(k * seg);
-        // Every other petal mirrored: the kaleidoscope's mirror.
-        if (k % 2) g.scale(1, -1);
+        // Every other petal mirrored across its own axis: the kaleidoscope's
+        // mirror. The designer's flipped it end over end instead, which with
+        // six segments laid each odd petal on an even one's and drew three.
+        if (k % 2) g.scale(-1, 1);
         petal(g, R, hue + k * (180 / segments), bass, mids, inner, treble, bloom);
         g.restore();
       }
