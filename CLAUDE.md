@@ -34,6 +34,7 @@ If no decision covers a choice, make the obvious call, write it down (a row in `
 | `design/tokens.json` | Machine-readable palette. **Import this; never hardcode a hex value** |
 | `.claude/skills/*/SKILL.md` | `/land` runs the gates and opens the PR; `/decide` appends a decision row. Those are the only workflow commands |
 | `skins/eyewall/` | The skin that ships, and the template a person copies to make their own (D90). `tools\chrome-sheet.ps1` redraws its sheets from the manifest |
+| `skins/purricane/` | The skin the Purricane theme wears (D132). `tools\purricane-sheet.ps1` redraws its sheets from the manifest |
 
 ---
 

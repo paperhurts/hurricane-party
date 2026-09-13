@@ -108,7 +108,7 @@ Which surfaces a real architectural requirement: **the visualizer is a swappable
 
 It also resolves cleanly against the only-light-source thesis rather than violating it: Purricane is still emissive, just high-key. A lit aquarium, not a white webpage.
 
-Ships in two pieces — the kaleidoscope visualizer and palette at **v0.5** with the skin system, the kittens at **v0.7** as an external viz-API client. The theme is complete without the cats; the cats are the encore. *Status:* **built at v0.5** (#147, D130). Purricane is picked in the library header beside the skin, is worn with its colours made legible (its mint accent wears as a teal on the near-white ground), and its analyser is the kaleidoscope, with calm beside the picker.
+Ships in two pieces — the kaleidoscope visualizer and palette at **v0.5** with the skin system, the kittens at **v0.7** as an external viz-API client. The theme is complete without the cats; the cats are the encore. *Status:* **built at v0.5** (#147, D130, D132). Purricane is picked in the library header beside the skin. It is the designer's screens: their colours, and a skin of its own that the theme puts on, with the kaleidoscope in a round badge on Main and CALM and 6/8 SEG pills beside it. Under Purricane the library wears the pastels deepened to be read, and so does any other mask skin worn with it.
 
 ---
 
