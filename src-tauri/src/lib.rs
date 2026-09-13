@@ -948,10 +948,14 @@ fn delete_eq_preset(app: AppHandle, id: i64) -> Result<(), db::DbError> {
 /// Every preset in the `.eqf` files the person picked (D31). Read here, not
 /// over the asset protocol: a preset file lives wherever they keep it.
 #[tauri::command]
-fn import_eqf(app: AppHandle, paths: Vec<String>) -> eq_presets::Imported {
+fn import_eqf(
+    app: AppHandle,
+    paths: Vec<String>,
+    shipped: Vec<eq_presets::Shipped>,
+) -> eq_presets::Imported {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
-    eq_presets::import(&conn, &paths)
+    eq_presets::import(&conn, &paths, &shipped)
 }
 
 #[tauri::command]
