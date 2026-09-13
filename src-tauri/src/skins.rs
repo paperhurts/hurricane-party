@@ -115,7 +115,15 @@ fn slug_for(root: &Path, stem: &str) -> String {
 /// are whatever the author's code page was. UTF-8 when it parses, otherwise
 /// each byte as its own character, which is right for the ASCII the colour
 /// lines are made of and harmless for the comments around them.
-fn text_of(bytes: Vec<u8>) -> String {
+///
+/// A leading byte-order mark is dropped. Notepad has written one in front of
+/// UTF-8, and a manifest someone edited that way was refused as "not valid
+/// JSON" on the first painted skin imported (#146).
+pub fn text_of(bytes: Vec<u8>) -> String {
+    let bytes = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        Some(rest) => rest.to_vec(),
+        None => bytes,
+    };
     match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => e.into_bytes().iter().map(|&b| b as char).collect(),
@@ -632,6 +640,15 @@ mod tests {
         assert!(dir.join("manifest.json").is_file());
         assert!(!dir.join("tool.exe").exists());
         fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_part_of_the_text() {
+        assert_eq!(
+            text_of(b"\xEF\xBB\xBF{ \"name\": \"x\" }".to_vec()),
+            "{ \"name\": \"x\" }"
+        );
+        assert_eq!(text_of(b"plain".to_vec()), "plain");
     }
 
     #[test]
