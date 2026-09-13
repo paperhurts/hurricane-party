@@ -1449,7 +1449,7 @@
 <main>
   <header>
     <h1>hurricane-party</h1>
-    <span class="ver">v0.4 — the classic windows play: analyser, EQ, playlist, bonds that glow</span>
+    <span class="ver">v0.5 — skins of your own: a .wsz, a picture, a painting, or Purricane</span>
     <label class="conc">
       concurrent
       <select value={concurrency} onchange={(e) => setConc(+e.currentTarget.value)}>
