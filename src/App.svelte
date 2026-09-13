@@ -1155,6 +1155,15 @@
       notice = `That cookies file was refused: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
+  /** Open the library folder in Explorer (#155). Rust picks the folder. */
+  async function openLibraryFolder() {
+    try {
+      await invoke("open_library_folder");
+    } catch (e) {
+      notice = `Could not open the library folder: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
   async function clearCookies() {
     cookies = await invoke<string>("set_cookies_file", { path: "" });
     notice = "Cookies cleared. Downloads are signed out again.";
@@ -1957,7 +1966,13 @@
     </div>
   </section>
 
-  <footer><span>Library</span><code>{libraryPath}</code></footer>
+  <!-- The folder downloads go to, and a click opens it in Explorer (#155). -->
+  <footer>
+    <span>Library</span>
+    <button class="path" onclick={openLibraryFolder} title="Open this folder in Explorer">
+      <code>{libraryPath}</code>
+    </button>
+  </footer>
 </main>
 
 <style>
@@ -2164,4 +2179,7 @@
   footer { display: flex; gap: 8px; align-items: baseline; font-size: 11px;
            color: color-mix(in srgb, var(--text) 35%, transparent); }
   footer code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  footer .path { min-width: 0; display: flex; padding: 0; border: 0; background: none; font: inherit;
+                 color: inherit; cursor: pointer; text-align: left; }
+  footer .path:hover:not(:disabled) { background: none; color: var(--accent); text-decoration: underline; }
 </style>

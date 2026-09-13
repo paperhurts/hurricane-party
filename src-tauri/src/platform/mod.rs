@@ -114,6 +114,14 @@ pub trait WindowPlatform: Send + Sync {
     /// writer on the same file. Measured on the real binary before this
     /// existed: Pause ended one of the two processes and not the other.
     fn kill_tree(&self, pid: u32);
+
+    /// Open a folder in the OS file manager (#155). Not about a window
+    /// either, and here for the same reason as `kill_tree`: there is no
+    /// portable call, and the shell's own "open" is the one that gets a path
+    /// with spaces or commas right, where handing it to `explorer.exe` on a
+    /// command line does not. The caller decides which folder; nothing from
+    /// the webview reaches this as a path.
+    fn open_folder(&self, path: &std::path::Path) -> Result<(), String>;
 }
 
 /// The native handle behind a Tauri window.
