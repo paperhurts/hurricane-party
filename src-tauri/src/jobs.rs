@@ -15,6 +15,7 @@ use crate::db::{self, Db, DbError};
 use crate::pipeline::{self, Progress};
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -42,6 +43,8 @@ pub struct Job {
     /// That list's name, for the Downloads header that controls it (D117).
     pub playlist_name: Option<String>,
     pub created_at: i64,
+    /// The folder it was queued for (#154, D136); None is the app's own.
+    pub download_root: Option<String>,
 }
 
 fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
@@ -62,6 +65,7 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
         // Only `list` joins the name in; a claimed job does not need it.
         playlist_name: r.get("playlist_name").unwrap_or(None),
         created_at: r.get("created_at")?,
+        download_root: r.get("download_root").unwrap_or(None),
     })
 }
 
@@ -87,15 +91,28 @@ pub fn enqueue(
     want_video: bool,
     playlist_id: Option<i64>,
 ) -> Result<i64, DbError> {
+    // The folder it is for is decided now (#154, D136): a person who picks
+    // another folder later sends the downloads they queue after that there,
+    // and this one still lands, or resumes, where it was going.
+    let root = pipeline::library_root(app)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
     let id = {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
         let t = db::now();
         conn.execute(
             "INSERT INTO jobs (url, want_video, want_audio, status, stage, playlist_id,
-                               created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'queued', 'probe', ?5, ?4, ?4)",
-            params![url, want_video as i64, !want_video as i64, t, playlist_id],
+                               created_at, updated_at, download_root)
+             VALUES (?1, ?2, ?3, 'queued', 'probe', ?5, ?4, ?4, ?6)",
+            params![
+                url,
+                want_video as i64,
+                !want_video as i64,
+                t,
+                playlist_id,
+                root
+            ],
         )?;
         conn.last_insert_rowid()
     };
@@ -125,28 +142,85 @@ pub fn list(conn: &Connection) -> Result<Vec<Job>, DbError> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Claim one queued job, flipping it to `running` in the same statement so two
-/// runner iterations can't take the same row.
-fn claim_next(conn: &Connection) -> Result<Option<Job>, DbError> {
+/// What the runner found in the queue.
+enum Claim {
+    Job(Box<Job>),
+    /// Queued downloads, all for a folder that is not there right now.
+    Waiting,
+    Empty,
+}
+
+/// Which queued job to start, oldest first, among those whose folder is there
+/// (#154, D136), and which are waiting on a folder that is not. A job with no
+/// folder recorded was queued for the app's own.
+fn first_ready(
+    queued: &[(i64, Option<String>)],
+    default_root: &Path,
+    present: impl Fn(&Path) -> bool,
+) -> (Option<i64>, Vec<(i64, PathBuf)>) {
+    let mut waiting = Vec::new();
+    for (id, root) in queued {
+        let dir = root
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_root.to_path_buf());
+        if present(&dir) {
+            return (Some(*id), waiting);
+        }
+        waiting.push((*id, dir));
+    }
+    (None, waiting)
+}
+
+/// The words on a download that is waiting for its folder.
+fn waiting_for(dir: &Path) -> String {
+    format!(
+        "Waiting for the download folder: {} is not there. It carries on when the folder is back, or pick another folder in the library.",
+        dir.display()
+    )
+}
+
+/// Claim one queued job whose folder is there, flipping it to `running` so
+/// two runner iterations can't take the same row, and mark the ones ahead of
+/// it that are waiting on a folder that is not.
+fn claim_next(conn: &Connection, default_root: &Path) -> Result<Claim, DbError> {
+    let queued: Vec<(i64, Option<String>)> = {
+        let mut st = conn.prepare(
+            "SELECT id, download_root FROM jobs WHERE status = 'queued' ORDER BY created_at",
+        )?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    if queued.is_empty() {
+        return Ok(Claim::Empty);
+    }
+    let (ready, waiting) = first_ready(&queued, default_root, |p| p.is_dir());
+    for (id, dir) in &waiting {
+        conn.execute(
+            "UPDATE jobs SET error = ?2 WHERE id = ?1 AND status = 'queued' AND IFNULL(error, '') != ?2",
+            params![id, waiting_for(dir)],
+        )?;
+    }
+    let Some(id) = ready else {
+        return Ok(Claim::Waiting);
+    };
     let t = db::now();
     let claimed: Option<i64> = conn
         .query_row(
-            "UPDATE jobs SET status = 'running', updated_at = ?1, attempts = attempts + 1
-             WHERE id = (SELECT id FROM jobs WHERE status = 'queued'
-                         ORDER BY created_at LIMIT 1)
+            "UPDATE jobs SET status = 'running', updated_at = ?1, attempts = attempts + 1, error = NULL
+             WHERE id = ?2 AND status = 'queued'
              RETURNING id",
-            [t],
+            params![t, id],
             |r| r.get(0),
         )
         .ok();
-
     match claimed {
-        None => Ok(None),
-        Some(id) => Ok(Some(conn.query_row(
+        None => Ok(Claim::Empty),
+        Some(id) => Ok(Claim::Job(Box::new(conn.query_row(
             "SELECT * FROM jobs WHERE id = ?1",
             [id],
             row_to_job,
-        )?)),
+        )?))),
     }
 }
 
@@ -350,8 +424,18 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<i64, DbError
     let db = app.state::<Db>();
     let conn = db.0.lock().unwrap();
 
-    let root = pipeline::library_root(app).map_err(|e| DbError::Io(e.to_string()))?;
-    let root_id = db::ensure_root(&conn, "Default", &root.to_string_lossy())?;
+    // The folder it landed in (#154): the app's own is "Default", a chosen one
+    // is named after itself.
+    let root = std::path::PathBuf::from(&track.root);
+    let is_default = pipeline::default_root(app).is_ok_and(|d| d == root);
+    let label = if is_default {
+        "Default".to_string()
+    } else {
+        root.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Downloads".to_string())
+    };
+    let root_id = db::ensure_root(&conn, &label, &root.to_string_lossy())?;
 
     // D28: store the path relative to its root so a drive returning under a
     // different letter doesn't orphan every row.
@@ -397,7 +481,20 @@ fn record_media(app: &AppHandle, track: &pipeline::Track) -> Result<i64, DbError
 async fn run_one(app: AppHandle, job: Job) {
     let _ = app.emit("jobs-changed", ());
 
-    let result = pipeline::import_job(&app, &job.url, job.id, job.want_video).await;
+    let root = match job.download_root.as_deref() {
+        Some(r) => std::path::PathBuf::from(r),
+        None => match pipeline::default_root(&app) {
+            Ok(r) => r,
+            Err(e) => {
+                let db = app.state::<Db>();
+                let conn = db.0.lock().unwrap();
+                let _ = fail(&conn, job.id, &e.to_string());
+                let _ = app.emit("jobs-changed", ());
+                return;
+            }
+        },
+    };
+    let result = pipeline::import_job(&app, &job.url, job.id, job.want_video, &root).await;
 
     let db = app.state::<Db>();
     match result {
@@ -454,14 +551,29 @@ pub fn spawn_runner(app: AppHandle) {
                 continue;
             }
 
+            let default_root = pipeline::default_root(&app).ok();
             let claimed = {
                 let db = app.state::<Db>();
                 let conn = db.0.lock().unwrap();
-                claim_next(&conn).ok().flatten()
+                match &default_root {
+                    Some(d) => claim_next(&conn, d).unwrap_or(Claim::Empty),
+                    None => Claim::Empty,
+                }
             };
 
             match claimed {
-                Some(job) => {
+                Claim::Waiting => {
+                    let _ = app.emit("jobs-changed", ());
+                    // A drive coming back is not an event anything sends, so
+                    // look again every so often, and at once when a person
+                    // picks another folder or queues something.
+                    tokio::select! {
+                        _ = notify.notified() => {}
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
+                    }
+                }
+                Claim::Job(job) => {
+                    let job = *job;
                     active.fetch_add(1, Ordering::SeqCst);
                     let app2 = app.clone();
                     let active2 = active.clone();
@@ -472,7 +584,7 @@ pub fn spawn_runner(app: AppHandle) {
                         notify2.notify_one(); // a slot freed
                     });
                 }
-                None => {
+                Claim::Empty => {
                     // Nothing queued. Wake on enqueue, or poll slowly as a
                     // backstop so a missed notification can't wedge the queue.
                     tokio::select! {
@@ -488,6 +600,66 @@ pub fn spawn_runner(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_download_waits_for_its_folder_and_the_rest_carry_on() {
+        let default = Path::new("/app/library");
+        let usb = "/mnt/usb/music".to_string();
+        let there = |p: &Path| p != Path::new("/mnt/usb/music");
+        // Oldest first: the one for the missing drive waits, the next runs.
+        let queued = vec![(1, Some(usb.clone())), (2, None), (3, Some(usb.clone()))];
+        let (ready, waiting) = first_ready(&queued, default, there);
+        assert_eq!(ready, Some(2));
+        assert_eq!(waiting, vec![(1, PathBuf::from(&usb))]);
+        // Nothing can run: every one is waiting, and says for what.
+        let (ready, waiting) = first_ready(&[(1, Some(usb.clone()))], default, there);
+        assert_eq!(ready, None);
+        assert_eq!(waiting.len(), 1);
+        assert!(waiting_for(&waiting[0].1).contains("music"));
+        // The drive is back.
+        assert_eq!(first_ready(&queued, default, |_| true).0, Some(1));
+    }
+
+    #[test]
+    fn claiming_skips_a_missing_folder_marks_it_and_clears_it_when_it_runs() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        let here = std::env::temp_dir();
+        let gone = here.join("hp-154-no-such-drive");
+        for (id, root) in [
+            (1, gone.to_string_lossy().into_owned()),
+            (2, here.to_string_lossy().into_owned()),
+        ] {
+            conn.execute(
+                "INSERT INTO jobs (id, url, status, stage, created_at, updated_at, download_root)
+                 VALUES (?1, 'https://example.com', 'queued', 'probe', ?1, ?1, ?2)",
+                params![id, root],
+            )
+            .unwrap();
+        }
+        match claim_next(&conn, &here).unwrap() {
+            Claim::Job(j) => assert_eq!(j.id, 2),
+            _ => panic!("the job whose folder is there runs"),
+        }
+        let (status, error): (String, Option<String>) = conn
+            .query_row("SELECT status, error FROM jobs WHERE id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(status, "queued");
+        assert!(error
+            .unwrap()
+            .starts_with("Waiting for the download folder"));
+        assert!(matches!(claim_next(&conn, &here).unwrap(), Claim::Waiting));
+        // Its folder comes back: it runs, and the waiting words go.
+        std::fs::create_dir_all(&gone).unwrap();
+        match claim_next(&conn, &here).unwrap() {
+            Claim::Job(j) => assert_eq!((j.id, j.error), (1, None)),
+            _ => panic!("the job runs once its folder is back"),
+        }
+        std::fs::remove_dir_all(&gone).ok();
+        assert!(matches!(claim_next(&conn, &here).unwrap(), Claim::Empty));
+    }
 
     fn fixture() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
