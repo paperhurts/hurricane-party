@@ -117,10 +117,12 @@
       ctxt.scale(grow, grow);
       // Neighbours turn opposite ways, so the band reads as gears, not a belt.
       const dir = m % 2 === 0 ? 1 : -1;
+      // Each wedge is drawn symmetric about its own middle, so turning it into
+      // place is the mirror. Flipping every other one as well folded each
+      // petal onto its neighbour's and six arms read as three.
       for (let k = 0; k < segments; k++) {
         ctxt.save();
         ctxt.rotate(dir * turn + k * seg);
-        if (k % 2 === 1) ctxt.scale(1, -1);
         wedge(ctxt, c.r, seg, L, bass, highs, overall, still, lead, second);
         ctxt.restore();
       }
@@ -131,8 +133,8 @@
     if (active || settling || bloom > 0) raf = requestAnimationFrame(draw);
   }
 
-  /** One mirrored wedge, from the centre to the rim, between angle 0 and
-   * half a segment; the loop above turns and flips it into the rest. */
+  /** One wedge, from the centre to the rim, between angle 0 and a segment,
+   * symmetric about its middle; the loop above turns it into the rest. */
   function wedge(
     g: CanvasRenderingContext2D,
     R: number,
@@ -146,42 +148,71 @@
     second: string,
   ) {
     // Bass pushes the pattern out; still, only the overall level does.
-    const reach = R * (still ? 0.45 + 0.55 * overall : 0.35 + 0.65 * bass);
+    const reach = R * (still ? 0.5 + 0.5 * overall : 0.4 + 0.6 * bass);
     const half = seg / 2;
+    const at = (r: number, a: number): [number, number] => [r * Math.cos(a), r * Math.sin(a)];
+    const RINGS = 4;
+    const per = Math.floor(L.length / RINGS);
 
-    // The spoke.
-    g.globalAlpha = 0.3 + 0.5 * (still ? overall : bass);
-    g.strokeStyle = lead;
-    g.lineWidth = Math.max(1, R * 0.03);
-    g.beginPath();
-    g.moveTo(0, 0);
-    g.lineTo(reach * Math.cos(half), reach * Math.sin(half));
-    g.stroke();
+    for (let j = 0; j < RINGS; j++) {
+      // A ring of the pattern per quarter of the spectrum, lows innermost.
+      let lv = 0;
+      for (let i = j * per; i < (j + 1) * per; i++) lv += L[i];
+      lv = still ? overall : lv / per;
+      const r0 = (reach * j) / RINGS;
+      const r1 = (reach * (j + 1)) / RINGS;
+      const rm = (r0 + r1) / 2;
 
-    // A petal per band, from the lows at the centre to the highs at the rim.
-    for (let i = 0; i < L.length; i++) {
-      const f = (i + 1) / L.length;
-      const lv = still ? overall : L[i];
-      const r = reach * f;
-      const a = half * (still ? 0.5 : 0.2 + 0.6 * lv);
-      const size = Math.max(0.75, R * 0.022 * (1 + 2.5 * lv));
-      g.globalAlpha = 0.35 + 0.65 * lv;
-      g.fillStyle = i % 2 === 0 ? lead : second;
+      // The ring itself, as the arc of this wedge: six of them close a circle.
+      g.globalAlpha = 0.25 + 0.45 * lv;
+      g.strokeStyle = j % 2 === 0 ? second : lead;
+      g.lineWidth = Math.max(1, R * 0.02 * (0.5 + 1.5 * lv));
       g.beginPath();
-      g.arc(r * Math.cos(a), r * Math.sin(a), size, 0, 2 * Math.PI);
+      g.arc(0, 0, r1, 0, seg);
+      g.stroke();
+
+      // A petal down the middle of the wedge, wider the louder its ring.
+      const w = half * (still ? 0.55 : 0.25 + 0.7 * lv);
+      g.globalAlpha = 0.45 + 0.5 * lv;
+      g.fillStyle = j % 2 === 0 ? lead : second;
+      g.beginPath();
+      g.moveTo(...at(r0, half));
+      g.quadraticCurveTo(...at(rm * 1.08, half - w), ...at(r1, half));
+      g.quadraticCurveTo(...at(rm * 1.08, half + w), ...at(r0, half));
+      g.fill();
+
+      // A leaf on each edge of the wedge, which meets its neighbour's there:
+      // the pair is the mirror across the seam.
+      const e = half * (still ? 0.3 : 0.15 + 0.45 * lv);
+      g.globalAlpha = 0.3 + 0.4 * lv;
+      g.fillStyle = j % 2 === 0 ? second : lead;
+      for (const [edge, s] of [
+        [0, 1],
+        [seg, -1],
+      ] as const) {
+        g.beginPath();
+        g.moveTo(...at(rm, edge));
+        g.quadraticCurveTo(...at(r1, edge + s * e * 0.5), ...at(r1 * 0.98, edge + s * e));
+        g.quadraticCurveTo(...at(rm, edge + s * e * 0.6), ...at(rm, edge));
+        g.fill();
+      }
+
+      // A jewel at the tip.
+      g.globalAlpha = 0.6 + 0.4 * lv;
+      g.fillStyle = lead;
+      g.beginPath();
+      g.arc(...at(r1, half), Math.max(0.75, R * 0.035 * (0.4 + lv)), 0, 2 * Math.PI);
       g.fill();
     }
 
-    // Detail near the rim, from the highs. None when still: detail that comes
+    // The rim's detail, from the highs. None when still: detail that comes
     // and goes is motion.
-    const dots = still ? 0 : Math.round(highs * 8);
+    const dots = still ? 0 : Math.round(highs * 6);
     for (let d = 0; d < dots; d++) {
-      const r = reach * (0.78 + (0.22 * d) / 8);
-      const a = (half * (d + 1)) / (dots + 1);
-      g.globalAlpha = 0.6;
+      g.globalAlpha = 0.7;
       g.fillStyle = second;
       g.beginPath();
-      g.arc(r * Math.cos(a), r * Math.sin(a), Math.max(0.5, R * 0.012), 0, 2 * Math.PI);
+      g.arc(...at(reach * 1.06, (half * 2 * (d + 1)) / (dots + 1)), Math.max(0.5, R * 0.018), 0, 2 * Math.PI);
       g.fill();
     }
     g.globalAlpha = 1;
