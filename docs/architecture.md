@@ -26,7 +26,7 @@ Everything below follows from that.
 | UI | **Svelte 5 + Vite** | Same reason. No reason to learn a second frontend stack. |
 | DB | **SQLite** through `rusqlite` (bundled) | Library metadata, playlists, job queue, settings. WAL mode for crash safety. |
 | Fetch | **yt-dlp** as Tauri sidecar (`externalBin`), with **deno** beside it for YouTube's JS challenges (D46) | 1800+ site extractors, maintained by people who fight YouTube full-time. Do not write your own. |
-| Transcode | **ffmpeg** as sidecar | Derive the MP3 from the downloaded file and attach its cover art. |
+| Transcode | **ffmpeg** as sidecar: yt-dlp's own build, pinned by checksum, or a person's own copy (D133) | Derive the MP3 from the downloaded file and attach its cover art. |
 | Playback | **HTML5 `<audio>` / `<video>`** via `convertFileSrc()` | See below — this is a real decision, not a default. |
 
 ### Why HTML5 audio instead of Rust-side (rodio/symphonia)
@@ -315,7 +315,7 @@ For each selected item:
 
 ```bash
 yt-dlp \
-  --ffmpeg-location <bundled ffmpeg> \
+  --ffmpeg-location <ffmpeg in use: the bundled one, or the person's own (D133)> \
   -f "bv*+ba/b" \                      # "bestaudio/best" when only audio is wanted
   --embed-metadata \
   --write-thumbnail --convert-thumbnails jpg \

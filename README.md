@@ -44,7 +44,7 @@ storm is the wrong failure. Bump them on purpose, test, then commit the new pin.
 |---|---|---|
 | `yt-dlp` | The only extractor, ever | D2, D47 |
 | `deno` | JS runtime for yt-dlp's EJS challenges | D46 |
-| `ffmpeg` | MP3 extraction and cover art | D3, D48 |
+| `ffmpeg` | MP3 extraction and cover art. yt-dlp's own build, pinned by checksum; a person can point the app at their own | D3, D133 |
 
 ### Getting a build without the toolchain
 
