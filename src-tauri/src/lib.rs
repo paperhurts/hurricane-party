@@ -595,6 +595,93 @@ fn set_cookies_file(app: AppHandle, path: String) -> Result<String, String> {
     Ok(p.to_string())
 }
 
+/// The ffmpeg a person picked instead of the one that ships (D133): its path,
+/// "" for the bundled one, and whether it is still there. A path that has gone
+/// is kept, so the library can say so, and the bundled one runs meanwhile.
+#[derive(serde::Serialize)]
+struct OwnFfmpeg {
+    path: String,
+    present: bool,
+}
+
+#[tauri::command]
+fn get_ffmpeg(app: AppHandle) -> OwnFfmpeg {
+    let path = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::get_setting(&conn, pipeline::FFMPEG_SETTING).unwrap_or_default()
+    };
+    let present = pipeline::own_ffmpeg(&app).is_some();
+    OwnFfmpeg { path, present }
+}
+
+/// Use an ffmpeg of a person's own, or the bundled one again with "".
+///
+/// It is asked what it is before it is kept (`-version`, `-encoders`), so a
+/// program that is not ffmpeg, or an ffmpeg that cannot make an MP3, is
+/// refused at the button with the reason rather than three minutes into a
+/// download. The version line comes back for the library to show.
+#[tauri::command]
+async fn set_ffmpeg(app: AppHandle, path: String) -> Result<String, String> {
+    use tauri_plugin_shell::ShellExt;
+    let p = path.trim().to_string();
+    let mut said = String::new();
+    if !p.is_empty() {
+        let pb = std::path::PathBuf::from(&p);
+        if !pb.is_absolute() {
+            return Err("that path is not absolute".into());
+        }
+        if !pb.is_file() {
+            return Err("there is no file there".into());
+        }
+        // Asking a program what it is means running it, so only a file that
+        // says it is ffmpeg gets run. Picking Notepad opened Notepad, and the
+        // check then waited for someone to close it (#18).
+        let named = pb
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        pipeline::named_like_ffmpeg(&named)?;
+        let ask = |flag: &'static str| {
+            let cmd = app.shell().command(&pb).args(["-hide_banner", flag]);
+            async move {
+                use tauri_plugin_shell::process::CommandEvent;
+                let (mut rx, child) = cmd.spawn().map_err(|e| format!("it would not run: {e}"))?;
+                let mut out = Vec::new();
+                // An ffmpeg answers these in well under a second. One that
+                // has not answered in ten is not one to keep, and is stopped.
+                let read = async {
+                    while let Some(ev) = rx.recv().await {
+                        match ev {
+                            CommandEvent::Stdout(b) => {
+                                out.extend_from_slice(&b);
+                                out.push(b'\n');
+                            }
+                            CommandEvent::Terminated(_) => break,
+                            _ => {}
+                        }
+                    }
+                };
+                if tokio::time::timeout(std::time::Duration::from_secs(10), read)
+                    .await
+                    .is_err()
+                {
+                    let _ = child.kill();
+                    return Err("it did not answer within ten seconds".to_string());
+                }
+                Ok(String::from_utf8_lossy(&out).into_owned())
+            }
+        };
+        let version = ask("-version").await?;
+        let encoders = ask("-encoders").await?;
+        said = pipeline::check_ffmpeg(&version, &encoders)?;
+    }
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::set_setting(&conn, pipeline::FFMPEG_SETTING, &p).map_err(|e| e.to_string())?;
+    Ok(said)
+}
+
 /// Every browser profile a cookie export can read (D113, D115). Built in
 /// Rust, so the picker cannot offer a store the export would then refuse —
 /// and so a second Chrome profile, which is where a YouTube sign-in often
@@ -1341,6 +1428,8 @@ pub fn run() {
             cookie_browsers,
             export_cookies_from_browser,
             get_cookies_file,
+            get_ffmpeg,
+            set_ffmpeg,
             get_cookies_from,
             set_cookies_file,
             show_library,

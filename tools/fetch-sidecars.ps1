@@ -1,16 +1,21 @@
 <#
     fetch-sidecars.ps1 — populate src-tauri/binaries/ for Tauri's externalBin.
 
-    Three sidecars (D46, D47, D48):
+    Three sidecars (D46, D47, D133):
       yt-dlp  — the OFFICIAL standalone exe, not the pip package. The pip form is a
                 Python zipapp and cannot be bundled. The official exe also ships the
                 EJS challenge code, so --remote-components is unnecessary (D47).
       deno    — the JS runtime yt-dlp enables by default, required for its EJS
                 challenge system. This replaced the PO-token provider (D25 -> D46).
-      ffmpeg  — extracts MP3 from the downloaded video (D3).
+      ffmpeg  — extracts MP3 from the downloaded video (D3), and does yt-dlp's
+                merging, tagging and thumbnail conversion. yt-dlp's own build
+                (github.com/yt-dlp/FFmpeg-Builds), win64 GPL, pinned to one dated
+                autobuild and checked against its SHA-256 (D133).
 
     Versions are PINNED (O11). A surprise yt-dlp bump the day before a storm is the
-    wrong failure. Bump deliberately, test, then commit the new pin.
+    wrong failure. Bump deliberately, test, then commit the new pin, with
+    licenses/THIRD-PARTY-NOTICES.md and the matching licence text updated in the
+    same change: the release zip carries that folder (D133).
 
     Tauri resolves externalBin by appending the target triple, so each file is
     named <tool>-x86_64-pc-windows-msvc.exe. binaries/ is gitignored.
@@ -19,9 +24,13 @@
 param(
     [string]$YtDlpVersion = "2026.08.19",
     [string]$DenoVersion  = "2.6.4",
-    # ffmpeg is the deferred one (D48). "essentials" is the dev stand-in; the
-    # shipping build gets decided at v0.6 when packaging actually matters.
-    [string]$FfmpegUrl    = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+    # yt-dlp's ffmpeg build (D133): a dated autobuild, never "latest", which
+    # moves daily. The zip is checked against the SHA-256 yt-dlp publishes for
+    # it, and ffmpeg.exe against the one inside it, so a machine still holding
+    # an older ffmpeg fetches this one without -Force.
+    [string]$FfmpegUrl    = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-09-11-17-43/ffmpeg-N-126504-g1b8a2b690b-win64-gpl.zip",
+    [string]$FfmpegZipSha = "2d2b30a1e31bbc3dde699d95e699f6a32178febffdf2bf552e5d6384fed97859",
+    [string]$FfmpegExeSha = "c130d1abd89a5c832a51b2415fdccc4b8dafdb8055b8b7977c0ecd94148b7afc",
     [switch]$Force
 )
 
@@ -33,11 +42,20 @@ $tmp     = Join-Path $env:TEMP "hp-sidecars"
 
 New-Item -ItemType Directory -Force -Path $binDir, $tmp | Out-Null
 
-function Need($name) {
+function Sha256($path) {
+    return (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLowerInvariant()
+}
+
+# The sidecar's destination when it needs fetching, or $null when it is there.
+# With -Sha, "there" means that exact file: anything else is fetched again.
+function Need($name, $Sha = "") {
     $dest = Join-Path $binDir "$name-$triple.exe"
     if ((Test-Path $dest) -and -not $Force) {
-        Write-Host "  $name already present, skipping (use -Force to refetch)" -ForegroundColor DarkGray
-        return $null
+        if (-not $Sha -or (Sha256 $dest) -eq $Sha) {
+            Write-Host "  $name already present, skipping (use -Force to refetch)" -ForegroundColor DarkGray
+            return $null
+        }
+        Write-Host "  $name present but not the pinned build, fetching it" -ForegroundColor Yellow
     }
     return $dest
 }
@@ -64,15 +82,40 @@ if ($dest) {
 }
 
 # --- ffmpeg: zipped, nested directory ---------------------------------------
-$dest = Need "ffmpeg"
+$dest = Need "ffmpeg" $FfmpegExeSha
 if ($dest) {
     $zip = Join-Path $tmp "ffmpeg.zip"
-    Write-Host "fetching ffmpeg (D48: dev stand-in, shipping build TBD at v0.6)" -ForegroundColor Cyan
+    Write-Host "fetching ffmpeg (D133: yt-dlp's build, ~185 MB)" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $FfmpegUrl -OutFile $zip -UseBasicParsing
+    # A download that is not the pinned build is refused, not shipped.
+    $got = Sha256 $zip
+    if ($got -ne $FfmpegZipSha) {
+        throw "ffmpeg: the download's SHA-256 is $got, not the pinned $FfmpegZipSha"
+    }
     $ex = Join-Path $tmp "ffmpeg"
     Remove-Item -Recurse -Force $ex -ErrorAction SilentlyContinue
     Expand-Archive -Path $zip -DestinationPath $ex -Force
     Copy-Item (Get-ChildItem -Path $ex -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1).FullName $dest -Force
+    if ((Sha256 $dest) -ne $FfmpegExeSha) {
+        throw "ffmpeg: ffmpeg.exe in the pinned zip is not the pinned exe"
+    }
+}
+
+# A dev build runs its sidecars from target\debug (and a local release build
+# from target\release), copied there by Tauri's build script, which does not
+# run again just because a file in binaries\ changed. Found when the dev app
+# kept running the old ffmpeg after this script fetched the new one (#18):
+# refresh any copy that is already there, so the next launch runs the pin.
+# Not $profile: that is PowerShell's own variable.
+foreach ($flavour in "debug", "release") {
+    foreach ($name in "yt-dlp", "deno", "ffmpeg") {
+        $built = Join-Path $root "src-tauri\target\$flavour\$name.exe"
+        $pinned = Join-Path $binDir "$name-$triple.exe"
+        if ((Test-Path $built) -and (Test-Path $pinned) -and ((Sha256 $built) -ne (Sha256 $pinned))) {
+            Copy-Item $pinned $built -Force
+            Write-Host "  refreshed target\$flavour\$name.exe" -ForegroundColor Yellow
+        }
+    }
 }
 
 Write-Host "`nsrc-tauri/binaries/:" -ForegroundColor Green
