@@ -405,7 +405,7 @@ Ship **your own** default skin — don't bundle third-party Winamp skins, those 
 **Zero-network guarantee.** A tested property, not an aspiration — **D29** pins the mechanism:
 
 - The **webview CSP forbids remote origins outright.** `connect-src`, `img-src`, `font-src`, and `script-src` allow only `self` and Tauri's `asset:` scheme. No CDN font, no remote thumbnail, no analytics can be added later by accident — it fails at load, loudly, in development
-- **All egress lives in Rust**, behind a single allowlisted command for the Cone radar fetch (D19). There is exactly one function in the codebase that opens a socket to the internet, and it's greppable
+- **All egress lives in Rust**, behind a single allowlisted command for the Cone radar fetch (D19). *As built* (#85, D135), that is `egress::get` in `src-tauri/src/egress.rs`, to `mapservices.weather.noaa.gov` and `api.weather.gov` over https only. There is exactly one function in the codebase that opens a socket to the internet, and it's greppable
 - **A test runs the app with the interface down** and asserts no connection is attempted. *That test is not written yet*; the CSP (`src-tauri/tauri.conf.json`) is what enforces the property today
 
 Anything that needs the network degrades silently, not spins. The CSP is doing the real work here: it turns "we intend not to make requests" into "requests cannot be made," which is the difference between a guarantee and a habit.
