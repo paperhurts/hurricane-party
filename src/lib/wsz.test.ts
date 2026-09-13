@@ -196,6 +196,13 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     // item's glyph.
     expect(by("addButton")).toMatchObject({ rect: [14, 86, 22, 18], anchor: "bottom", action: "add" });
     expect(by("removeButton")).toMatchObject({ rect: [43, 86, 22, 18], anchor: "bottom", action: "remove" });
+    // Sel loads the list selected in the library (D125), and has no glyph of
+    // its own to show when pressed: its menu's three say something else.
+    const sel = by("selectButton")!;
+    expect(sel).toMatchObject({ rect: [72, 86, 22, 18], anchor: "bottom", action: "loadSelected" });
+    if (sel.type !== "button") throw new Error("selectButton is not a button");
+    expect(sel.sprite).toEqual({ sheet: "pledit", rect: [72, 80, 22, 18], tint: "text" });
+    expect(sel.active).toBeUndefined();
     expect(by("libraryButton")).toMatchObject({ anchor: "bottom-right", action: "library" });
     const add = by("addButton")!;
     if (add.type !== "button") throw new Error("addButton is not a button");
