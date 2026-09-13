@@ -23,14 +23,14 @@ If no decision covers a choice, make the obvious call, write it down (a row in `
 | Path | Read it when |
 |---|---|
 | `docs/decisions.md` | **Always.** Short. Start here |
-| `docs/v0.4-brief.md` | Before starting v0.4. What ports from the spike, which findings are now requirements, and why stage 6 runs first |
-| `docs/spike-v0.0.md` | Before starting the window engine spike. Stage order, pass/fail criteria, what the findings doc must answer |
+| `docs/v0.4-brief.md` | History, v0.4 is built. What ported from the spike, which findings became requirements, and why stage 6 ran first |
+| `docs/spike-v0.0.md` | History, the spike returned go (D45). Its stage order and pass/fail criteria, when a window-engine question goes back to first principles |
 | `docs/architecture.md` | Data model, import pipeline, yt-dlp/ffmpeg invocation, EQ audio graph |
 | `docs/windows.md` | Window bonding, snapping, splitter resize, skin formats. Read before touching anything window-related |
-| `docs/skin-manifest.md` | The `hp-skin/1` native format. Read before touching the skin renderer or either importer — both `.wsz` and `.wal` map *into* it |
+| `docs/skin-manifest.md` | The `hp-skin/1` native format. Read before touching the skin renderer, the `.wsz` importer or the skin maker — all of them write *into* it |
 | `docs/control-api.md` | The public IPC protocol and viz stream. Read before changing anything in `crates/hp-control/` |
 | `docs/theme.md` | Eyewall and Cone themes, palette rationale, glow rendering |
-| `docs/purricane.md` | Kaleidoscope theme + desktop kittens. v0.5 and v0.7. Not needed before then |
+| `docs/purricane.md` | Kaleidoscope theme + desktop kittens. Read before building Purricane or the kaleidoscope (v0.5) or the kittens (v0.7) |
 | `design/tokens.json` | Machine-readable palette. **Import this; never hardcode a hex value** |
 | `.claude/skills/*/SKILL.md` | `/land` runs the gates and opens the PR; `/decide` appends a decision row. Those are the only workflow commands |
 | `skins/eyewall/` | The skin that ships, and the template a person copies to make their own (D90). `tools\chrome-sheet.ps1` redraws its sheets from the manifest |
@@ -56,7 +56,7 @@ These have burned into the design. Don't quietly relax them.
 
 Work one at a time. Don't build ahead.
 
-**v0.0 through v0.4b are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). v0.4b: chrome drawn from tokens in CSS (D72), Main owns playback and shows the spectrum on the radar ramp (D74), the 10-band EQ (D75), the playlist window, seams that glow and discharge (#9), 2x chrome (D76), the playlist's corner grip, the viz stream on its own pipe, the windowshade as a mini-player, Main as the one transport (D81), the download page and tagged Releases (D82), removal from the library (D83, D84), the captain's frames and the recipe that made them (`docs/companion-art.md`, `design/sprites/captain/`), minimise as a group (D86), the library to the tray (D87), and three bond-model rules that hand tests forced: a click is not a drag (D85), a title bar stays within reach (D88), a window never bonds over another's body (D89). The sprite renderer (#3) drew the shell chrome of all three windows from `skins/eyewall/` through `hp-skin/1` (D90, D92) and put the shade button on every title bar (#8); then Main's interior and the close button (D93, D94), the EQ's (D98), and the playlist's, with shuffle and repeat in its bar (D97, D99); and the glow became a person's to turn off (D100). That is the whole of v0.4b, tracked as its milestone on GitHub.
+**v0.0 through v0.4b are built.** The window-engine spike returned **go** on the bond model (D45); its `bond.rs` was ported byte-identical, the spike repo has been archived, and `bond.rs` now evolves under its own tests like any other module (D66). v0.4b: chrome drawn from tokens in CSS (D72), Main owns playback and shows the spectrum on the radar ramp (D74), the 10-band EQ (D75), the playlist window, seams that glow and discharge (#9), 2x chrome (D76), the playlist's corner grip, the viz stream on its own pipe, the windowshade as a mini-player, Main as the one transport (D81), the download page and tagged Releases (D82), removal from the library (D83, D84), the captain's frames and the recipe that made them (`docs/companion-art.md`, `design/sprites/captain/`), minimise as a group (D86), the library to the tray (D87), and three bond-model rules that hand tests forced: a click is not a drag (D85), a title bar stays within reach (D88), a window never bonds over another's body (D89). The sprite renderer (#3) drew the shell chrome of all three windows from `skins/eyewall/` through `hp-skin/1` (D90, D92) and put the shade button on every title bar (#8); then Main's interior and the close button (D93, D94), the EQ's (D98), and the playlist's, with shuffle and repeat in its bar (D97, D99); and the glow became a person's to turn off (D100). That is the whole of v0.4b, tracked as its milestone on GitHub. **v0.5 is in progress**: the `.wsz` loader, supported to a degree (D110), and the headline, *Make a skin…* from a picture (D122); what is left is in the v0.5 row of `decisions.md`.
 
 ---
 

@@ -1,6 +1,6 @@
 # v0.0 — Window Engine Spike
 
-**Status:** brief. The spike itself lives in a separate throwaway repo (`hurricane-party-spike`), not here.
+**Status:** done, and **go** (D45); stage 6, the cross-scale test, passed once a second display was attached (O14). Kept for its stage order and criteria. The spike lived in a separate throwaway repo (`hurricane-party-spike`), now archived; `bond.rs` was ported from it byte-identical and evolves here (D66).
 
 **Timebox: one weekend.** If it's still fighting you on day three, that *is* the finding. Write it up and stop.
 

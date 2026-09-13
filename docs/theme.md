@@ -56,13 +56,15 @@ Chrome stays cyan/magenta. Radar ramp is visualizer-only. Both are instrument-di
 
 Charter and Crimson Pro are lovely and wrong here — serifs at 11px on dark with a glow halo turn to mush. Save them for doc-md.
 
+*As built:* each theme names its faces in `design/tokens.json` (`type.chrome`, `type.ui`) and the app asks for them by name. **No font file ships**: a CDN font is ruled out (D29) and none is bundled. A machine with Iosevka installed gets it, and every other one gets the stack's fallback, Cascadia Mono then Consolas (`src/app.css`).
+
 ---
 
 ## How the glow is actually rendered
 
 This matters for performance, and the answer differs by window type.
 
-**Classic chrome (main, EQ, playlist): the sprites carry the shape; the renderer paints the glow from `--accent`** (D73). That is what lets a committed PNG sheet follow the theme instead of freezing one palette into its pixels. A skin whose halo is already in the art says `"glow": "baked"` in its manifest and gets no second one — every imported `.wsz` is that, so native and imported skins still take one path. The one hard rule is scoped to the 60 Hz path: **no CSS filter on the visualizer surface or any ancestor of it**, whatever the skin declares, because a filter on a parent runs the child through it every frame. The analyser's own glow stays pre-rendered in its ramp art for the same reason.
+**Classic chrome (main, EQ, playlist): the sprites carry the shape; the renderer paints the glow from `--accent`** (D73). That is what lets a committed PNG sheet follow the theme instead of freezing one palette into its pixels. The colours are the theme's for a mask skin like Eyewall, and the skin's own for one that brings them — an imported `.wsz`, whose pixels cannot be tinted (D101), or a skin made from a picture, which says `"colors": "own"` (D122). A skin whose halo is already in the art says `"glow": "baked"` in its manifest and gets no second one — every imported `.wsz` is that, so native and imported skins still take one path. The one hard rule is scoped to the 60 Hz path: **no CSS filter on the visualizer surface or any ancestor of it**, whatever the skin declares, because a filter on a parent runs the child through it every frame. The analyser's own glow stays pre-rendered in its ramp art for the same reason.
 
 **Modern windows (library, settings, import): compute it in CSS**, but sparingly:
 
@@ -102,17 +104,19 @@ Working name **Purricane.** It has its own document because it isn't a palette s
 
 The short version of what this section originally got wrong: **kaleidoscope is a visualizer directive, not a color scheme.** In Eyewall the analyser is spectrum bars on a radar ramp; in Purricane the analyser *is* a kaleidoscope — radial mirrored segments driven by the same FFT data.
 
-Which surfaces a real architectural requirement: **the visualizer is a swappable themed component, not a fixed widget.** The native skin manifest has to support that. Eyewall draws bars, Purricane draws a mandala, and some future theme draws an oscilloscope.
+Which surfaces a real architectural requirement: **the visualizer is a swappable themed component, not a fixed widget.** The native skin manifest has to support that (`visualizer.component`, D20). Eyewall draws bars, Purricane draws a mandala, and the oscilloscope arrived first, at v0.4b: Main's display cycles bars, scope and off.
 
 It also resolves cleanly against the only-light-source thesis rather than violating it: Purricane is still emissive, just high-key. A lit aquarium, not a white webpage.
 
-Ships in two pieces — the kaleidoscope visualizer and palette at **v0.5** with the skin system, the kittens at **v0.7** as an external viz-API client. The theme is complete without the cats; the cats are the encore.
+Ships in two pieces — the kaleidoscope visualizer and palette at **v0.5** with the skin system, the kittens at **v0.7** as an external viz-API client. The theme is complete without the cats; the cats are the encore. *Status:* Purricane's palette is in `design/tokens.json` in the same six roles as Eyewall's (D108, #28), and nothing can wear it yet; the kaleidoscope is not built.
 
 ---
 
 ## Second shipped theme: "Cone"
 
 Live NEXRAD reflectivity as the window backdrop. Named for the cone of uncertainty, which is the right emotional register: you're watching a thing you can't control and don't fully know.
+
+*Status:* **v0.6** (D27, #85), not built. `design/tokens.json` has the theme's entry, extending Eyewall's palette.
 
 This is the best idea in the project and it's yours. But it has a conflict to resolve first.
 

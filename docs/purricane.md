@@ -232,7 +232,7 @@ Split it:
 
 | | Ships in | Where it lives |
 |---|---|---|
-| Kaleidoscope visualizer + Purricane palette | **v0.5**, with the skin system | In the player |
+| Kaleidoscope visualizer + Purricane palette | **v0.5**, with the skin system. *The palette is in `design/tokens.json` in the six roles (D108, #28); nothing can wear it yet, and the kaleidoscope is not built* | In the player |
 | Kittens | **v0.7**, after protocol freeze | External process |
 
 The theme is usable and complete without the cats. The cats are the encore.

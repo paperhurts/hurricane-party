@@ -1,6 +1,6 @@
 # hurricane-party — Native Skin Manifest (`hp-skin/1`)
 
-**Locked as D36.** This is the format the default Eyewall skin ships in, and it is the target that the `.wsz` and `.wal` importers both map *into*. It is therefore load-bearing for v0.4 (skin renderer) and v0.5 (importers) simultaneously.
+**Locked as D36.** This is the format the default Eyewall skin ships in, and it is the target that the `.wsz` and `.wal` importers both map *into*, and what the skin maker writes. It carried the v0.4b renderer and the v0.5 `.wsz` importer and skin maker; the `.wal` importer is not scheduled (D110).
 
 The governing constraint, stated once and applied everywhere below: **art and layout come in, code does not** (D8, D17, D23). There is no expression language here, no conditionals, no scripting hook. If a skin wants behavior the app doesn't already have, the answer is no.
 
@@ -62,7 +62,7 @@ So this schema is deliberately closer to Winamp's model than to the web's — ab
 
   "seam": { … },
 
-  "regions": { … }             // optional, best-effort, v0.5+
+  "regions": { … }             // reserved: best-effort non-rectangular windows. Not read yet
 }
 ```
 
@@ -94,9 +94,9 @@ Required by **D20**. The manifest names a component the app implements; it never
 
 | `component` | Ships in | Notes |
 |---|---|---|
-| `spectrum-bars` | v0.4 | Eyewall. Bars on the `viscolor` ramp |
-| `kaleidoscope` | v0.5 | Purricane. Honors the accessibility clamps in `purricane.md` — those are enforced by the app, not configurable by the skin |
-| `oscilloscope` | — | Reserved |
+| `spectrum-bars` | v0.4b | Eyewall. Bars on the `viscolor` ramp |
+| `oscilloscope` | v0.4b | The waveform. Main's display cycles between the two (and off) whatever the skin names |
+| `kaleidoscope` | v0.5, **not built yet** | Purricane. Honors the accessibility clamps in `purricane.md` — those are enforced by the app, not configurable by the skin. Until it exists, a skin that names it gets `spectrum-bars` and the warning below |
 
 An unknown `component` falls back to `spectrum-bars` with a warning. This is the one place a soft failure is right: a skin that names a visualizer from a future version should still load and look mostly correct.
 
@@ -240,7 +240,7 @@ A made skin also records **where its picture is**, as `"picture": { "sheet", "to
 
 ### Glow is declared, not assumed
 
-Two top-level fields say what kind of art this is (D73). **`glow`** is `"baked"` — the halo is in the pixels and the renderer adds none — or `"renderer"`, where the renderer paints a halo from the palette's `accent` behind glow-eligible chrome and the user's glow toggle applies: a `glow` checkbox in the library's header until there is a settings window, saved in `settings` and heard by all three classic windows at once (D100). Off, the renderer adds no halo anywhere in a classic window, a text's `glow` included, and the windows drop the halos they draw themselves; a `baked` skin is untouched either way, since its halo is in its pixels. **`art`** is `"final"` — full-colour pixels, drawn as they are — or `"mask"`, alpha masks the renderer tints from the palette, so a theme change reaches the whole chrome rather than only its halo. Both importers produce `art: final, glow: baked`, which is what their source art is, so an imported skin never double-glows and native and imported skins take one rendering path.
+Two top-level fields say what kind of art this is (D73). **`glow`** is `"baked"` — the halo is in the pixels and the renderer adds none — or `"renderer"`, where the renderer paints a halo from the palette's `accent` behind glow-eligible chrome and the user's glow toggle applies: a `glow` checkbox in the library's header until there is a settings window, saved in `settings` and heard by all three classic windows at once (D100). Off, the renderer adds no halo anywhere in a classic window, a text's `glow` included, and the windows drop the halos they draw themselves; a `baked` skin is untouched either way, since its halo is in its pixels. **`art`** is `"final"` — full-colour pixels, drawn as they are — or `"mask"`, alpha masks the renderer tints from the palette, so a theme change reaches the whole chrome rather than only its halo. The `.wsz` importer produces `art: final, glow: baked`, which is what its source art is (a `.wal` importer would too), so an imported skin never double-glows and native and imported skins take one rendering path.
 
 What no manifest can change: **no CSS filter on the visualizer surface or any ancestor of it.** That is the 60 Hz path, a filter on a parent runs the child through it every frame, and the analyser's own glow is pre-rendered into its ramp art for that reason. The renderer scopes the toggle per chrome element and does not consult the skin about the exemption — the same status as `prefers-reduced-motion` on the seam below. The modern decorated windows compute glow in CSS and aren't described by this manifest at all.
 
@@ -280,12 +280,12 @@ Both importers are mappings *into* the above. That is the entire justification f
 | `TITLEBAR.BMP` | `titlebar` sprite + `inactive` variant; the shade-mode strips, and the controls painted into them (D111) |
 | `NUMBERS.BMP` / `NUMS_EX.BMP` | `fonts.time` |
 | `TEXT.BMP` | `fonts.chrome` |
-| `VOLUME.BMP` / `BALANCE.BMP` | The volume and balance `slider` elements |
+| `VOLUME.BMP` | The volume `slider` (`BALANCE.BMP` is not read: this app has no balance, D110) |
 | `POSBAR.BMP` | `seekbar` track and thumb |
 | `PLEDIT.BMP` + `PLEDIT.TXT` | `windows.playlist` frame, its bar's buttons, and the row colours |
 | `EQMAIN.BMP` | `windows.equalizer` |
 | `VISCOLOR.TXT` | `viscolor` (24 entries — the format's own count) |
-| `REGION.TXT` | `regions`, best-effort |
+| `REGION.TXT` | Not read yet. A classic skin wears as rectangles; `regions` is reserved for it |
 
 Sprite coordinates in `.wsz` are **conventional, not declared** — the offsets live in the importer as a constant table, which is exactly why the format is bounded and a weekend-to-a-fortnight problem rather than an open-ended one. That table is `src/lib/wsz.ts`, transcribed from Webamp with its notice in `THIRD-PARTY.md` (D102), beside the classic window positions. `wszManifest()` turns a zip's file list and its two text files into a manifest this document's own validator then accepts or refuses, so an import that would half-load is refused before anything is written.
 
@@ -315,7 +315,7 @@ Packs are untrusted input from the internet even without code in them. Same rule
 - **Cap sheet dimensions and total decoded size.** A 16k × 16k PNG is a denial of service dressed as a skin. The `.wsz` importer's caps are 200 entries, 8 MB a file and 32 MB unpacked (D105), and it writes only `.bmp` and `.txt`, by basename — which is also what closes zip slip
 - **Every `sprite.rect` must lie inside its sheet.** Out-of-bounds is a hard failure, not a clamp
 - **Unknown keys are ignored, not errors**, so `hp-skin/2` degrades rather than dying
-- **Missing required elements are a hard failure.** Missing *optional* ones fall back to the default skin's art for that element, so a skin that forgets the balance slider still loads
+- **Missing required elements are a hard failure.** Missing *optional* ones fall back to the default skin's art for that element, so a skin that forgets the balance slider still loads. *As built*, nothing is borrowed from Eyewall: an optional element a skin leaves out is simply not drawn, which is what lets a `.wsz` with a short sheet wear (D106)
 
 The asymmetry is deliberate: structural errors fail loudly at load time, missing art falls back quietly at render time. The first is a broken file; the second is an incomplete one, and incomplete skins are the norm.
 
@@ -325,5 +325,5 @@ The asymmetry is deliberate: structural errors fail loudly at load time, missing
 
 ## Open
 
-- ~~**The conventional `.wsz` sprite offset table** hasn't been transcribed yet~~ **Done** (D102): `src/lib/wsz.ts`. Mapped so far: Main in full, the equalizer's switch, preset button, curve box and eleven sliders, and the playlist's frame, rows and the boxes the window fills. Still to come, one PR each: the playlist's bottom bar and its `bottom-right` anchor, **bitmap fonts drawn as glyphs** (a `.wsz`'s clock and title are art, and until then they are the theme's face at the glyph height), and the zip, the import button and the refusal in front of the person who chose the file (#107)
+- ~~**The conventional `.wsz` sprite offset table** hasn't been transcribed yet~~ **Done** (D102): `src/lib/wsz.ts`. Main in full, the equalizer, and the playlist's frame, rows, bar and `bottom-right` anchor (D103); bitmap fonts drawn as glyphs (D104); the zip, the import button and the refusal in front of the person who chose the file (D105, #107); short sheets (D106), rebuilt manifests (D107) and the shade strip's painted controls (D111). Merged by 2026-09-12
 - ~~**Fixed rectangles for the Eyewall default skin** still have to be derived from the Pass 1 prototypes, which are flexbox. That's a v0.4 task and the first real test of whether this schema is expressive enough~~ **Done for the shell chrome in #3's first PR** (D90, D92): `skins/eyewall/` is derived from the CSS chrome that shipped, and it is the template a person copies. The interiors follow, one window per PR
