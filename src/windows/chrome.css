@@ -296,6 +296,18 @@ body {
 .chrome[data-active="false"] .sp-text {
   color: var(--tc-i, var(--tc));
 }
+/* Cone's readout in Main's title bar (#85): a loop past its staleness line,
+ * or one the app could not refresh, says so in the warning colour, focused or
+ * not. Cached weather must never look current (theme.md). */
+.chrome[data-radar-warn="yes"] .sp-text[data-bind="windowTitle"] {
+  color: var(--warn);
+}
+/* Under Cone the playlist's rows sit on a well the radar shows through: it
+ * is the biggest box in the stack, and opaque it hid nearly all of the map.
+ * `!important` because the manifest's opacity is on the element's own style. */
+.chrome[data-radar] .sp-image[data-name="listWell"] {
+  opacity: 0.8 !important;
+}
 .sp-text .shade button,
 .sp-text .shade .sb {
   pointer-events: auto;
@@ -603,6 +615,10 @@ body {
 }
 .shade .stag.lit {
   color: var(--accent);
+}
+/* Cone's loop age, once it must not be read as current (#85). */
+.shade .stag.radarwarn {
+  color: var(--warn);
 }
 
 /* The one line of text that takes what is left. */
