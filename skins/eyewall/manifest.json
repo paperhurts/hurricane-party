@@ -291,7 +291,7 @@
 
         "eqPre": { "type": "slider", "rect": [69, 17, 17, 69], "orientation": "vertical",
           "bind": "eqPre", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -302,7 +302,7 @@
 
         "eqBand1": { "type": "slider", "rect": [87, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand1", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -313,7 +313,7 @@
 
         "eqBand2": { "type": "slider", "rect": [106, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand2", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -324,7 +324,7 @@
 
         "eqBand3": { "type": "slider", "rect": [124, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand3", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -335,7 +335,7 @@
 
         "eqBand4": { "type": "slider", "rect": [143, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand4", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -346,7 +346,7 @@
 
         "eqBand5": { "type": "slider", "rect": [161, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand5", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -357,7 +357,7 @@
 
         "eqBand6": { "type": "slider", "rect": [180, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand6", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -368,7 +368,7 @@
 
         "eqBand7": { "type": "slider", "rect": [198, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand7", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -379,7 +379,7 @@
 
         "eqBand8": { "type": "slider", "rect": [217, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand8", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -390,7 +390,7 @@
 
         "eqBand9": { "type": "slider", "rect": [235, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand9", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
@@ -401,7 +401,7 @@
 
         "eqBand10": { "type": "slider", "rect": [254, 17, 17, 69], "orientation": "vertical",
           "bind": "eqBand10", "origin": 0.5,
-          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent" },
+          "track": { "sheet": "chrome", "rect": [60, 126, 17, 69], "tint": "accent", "opacity": 0.22 },
           "fill":  { "sheet": "chrome", "rect": [80, 126, 17, 2], "tint": "accent" },
           "thumb": { "sheet": "chrome", "rect": [80, 130, 17, 11], "tint": "accent" },
           "lit": { "bind": "eqOn", "when": "off", "tint": "text", "opacity": 0.4 },
