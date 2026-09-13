@@ -28,6 +28,14 @@ const MAX_TOTAL: u64 = 32 * 1024 * 1024;
 /// author's own screenshots) is left where it was.
 const KEEP: [&str; 2] = ["bmp", "txt"];
 
+/// What an `hp-skin/1` pack keeps besides its manifest (#146): the PNGs a
+/// painted or made skin draws from, and the BMPs and text files a zipped
+/// import folder carries, which its manifest still names.
+const KEEP_NATIVE: [&str; 3] = ["png", "bmp", "txt"];
+
+/// A native skin is a folder with this in it (`installed`), and so is a pack.
+const MANIFEST: &str = "manifest.json";
+
 #[derive(Debug, thiserror::Error)]
 pub enum SkinError {
     #[error("{0}")]
@@ -67,6 +75,9 @@ pub struct Unpacked {
     pub files: Vec<String>,
     pub pledit: Option<String>,
     pub viscolor: Option<String>,
+    /// An `hp-skin/1` pack's own manifest, as written (#146). None for a
+    /// `.wsz`, whose manifest the webview builds from the art.
+    pub manifest: Option<String>,
 }
 
 /// A folder name from a skin's file name: lower case, and nothing that could
@@ -104,20 +115,56 @@ fn slug_for(root: &Path, stem: &str) -> String {
 /// are whatever the author's code page was. UTF-8 when it parses, otherwise
 /// each byte as its own character, which is right for the ASCII the colour
 /// lines are made of and harmless for the comments around them.
-fn text_of(bytes: Vec<u8>) -> String {
+///
+/// A leading byte-order mark is dropped. Notepad has written one in front of
+/// UTF-8, and a manifest someone edited that way was refused as "not valid
+/// JSON" on the first painted skin imported (#146).
+pub fn text_of(bytes: Vec<u8>) -> String {
+    let bytes = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        Some(rest) => rest.to_vec(),
+        None => bytes,
+    };
     match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => e.into_bytes().iter().map(|&b| b as char).collect(),
     }
 }
 
-/// Unpack one `.wsz` into `skins_dir`, and say what came out.
+/// A pack's manifest names the skin; a manifest that does not parse, or
+/// has no name, leaves the file or folder name to do it.
+fn name_in(manifest: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(manifest)
+        .ok()?
+        .get("name")?
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Unpack one skin zip into `skins_dir`, and say what came out: a `.wsz`, or
+/// a zip of an `hp-skin/1` folder, which has a `manifest.json` in it (#146).
 pub fn unpack(zip_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> {
     let file = fs::File::open(zip_path)?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| SkinError::NotAZip(e.to_string()))?;
     if zip.len() > MAX_ENTRIES {
         return Err(SkinError::TooBig(format!("{} files in the zip", zip.len())));
     }
+    // Only basenames are ever used, so two manifests would be two skins
+    // poured into one folder.
+    let manifests = zip
+        .file_names()
+        .filter(|n| {
+            Path::new(n)
+                .file_name()
+                .is_some_and(|b| b.to_string_lossy().eq_ignore_ascii_case(MANIFEST))
+        })
+        .count();
+    if manifests > 1 {
+        return Err(SkinError::Io(
+            "that zip holds more than one skin; zip one skin's folder at a time".into(),
+        ));
+    }
+    let native = manifests == 1;
 
     let stem = zip_path
         .file_stem()
@@ -135,6 +182,7 @@ pub fn unpack(zip_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> 
         files: Vec::new(),
         pledit: None,
         viscolor: None,
+        manifest: None,
     };
     let mut total: u64 = 0;
     for i in 0..zip.len() {
@@ -158,7 +206,12 @@ pub fn unpack(zip_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> 
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        if !KEEP.contains(&ext.as_str()) {
+        let keep = if native {
+            name == MANIFEST || KEEP_NATIVE.contains(&ext.as_str())
+        } else {
+            KEEP.contains(&ext.as_str())
+        };
+        if !keep {
             continue;
         }
         if entry.size() > MAX_FILE {
@@ -185,17 +238,144 @@ pub fn unpack(zip_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> 
         match name.as_str() {
             "pledit.txt" => out.pledit = Some(text_of(bytes.clone())),
             "viscolor.txt" => out.viscolor = Some(text_of(bytes.clone())),
+            MANIFEST => out.manifest = Some(text_of(bytes.clone())),
+            _ => {}
+        }
+        fs::write(dir.join(&name), &bytes)?;
+        if name != MANIFEST {
+            out.files.push(name);
+        }
+    }
+
+    let art = |f: &String| f.ends_with(".bmp") || (native && f.ends_with(".png"));
+    if !out.files.iter().any(art) || (native && out.manifest.is_none()) {
+        fs::remove_dir_all(&dir).ok();
+        return Err(SkinError::Empty);
+    }
+    if let Some(name) = out.manifest.as_deref().and_then(name_in) {
+        out.name = name;
+    }
+    Ok(out)
+}
+
+/// Copy an `hp-skin/1` folder into `skins_dir` (#146), given its manifest:
+/// the file a person picks, since one dialog then serves a `.wsz`, a zip and
+/// a painted folder. The same caps and the same basename-only rule as a zip,
+/// and the folder's own subfolders are not followed.
+pub fn copy_folder(manifest_path: &Path, skins_dir: &Path) -> Result<Unpacked, SkinError> {
+    let src = manifest_path
+        .parent()
+        .ok_or_else(|| SkinError::Io("that manifest is not in a folder".into()))?;
+    let manifest_size = fs::metadata(manifest_path)?.len();
+    if manifest_size > MAX_FILE {
+        return Err(SkinError::TooBig(format!(
+            "{MANIFEST} is {manifest_size} bytes"
+        )));
+    }
+    let manifest = text_of(fs::read(manifest_path)?);
+
+    let mut art: Vec<(String, PathBuf)> = Vec::new();
+    let mut total = manifest_size;
+    for e in fs::read_dir(src)?.flatten() {
+        let path = e.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        let ext = Path::new(&name)
+            .extension()
+            .map(|x| x.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if name == MANIFEST || !KEEP_NATIVE.contains(&ext.as_str()) {
+            continue;
+        }
+        let size = e.metadata()?.len();
+        if size > MAX_FILE {
+            return Err(SkinError::TooBig(format!("{name} is {size} bytes")));
+        }
+        total += size;
+        if total > MAX_TOTAL {
+            return Err(SkinError::TooBig(format!(
+                "more than {MAX_TOTAL} bytes of art"
+            )));
+        }
+        art.push((name, path));
+        if art.len() > MAX_ENTRIES {
+            return Err(SkinError::TooBig(format!("more than {MAX_ENTRIES} files")));
+        }
+    }
+    if !art
+        .iter()
+        .any(|(n, _)| n.ends_with(".png") || n.ends_with(".bmp"))
+    {
+        return Err(SkinError::Empty);
+    }
+
+    let stem = src
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    fs::create_dir_all(skins_dir)?;
+    let id = slug_for(skins_dir, &stem);
+    let dir = skins_dir.join(&id);
+    fs::create_dir_all(&dir)?;
+    let mut out = Unpacked {
+        id: id.clone(),
+        dir: dir.to_string_lossy().to_string(),
+        name: name_in(&manifest).unwrap_or(if stem.is_empty() { id } else { stem }),
+        files: Vec::new(),
+        pledit: None,
+        viscolor: None,
+        manifest: Some(manifest.clone()),
+    };
+    fs::write(dir.join(MANIFEST), manifest.as_bytes())?;
+    art.sort();
+    for (name, path) in art {
+        let bytes = fs::read(&path)?;
+        match name.as_str() {
+            "pledit.txt" => out.pledit = Some(text_of(bytes.clone())),
+            "viscolor.txt" => out.viscolor = Some(text_of(bytes.clone())),
             _ => {}
         }
         fs::write(dir.join(&name), &bytes)?;
         out.files.push(name);
     }
-
-    if !out.files.iter().any(|f| f.ends_with(".bmp")) {
-        fs::remove_dir_all(&dir).ok();
-        return Err(SkinError::Empty);
-    }
     Ok(out)
+}
+
+// ---- a template to paint (#146) ----
+
+/// The folder `start_template` made this session, and the only place
+/// `write_template_file` writes. The webview names the parent through the
+/// OS dialog; it never names a path to write to.
+#[derive(Default)]
+pub struct TemplateDir(pub std::sync::Mutex<Option<PathBuf>>);
+
+/// What a template is: the manifest, the sheet to paint, the guide that
+/// names every part of it, and a note on how.
+const TEMPLATE_FILES: [&str; 4] = [MANIFEST, "chrome.png", "guide.png", "README.txt"];
+
+/// Make a new, empty folder for a template inside the one a person chose.
+/// A name already there takes a number, so nothing is ever painted over.
+pub fn start_template(parent: &Path, name: &str) -> Result<PathBuf, SkinError> {
+    if !parent.is_dir() {
+        return Err(SkinError::Io("that is not a folder".into()));
+    }
+    let dir = parent.join(slug_for(parent, name));
+    fs::create_dir(&dir)?;
+    Ok(dir)
+}
+
+/// Write one of a template's four files into its folder.
+pub fn write_template_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), SkinError> {
+    if !TEMPLATE_FILES.contains(&name) {
+        return Err(SkinError::Io(format!("{name:?} is not part of a template")));
+    }
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(SkinError::TooBig(format!("{name} is too big")));
+    }
+    fs::write(dir.join(name), bytes)?;
+    Ok(())
 }
 
 /// What a skin folder holds, for rebuilding its manifest (D107).
@@ -433,12 +613,113 @@ mod tests {
         path
     }
 
-    fn temp() -> PathBuf {
-        let p = std::env::temp_dir().join(format!("hp-skins-{}", std::process::id()));
-        let p = p.join(
-            format!("{:?}", std::time::SystemTime::now())
-                .replace(|c: char| !c.is_ascii_alphanumeric(), ""),
+    #[test]
+    fn a_zipped_hp_skin_folder_keeps_its_manifest_and_its_pngs() {
+        let t = temp();
+        let skins = t.join("skins");
+        let manifest = br#"{ "format": "hp-skin/1", "name": "Painted Storm" }"#;
+        let zip = write_zip(
+            &t,
+            "my-skin.zip",
+            &[
+                ("my-skin/manifest.json", manifest),
+                ("my-skin/chrome.png", b"png bytes"),
+                ("my-skin/guide.png", b"png bytes"),
+                ("my-skin/README.txt", b"paint it"),
+                ("my-skin/tool.exe", b"MZ"),
+            ],
         );
+        let out = unpack(&zip, &skins).unwrap();
+        assert_eq!(out.name, "Painted Storm");
+        assert_eq!(
+            out.manifest.as_deref(),
+            Some(std::str::from_utf8(manifest).unwrap())
+        );
+        assert_eq!(out.files, ["chrome.png", "guide.png", "readme.txt"]);
+        let dir = skins.join(&out.id);
+        assert!(dir.join("manifest.json").is_file());
+        assert!(!dir.join("tool.exe").exists());
+        fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_part_of_the_text() {
+        assert_eq!(
+            text_of(b"\xEF\xBB\xBF{ \"name\": \"x\" }".to_vec()),
+            "{ \"name\": \"x\" }"
+        );
+        assert_eq!(text_of(b"plain".to_vec()), "plain");
+    }
+
+    #[test]
+    fn a_zip_with_two_skins_in_it_is_refused() {
+        let t = temp();
+        let zip = write_zip(
+            &t,
+            "two.zip",
+            &[
+                ("a/manifest.json", b"{}"),
+                ("a/chrome.png", b"x"),
+                ("b/manifest.json", b"{}"),
+            ],
+        );
+        assert!(unpack(&zip, &t.join("skins")).is_err());
+        fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn a_painted_folder_is_copied_by_its_manifest_and_nothing_else_comes_along() {
+        let t = temp();
+        let src = t.join("Painted");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("manifest.json"), br#"{ "name": "Mine" }"#).unwrap();
+        fs::write(src.join("chrome.png"), b"png").unwrap();
+        fs::write(src.join("guide.png"), b"png").unwrap();
+        fs::write(src.join("notes.docx"), b"no").unwrap();
+        fs::write(src.join("sub").join("deep.png"), b"no").unwrap();
+        let skins = t.join("skins");
+        let out = copy_folder(&src.join("manifest.json"), &skins).unwrap();
+        assert_eq!((out.id.as_str(), out.name.as_str()), ("painted", "Mine"));
+        assert_eq!(out.files, ["chrome.png", "guide.png"]);
+        assert!(skins.join("painted").join("manifest.json").is_file());
+        assert!(!skins.join("painted").join("deep.png").exists());
+        // A folder with a manifest and no art is not a skin.
+        let bare = t.join("bare");
+        fs::create_dir_all(&bare).unwrap();
+        fs::write(bare.join("manifest.json"), b"{}").unwrap();
+        assert!(matches!(
+            copy_folder(&bare.join("manifest.json"), &skins),
+            Err(SkinError::Empty)
+        ));
+        fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn a_template_goes_in_a_new_folder_and_writes_only_its_own_files() {
+        let t = temp();
+        let a = start_template(&t, "my-skin").unwrap();
+        let b = start_template(&t, "my-skin").unwrap();
+        assert_ne!(a, b, "a second template never paints over the first");
+        assert!(write_template_file(&a, "chrome.png", b"png").is_ok());
+        assert!(write_template_file(&a, "README.txt", b"hello").is_ok());
+        assert!(write_template_file(&a, "../escape.png", b"x").is_err());
+        assert!(write_template_file(&a, "run.bat", b"x").is_err());
+        assert!(start_template(&t.join("nope"), "my-skin").is_err());
+        fs::remove_dir_all(&t).ok();
+    }
+
+    fn temp() -> PathBuf {
+        // A counter as well as the clock: tests run in parallel, two can read
+        // the same instant, and a test that cleans up after itself would
+        // then delete the other's folder out from under it.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("hp-skins-{}", std::process::id()));
+        let p = p.join(format!(
+            "{}-{n}",
+            format!("{:?}", std::time::SystemTime::now())
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "")
+        ));
         fs::create_dir_all(&p).unwrap();
         p
     }

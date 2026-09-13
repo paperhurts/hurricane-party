@@ -4,9 +4,10 @@
   import { invoke } from "@tauri-apps/api/core";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { applyTheme } from "./lib/theme";
-  import { parseSkin } from "./lib/skin";
-  import { measureSheets, placePicture, readyPicture, skinNotes } from "./lib/skins";
+  import { applyTheme, colorsFor } from "./lib/theme";
+  import { checkSheetBounds, parseSkin, type Token } from "./lib/skin";
+  import { guideSheet, paintableSheet, templateManifest, templateParts, templateReadme } from "./lib/template";
+  import { eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
   import {
     backdropPng,
@@ -71,6 +72,8 @@
     files: string[];
     pledit: string | null;
     viscolor: string | null;
+    /** A painted or zipped `hp-skin/1` skin's own manifest (#146). */
+    manifest: string | null;
   };
 
   let url = $state("");
@@ -133,6 +136,10 @@
   // that found rows whose files are gone. Each is cleared with the notice.
   let pendingDelete = $state<Removed[]>([]);
   let pendingPrune = $state<{ rootId: number; count: number } | null>(null);
+  // A skin just made or imported, worn so it can be seen, and not yet kept
+  // (#146): Keep leaves it, Discard throws it away and puts back the one that
+  // was on. Clearing the notice keeps it.
+  let pendingKeep = $state<{ id: string; name: string; was: string } | null>(null);
   // The checked rows (D84). Removal from the library is a selection and a
   // button, never a one-click glyph: a × beside every row was one slip away
   // from a row vanishing, and the playlist's × sets the expectation that a ×
@@ -921,6 +928,7 @@
     error = null;
     pendingDelete = [];
     pendingPrune = null;
+    pendingKeep = null;
   }
 
   /**
@@ -1251,8 +1259,10 @@
       parseSkin(manifest);
       await invoke("write_skin_manifest", { id, json: JSON.stringify(manifest, null, 1) });
       skins = await invoke<string[]>("list_skins");
+      const was = skin;
       await setSkin(id, name);
-      notice = `${name} is on: Eyewall's chrome in that picture's colours, with the picture behind it. Pick another skin to go back; ${name} stays in the list.`;
+      notice = `${name} is on: Eyewall's chrome in that picture's colours, with the picture behind it.`;
+      pendingKeep = { id, name, was };
     } catch (e) {
       if (id) await invoke("discard_skin", { id }).catch(() => {});
       notice = `Couldn't make a skin from that picture: ${e instanceof Error ? e.message : String(e)}`;
@@ -1264,14 +1274,31 @@
   async function importSkin() {
     const picked = await openDialog({
       multiple: false,
-      title: "Import a skin",
-      filters: [{ name: "Winamp skin", extensions: ["wsz", "zip"] }],
+      title: "Import a skin: a .wsz, a zip, or a painted skin's manifest.json",
+      filters: [{ name: "Skin", extensions: ["wsz", "zip", "json"] }],
     });
     if (typeof picked !== "string") return;
     notice = null;
     let unpacked: Unpacked | null = null;
+    const was = skin;
     try {
       unpacked = await invoke<Unpacked>("import_skin", { path: picked });
+      if (unpacked.manifest !== null) {
+        // A painted skin, or a skin folder someone zipped (#146): its manifest
+        // is its own. The validator, then its rectangles against its own art.
+        const { skin: parsed } = parseSkin(JSON.parse(unpacked.manifest));
+        const files = new Set(Object.values(parsed.sheets).flatMap((per) => Object.values(per)));
+        const problems = checkSheetBounds(parsed, await sheetSizes(unpacked.dir, [...files]));
+        if (problems.length) {
+          const more = problems.length > 2 ? ` (and ${problems.length - 2} more)` : "";
+          throw new Error(`${problems.slice(0, 2).join("; ")}${more}`);
+        }
+        skins = await invoke<string[]>("list_skins");
+        await setSkin(unpacked.id, unpacked.name);
+        notice ??= `${unpacked.name} is on.`;
+        pendingKeep = { id: unpacked.id, name: unpacked.name, was };
+        return;
+      }
       // Look at the sheets before mapping them (D106): a classic skin often
       // stops a file short, and a manifest must not claim art that is not
       // there.
@@ -1291,9 +1318,66 @@
       // every later time this skin is picked, rather than a better line a
       // person sees once and never again.
       await setSkin(unpacked.id, unpacked.name);
+      notice ??= `${unpacked.name} is on.`;
+      pendingKeep = { id: unpacked.id, name: unpacked.name, was };
     } catch (e) {
       if (unpacked) await invoke("discard_skin", { id: unpacked.id }).catch(() => {});
       notice = `That skin was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  /** Keep the skin just made or imported: nothing to do but stop asking. */
+  function keepSkin() {
+    pendingKeep = null;
+    notice = null;
+  }
+
+  /** Throw away the skin just made or imported and wear the one before it. */
+  async function discardSkin() {
+    const p = pendingKeep;
+    if (!p) return;
+    pendingKeep = null;
+    await setSkin(p.was);
+    await invoke("discard_skin", { id: p.id }).catch(() => {});
+    skins = await invoke<string[]>("list_skins");
+    notice = `${p.name} is gone; ${p.was} is back on.`;
+  }
+
+  /**
+   * Paint your own (#146): a folder with Eyewall's chrome in colour to paint
+   * over, a guide that names every part, the manifest, and a note on how.
+   * Written where the person chooses, in a new folder, never over one.
+   */
+  let painting = $state(false);
+  async function paintYourOwn() {
+    if (painting) return;
+    const parent = await openDialog({ directory: true, title: "Where should the skin to paint go?" });
+    if (typeof parent !== "string") return;
+    painting = true;
+    try {
+      const palette = colorsFor("eyewall") as Record<Token, string>;
+      const manifest = templateManifest(palette);
+      // The template is a skin: the same validator before a byte is written.
+      parseSkin(manifest);
+      const parts = templateParts();
+      const sheet = await paintableSheet(eyewallFile("chrome@2x.png"), parts, palette);
+      const guide = await guideSheet(sheet.canvas, parts, palette);
+      const dir = await invoke<string>("start_template", { parent });
+      const text = (s: string) => new TextEncoder().encode(s);
+      const files: [string, Uint8Array][] = [
+        ["manifest.json", text(JSON.stringify(manifest, null, 1))],
+        ["chrome.png", sheet.bytes],
+        ["guide.png", guide],
+        ["README.txt", text(templateReadme())],
+      ];
+      for (const [name, bytes] of files) {
+        await invoke("write_template_file", bytes, { headers: { "x-hp-name": name } });
+      }
+      notice = `A skin to paint is in ${dir}. Paint chrome.png (guide.png says what every part is), then Import skin… and pick its manifest.json.`;
+    } catch (e) {
+      notice = `Couldn't write the skin to paint: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      painting = false;
     }
   }
 </script>
@@ -1363,11 +1447,20 @@
     </label>
     <label class="conc skinpick" title="What the three classic windows wear">
       skin
-      <select value={skin} onchange={(e) => setSkin(e.currentTarget.value)}>
+      <select
+        value={skin}
+        onchange={(e) => {
+          // Picking another skin keeps the one on trial.
+          pendingKeep = null;
+          setSkin(e.currentTarget.value);
+        }}
+      >
         {#each skins as s (s)}<option value={s}>{s}</option>{/each}
       </select>
     </label>
-    <button class="mini" onclick={importSkin} title="A .wsz, or a zip of one">Import skin…</button>
+    <button class="mini" onclick={importSkin} title="A .wsz, a zip of a skin, or a painted skin's manifest.json"
+      >Import skin…</button
+    >
     <button
       class="mini"
       onclick={makeSkin}
@@ -1375,6 +1468,14 @@
       title="Pick any picture and get a skin in its colours, with the picture behind the windows"
     >
       {making ? "Making…" : "Make a skin…"}
+    </button>
+    <button
+      class="mini"
+      onclick={paintYourOwn}
+      disabled={painting}
+      title="A folder with the windows' chrome to paint over, and a guide to every part of it"
+    >
+      {painting ? "Writing…" : "Paint your own…"}
     </button>
     {#if picturePlace}
       <label class="conc skinpick" title="Which part of the picture shows behind the three windows">
@@ -1461,6 +1562,10 @@
       {/if}
       {#if pendingPrune}
         <button class="mini" onclick={pruneMissing}>Remove {pendingPrune.count === 1 ? "it" : `those ${pendingPrune.count}`} from the library</button>
+      {/if}
+      {#if pendingKeep}
+        <button class="mini" onclick={keepSkin}>Keep it</button>
+        <button class="mini danger" onclick={discardSkin} title="Delete it and put {pendingKeep.was} back on">Discard</button>
       {/if}
     </p>
   {/if}

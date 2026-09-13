@@ -267,6 +267,14 @@ Animate `opacity` on a pre-composited glow layer. Never animate `box-shadow`.
 
 ---
 
+## Painting your own (D129)
+
+**Paint your own…** in the library writes a template: Eyewall's manifest under a new name with `"art": "final"` and `"colors": "own"`, one sheet at 2x (`"chrome": { "2": "chrome.png" }`) holding every part of Eyewall's chrome already in the colour it wears, a `guide.png` that numbers every rectangle and lists what each is, and a `README.txt`. What is painted into `chrome.png` is exactly what is worn; the six colours in `palette` paint everything the windows draw themselves. The template carries no `maker` or `generator`, so it is never rebuilt (D107, D124).
+
+**Import skin…** brings a native skin in two ways besides a `.wsz`: a painted folder, picked by its `manifest.json`, and a zip of a skin folder, recognised by the `manifest.json` in it. Either is validated with `parseSkin` and its rectangles checked against its own sheets before it is worn, under the caps in Validation below. A newly made or imported skin is worn on trial, with Keep it or Discard beside the library's notice.
+
+---
+
 ## Importer mappings
 
 Both importers are mappings *into* the above. That is the entire justification for locking this schema before either one is written.
