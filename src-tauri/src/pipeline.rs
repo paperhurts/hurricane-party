@@ -5,10 +5,10 @@
 //! fetch write to a deterministic path. That means finding the downloaded file
 //! afterwards is a directory scan rather than scraping yt-dlp's stdout for it.
 //!
-//! Sidecars, all bundled (D46/D47/D48):
+//! Sidecars, all bundled (D46/D47/D133):
 //!   yt-dlp — the official standalone exe
 //!   deno   — JS runtime for yt-dlp's EJS challenges, passed via --js-runtimes
-//!   ffmpeg — MP3 extraction (D3)
+//!   ffmpeg — MP3 extraction (D3): yt-dlp's own build, or a person's own
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -202,6 +202,53 @@ impl Tail {
             t
         }
     }
+}
+
+/// Where a person keeps an ffmpeg of their own, when they have pointed the app
+/// at one (D133). Unset, the default, is the one that ships.
+pub const FFMPEG_SETTING: &str = "ffmpeg.path";
+
+/// That ffmpeg, if it is set and still there.
+///
+/// A path that has gone (an unplugged drive, an uninstalled copy) is the
+/// bundled one rather than an error, like a cookies file that has gone: a
+/// download the week before a storm keeps working, and the library says the
+/// person's copy is missing (D133).
+pub fn own_ffmpeg(app: &AppHandle) -> Option<PathBuf> {
+    let state = app.state::<crate::Db>();
+    let raw = {
+        let conn = state.0.lock().unwrap();
+        crate::db::get_setting(&conn, FFMPEG_SETTING)
+    }?;
+    let p = PathBuf::from(raw.trim());
+    (p.is_absolute() && p.is_file()).then_some(p)
+}
+
+/// The ffmpeg a job runs: the person's own when there is one, else the one
+/// that ships.
+fn ffmpeg_for(app: &AppHandle) -> Option<PathBuf> {
+    own_ffmpeg(app).or_else(bundled_ffmpeg)
+}
+
+/// Whether an ffmpeg can do this app's work, from what it says about itself:
+/// `-version` and `-encoders`. The version line when it can; the reason when
+/// it cannot, in words for the person who picked it (D133). The one encoder
+/// the pipeline names is LAME, for the MP3 (D3); everything else it and
+/// yt-dlp use is ffmpeg's own and in every build.
+pub fn check_ffmpeg(version: &str, encoders: &str) -> std::result::Result<String, String> {
+    let line = version.lines().next().unwrap_or("").trim();
+    if !line.starts_with("ffmpeg version") {
+        return Err("that program did not answer as ffmpeg does".into());
+    }
+    if !encoders
+        .lines()
+        .any(|l| l.split_whitespace().nth(1) == Some("libmp3lame"))
+    {
+        return Err(format!(
+            "{line} has no MP3 encoder (libmp3lame), which every download needs"
+        ));
+    }
+    Ok(line.to_string())
 }
 
 /// Path to the bundled ffmpeg, which Tauri places beside the main executable.
@@ -1132,8 +1179,9 @@ async fn download_media(
     let outtmpl = root.join("%(extractor)s/%(title)s [%(id)s].%(ext)s");
 
     let mut args = ytdlp_base(app);
-    // Point yt-dlp at our ffmpeg rather than letting it search PATH.
-    if let Some(ff) = bundled_ffmpeg() {
+    // Point yt-dlp at our ffmpeg rather than letting it search PATH: the
+    // person's own when they have picked one, the bundled one otherwise.
+    if let Some(ff) = ffmpeg_for(app) {
         args.extend([
             "--ffmpeg-location".to_string(),
             ff.to_string_lossy().into_owned(),
@@ -1496,10 +1544,15 @@ async fn extract_mp3(
         scratch.to_string_lossy().into_owned(),
     ]);
 
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("ffmpeg")
-        .map_err(|e| PipelineError::Sidecar(format!("ffmpeg sidecar missing: {e}")))?
+    // The same ffmpeg yt-dlp was handed (D133).
+    let program = match own_ffmpeg(app) {
+        Some(own) => app.shell().command(own),
+        None => app
+            .shell()
+            .sidecar("ffmpeg")
+            .map_err(|e| PipelineError::Sidecar(format!("ffmpeg sidecar missing: {e}")))?,
+    };
+    let (mut rx, child) = program
         .args(args)
         .spawn()
         .map_err(|e| PipelineError::Sidecar(format!("couldn't start ffmpeg: {e}")))?;
@@ -2185,6 +2238,26 @@ mod tests {
         // Anything else keeps yt-dlp's words rather than guessing.
         let odd = explain_export("opera", "ERROR: something nobody has seen");
         assert!(odd.contains("something nobody has seen"), "{odd}");
+    }
+
+    #[test]
+    fn an_ffmpeg_of_your_own_must_be_ffmpeg_and_encode_mp3() {
+        let version = "ffmpeg version N-126504-g1b8a2b690b-20260911 Copyright (c) 2000-2026 the FFmpeg developers\nbuilt with gcc 16.2.0";
+        let encoders = "Encoders:\n V..... = Video\n ------\n A....D libmp3lame           libmp3lame MP3 (MPEG audio layer 3) (codec mp3)\n A....D libopus              libopus Opus (codec opus)";
+        assert_eq!(
+            check_ffmpeg(version, encoders).unwrap(),
+            "ffmpeg version N-126504-g1b8a2b690b-20260911 Copyright (c) 2000-2026 the FFmpeg developers"
+        );
+        // A build without LAME would download and then fail every conversion.
+        let no_lame = "Encoders:\n A....D libopus              libopus Opus (codec opus)\n A....D mp2 MP2 (MPEG audio layer 2)";
+        let why = check_ffmpeg(version, no_lame).unwrap_err();
+        assert!(why.contains("libmp3lame"), "{why}");
+        // A description that mentions it is not the encoder.
+        let mention = " A....D aac  AAC, not libmp3lame";
+        assert!(check_ffmpeg(version, mention).is_err());
+        // Something else entirely.
+        assert!(check_ffmpeg("Usage: notepad", encoders).is_err());
+        assert!(check_ffmpeg("", "").is_err());
     }
 
     #[test]
