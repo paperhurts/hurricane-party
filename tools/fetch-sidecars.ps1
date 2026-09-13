@@ -101,6 +101,23 @@ if ($dest) {
     }
 }
 
+# A dev build runs its sidecars from target\debug (and a local release build
+# from target\release), copied there by Tauri's build script, which does not
+# run again just because a file in binaries\ changed. Found when the dev app
+# kept running the old ffmpeg after this script fetched the new one (#18):
+# refresh any copy that is already there, so the next launch runs the pin.
+# Not $profile: that is PowerShell's own variable.
+foreach ($flavour in "debug", "release") {
+    foreach ($name in "yt-dlp", "deno", "ffmpeg") {
+        $built = Join-Path $root "src-tauri\target\$flavour\$name.exe"
+        $pinned = Join-Path $binDir "$name-$triple.exe"
+        if ((Test-Path $built) -and (Test-Path $pinned) -and ((Sha256 $built) -ne (Sha256 $pinned))) {
+            Copy-Item $pinned $built -Force
+            Write-Host "  refreshed target\$flavour\$name.exe" -ForegroundColor Yellow
+        }
+    }
+}
+
 Write-Host "`nsrc-tauri/binaries/:" -ForegroundColor Green
 Get-ChildItem $binDir -Filter "*.exe" | ForEach-Object {
     "{0,-44} {1,7:N1} MB" -f $_.Name, ($_.Length / 1MB)
