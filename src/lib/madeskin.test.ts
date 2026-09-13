@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import eyewall from "../../skins/eyewall/manifest.json";
 import { colorsWorn } from "./theme";
 import {
+  DISPLAY_WELL,
   madeManifest,
   MAKER_VERSION,
   nameFrom,
@@ -114,7 +115,10 @@ describe("a skin made from a picture (#131)", () => {
       }
       return out;
     };
-    const made_ = madeManifest(made()) as { windows: Record<string, { elements: Record<string, unknown> }> };
+    const made_ = madeManifest(made()) as { windows: Record<string, { elements: Record<string, any> }> };
+    // The two displays are see-through on purpose (DISPLAY_WELL, its own test); every other piece
+    // of chrome is held to the floor and to Eyewall's order.
+    delete made_.windows.equalizer.elements.eqCurveWell.opacity;
     for (const w of Object.values(made_.windows)) {
       const { backdrop, ...chrome } = w.elements;
       expect((backdrop as { opacity: number }).opacity).toBe(PICTURE_OPACITY);
@@ -136,6 +140,25 @@ describe("a skin made from a picture (#131)", () => {
         if (before[i] < before[j]) expect(after[i]).toBeLessThanOrEqual(after[j]);
       }
     }
+  });
+
+  it("lets the picture show through the analyser and the EQ graph", () => {
+    const { skin } = parseSkin(madeManifest(made()));
+    const vis = elementsOf(skin, "main", false).elements.find((e) => e.name === "vis") as { well: number };
+    const curve = elementsOf(skin, "equalizer", false).elements.find((e) => e.name === "eqCurveWell") as {
+      opacity: number;
+    };
+    expect(vis.well).toBe(DISPLAY_WELL);
+    expect(curve.opacity).toBe(DISPLAY_WELL);
+    // Eyewall keeps its solid wells.
+    const ew = parseSkin(eyewall).skin;
+    expect((elementsOf(ew, "main", false).elements.find((e) => e.name === "vis") as { well: number }).well).toBe(1);
+  });
+
+  it("refuses a visualizer well outside 0..1", () => {
+    const m = madeManifest(made()) as Record<string, any>;
+    m.windows.main.elements.vis.well = 2;
+    expect(() => parseSkin(m)).toThrow(/well/);
   });
 
   it("carries a maker stamp and no importer stamp, so it is never rebuilt as a .wsz", () => {

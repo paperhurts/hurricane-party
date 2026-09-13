@@ -55,6 +55,14 @@ export const PICTURE_OPACITY = 0.22;
  */
 export const QUIET_FLOOR = 0.55;
 
+/**
+ * How strongly the analyser's well and the EQ graph's paint over the picture.
+ * They were solid, and the owner asked for the picture through them: the bars
+ * and the curve are drawn at full strength in the accent, so a wash behind
+ * them is enough to hold them, and the rest can be the picture.
+ */
+export const DISPLAY_WELL = 0.35;
+
 /** Eyewall's quietest chrome, which lands on the floor. */
 const EYEWALL_QUIETEST = 0.14;
 
@@ -100,6 +108,10 @@ export function madeManifest(made: {
   };
   // Before the backdrops go in: the picture's own opacity is not lifted.
   liftOpacities(m.windows);
+  // The two displays let the picture through (after the lift, which would
+  // otherwise raise them back up).
+  m.windows.main.elements.vis.well = DISPLAY_WELL;
+  m.windows.equalizer.elements.eqCurveWell.opacity = DISPLAY_WELL;
   for (const [win, band] of Object.entries(WINDOW_BAND)) {
     const w = m.windows[win];
     // Main and the equalizer never change size, so each takes its third. The
