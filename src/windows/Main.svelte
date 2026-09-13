@@ -15,6 +15,7 @@
   import { loadEq, type EqState } from "../lib/eq";
   import { kaleidoscopeFor, rampWorn, viscolor, visualizerFor } from "../lib/theme";
   import { HUE_PERIOD_S } from "../lib/kaleidoscope";
+  import type { Readout } from "../lib/radar";
   import { loadVisMode, nextVisMode, saveVisMode, type VisMode } from "../lib/vis";
   // The cooler capybara's home (#62): the display, while a file cannot be
   // opened. The analyser has nothing to draw then, and he has a drink.
@@ -47,6 +48,8 @@
   // Calm: the kaleidoscope still (#147). The library holds the switch, and
   // Purricane's Main a pill for it (D132).
   let calm = $state(false);
+  // What Cone's radar readout says while it is on (#85), for the strip.
+  let radarSaid = $state<Readout | null>(null);
   // The six or eight segments a person picked on Purricane's Main (D132);
   // null until they pick, and the theme's number until then.
   let segments = $state<6 | 8 | null>(null);
@@ -540,6 +543,11 @@
         {title}
       {/if}
     </span>
+    {#if radarSaid}
+      <!-- Cone (#85): the strip is the state a person lives in, so the loop's
+           age rides here too, in the warning colour once it is stale. -->
+      <span class="stag" class:radarwarn={radarSaid.warn} title={radarSaid.text}>{radarSaid.short}</span>
+    {/if}
     <span class="stime">{elapsed}</span>
   </div>
 {/snippet}
@@ -609,6 +617,7 @@
   slots={error ? { vis, trackTitle: strip } : { vis }}
   onaction={action}
   onslide={slide}
+  onradar={(r) => (radarSaid = r)}
   onskin={(s, t) => {
     palette = rampWorn(s, t);
     component = visualizerFor(s, t);

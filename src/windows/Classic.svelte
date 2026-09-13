@@ -2,7 +2,9 @@
   import type { Snippet } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { emitTo, listen } from "@tauri-apps/api/event";
-  import { applyTheme, colorsWorn, isWearable, type ThemeName } from "../lib/theme";
+  import { applyTheme, colorsWorn, isWearable, ownsColours, type ThemeName } from "../lib/theme";
+  import { readout, type Readout, type RadarStatus } from "../lib/radar";
+  import RadarBackdrop from "./RadarBackdrop.svelte";
   import { elementsOf, TOKENS, type Element, type Skin } from "../lib/skin";
   import { loadSkin, type LoadedSkin } from "../lib/skinsheet";
   import { currentSkin, EYEWALL, eyewallFile, windowNameOf } from "../lib/skins";
@@ -24,6 +26,7 @@
     onaction,
     onslide,
     onskin,
+    onradar,
   }: {
     label: string;
     title: string;
@@ -56,6 +59,9 @@
     /** The skin this window is now wearing, each time one loads: the window
      * draws what the sheet cannot, and the analyser's ramp is the skin's. */
     onskin?: (skin: Skin, theme: ThemeName) => void;
+    /** What the radar readout says while Cone is on, null otherwise (#85):
+     * Main's windowshade strip carries the loop's age too. */
+    onradar?: (r: Readout | null) => void;
   } = $props();
 
   // Each window is its own document, so each applies the theme itself. Cheap:
@@ -77,7 +83,7 @@
    */
   // The theme the person picked (#147), read with every skin load so a
   // theme change and a skin change take one path.
-  let theme: ThemeName = "eyewall";
+  let theme = $state<ThemeName>("eyewall");
 
   function paintFrom(s: Skin) {
     applyTheme(theme);
@@ -250,7 +256,37 @@
 
   // The window's own bindings, plus the one the shell always knows. A window
   // never has to pass its own name in.
-  let allBinds = $derived({ windowTitle: title, ...binds });
+  // Cone (#85, D135): the radar behind the chrome of a skin that wears the
+  // theme. A skin with its own colours is its own art and keeps it.
+  let cone = $derived(theme === "cone" && !!skin && !ownsColours(skin.skin));
+  let radar = $state<RadarStatus | null>(null);
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!cone) return;
+    invoke<RadarStatus>("get_radar").then(
+      (s) => (radar = s),
+      () => {},
+    );
+    const sub = listen<RadarStatus>("radar:updated", (e) => (radar = e.payload), {
+      target: { kind: "WebviewWindow", label },
+    });
+    // The age in the words moves on its own, fetch or no fetch.
+    const tick = setInterval(() => (now = Date.now()), 20000);
+    return () => {
+      sub.then((off) => off());
+      clearInterval(tick);
+    };
+  });
+  let said = $derived(cone ? readout(radar, now) : null);
+  $effect(() => onradar?.(said));
+
+  // Main's title bar is where the loop says how old it is, always in view
+  // (theme.md: "Age is always visible in the chrome, not buried in a
+  // tooltip").
+  let allBinds = $derived({
+    windowTitle: said && label === "main" ? said.text : title,
+    ...binds,
+  });
 
   // The discharge (#9, theme.md): a bond that just broke blooms for ~120 ms
   // and is gone. Detected here, from the edge going from bonded to null in a
@@ -499,11 +535,18 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="chrome"
+  data-radar={said ? said.state : undefined}
+  data-radar-warn={said?.warn && label === "main" ? "yes" : undefined}
   data-active={active}
   data-shaded={shaded}
   data-glow={glowOn ? "on" : "off"}
   onpointerdown={raise}
 >
+  {#if cone && !shaded}
+    <!-- Cone's radar, under every sprite (#85). Not in the 14 px strip, which
+         says the loop's age instead. -->
+    <RadarBackdrop status={radar} window={win} warn={!!said?.warn} />
+  {/if}
   {#if skin && set}
     <!-- The chrome, element by element in the manifest's order, which is the
          z-order: the frame first. The title bar is the one move handle (D35)

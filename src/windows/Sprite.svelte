@@ -417,6 +417,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="sp sp-image"
+    data-name={el.name}
     class:mask
     class:final={!mask}
     class:reveal={el.fit === "reveal"}
@@ -471,6 +472,7 @@
   <div
     bind:this={textBox}
     class="sp-text"
+    data-bind={el.bind ?? undefined}
     class:upper={font.type === "system" && font.case === "upper"}
     class:scroll={el.overflow === "scroll"}
     class:lit={look.glow && glow}
