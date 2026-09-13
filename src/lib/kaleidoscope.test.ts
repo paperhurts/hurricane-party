@@ -54,9 +54,13 @@ describe("the kaleidoscope's clamps (#147)", () => {
 describe("the kaleidoscope's colour and layout", () => {
   const stops = ["#000000", "#FFFFFF"]; // tokens-exempt: two ends of a ramp to test the mix, not colours anything draws
 
-  it("drifts through the palette and comes back", () => {
+  it("drifts through the palette, holding each colour, and comes back", () => {
+    // Two stops over ten seconds: five seconds each.
     expect(hueAt(0, stops, 10)).toBe(mix(stops[0], stops[1], 0));
-    expect(hueAt(2.5, stops, 10)).toBe(mix(stops[0], stops[1], 0.5));
+    // Held for most of its turn, not half-way to the next.
+    expect(hueAt(2.5, stops, 10)).toBe(mix(stops[0], stops[1], 0));
+    // Blending over the last part of it.
+    expect(hueAt(4.25, stops, 10)).toBe(mix(stops[0], stops[1], 0.5));
     expect(hueAt(10, stops, 10)).toBe(hueAt(0, stops, 10));
     expect(hueAt(3, [], 10)).toBe("transparent");
   });

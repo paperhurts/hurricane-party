@@ -69,15 +69,23 @@ export function mix(a: string, b: string, t: number): string {
   return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 }
 
+/** How much of each colour's turn is spent on the way to the next. The rest
+ * holds: a blend between two colours from opposite sides of the wheel passes
+ * through grey, and the first version sat in that grey half the time. */
+export const HUE_BLEND = 0.3;
+
 /** The colour the pattern is at time `t`: drifting through `stops` once
- * every `HUE_PERIOD_S`, and back to the first. */
+ * every `HUE_PERIOD_S`, and back to the first. Each colour holds, then
+ * blends into the next over the last `HUE_BLEND` of its turn. */
 export function hueAt(t: number, stops: string[], period = HUE_PERIOD_S): string {
   if (stops.length === 0) return "transparent";
   if (stops.length === 1) return mix(stops[0], stops[0], 0);
   const phase = (((t / period) % 1) + 1) % 1;
   const at = phase * stops.length;
   const i = Math.floor(at);
-  return mix(stops[i % stops.length], stops[(i + 1) % stops.length], at - i);
+  const into = at - i;
+  const k = into <= 1 - HUE_BLEND ? 0 : (into - (1 - HUE_BLEND)) / HUE_BLEND;
+  return mix(stops[i % stops.length], stops[(i + 1) % stops.length], k);
 }
 
 /** Where the mandalas sit in a box `w` x `h`: as many as fit side by side at
