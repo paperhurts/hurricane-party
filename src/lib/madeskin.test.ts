@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import eyewall from "../../skins/eyewall/manifest.json";
 import { colorsWorn } from "./theme";
 import {
+  canMove,
   DISPLAY_WELL,
   madeManifest,
   remade,
@@ -10,8 +11,11 @@ import {
   PICTURE_H,
   PICTURE_MAX_H,
   PICTURE_OPACITY,
-  pictureHeightFor,
+  pictureFor,
+  pictureOf,
+  PLACES,
   QUIET_FLOOR,
+  windowsTop,
 } from "./madeskin";
 import { elementsOf, parseSkin, TOKENS, WINDOWS } from "./skin";
 import { paletteFromPixels } from "./palette";
@@ -66,7 +70,7 @@ describe("a skin made from a picture (#131)", () => {
   });
 
   it("lays one picture across the three stacked windows, as a wash under the chrome", () => {
-    const { skin } = parseSkin(madeManifest({ ...made(), pictureHeight: 900 }));
+    const { skin } = parseSkin(madeManifest({ ...made(), picture: pictureFor(275, 900) }));
     const bands = WINDOWS.map((w) => {
       const b = elementsOf(skin, w, false).elements[0] as {
         sprite: { rect: number[] };
@@ -91,16 +95,83 @@ describe("a skin made from a picture (#131)", () => {
 
   it("keeps a picture at the windows' width and its own height, within bounds", () => {
     // A tall portrait keeps its height, so the playlist has something to reveal.
-    expect(pictureHeightFor(1000, 2000)).toBe(550);
-    // A wide landscape still gets a sheet three windows tall, so every
-    // window's third exists; the picture fills its top at the windows' width
-    // and the rest is clear (backdropPng), rather than being scaled up to
-    // that height and cropped at the sides.
-    expect(pictureHeightFor(4000, 1000)).toBe(PICTURE_H);
+    expect(pictureFor(1000, 2000)).toEqual({ sheet: 550, top: 0, height: 550, at: "top" });
+    // A wide landscape keeps its height too, rather than being scaled up to
+    // three windows and cropped at the sides, and gets clear sheet above and
+    // below it, as much as the windows are taller than it (D127).
+    expect(pictureFor(4000, 1000)).toEqual({ sheet: 627, top: 279, height: 69, at: "top" });
     // A very tall strip stops at the cap.
-    expect(pictureHeightFor(100, 100000)).toBe(PICTURE_MAX_H);
+    expect(pictureFor(100, 100000)).toEqual({ sheet: PICTURE_MAX_H, top: 0, height: PICTURE_MAX_H, at: "top" });
     // Nothing to measure is not a crash.
-    expect(pictureHeightFor(0, 0)).toBe(PICTURE_H);
+    expect(pictureFor(0, 0)).toEqual({ sheet: PICTURE_H, top: 0, height: PICTURE_H, at: "top" });
+  });
+
+  // The owner's square pictures covered Main and the equalizer and left most
+  // of the playlist bare, with nowhere else for them to go (D127).
+  it("puts the windows at the top, middle or bottom of a picture", () => {
+    const bands = (at: (typeof PLACES)[number], picture = pictureFor(1000, 1000)) => {
+      const { skin } = parseSkin(madeManifest({ ...made(), picture: { ...picture, at } }));
+      return WINDOWS.map((w) => (elementsOf(skin, w, false).elements[0] as { sprite: { rect: number[] } }).sprite.rect);
+    };
+    // A square picture is 275 tall at the windows' width, with 73 clear above
+    // and below it: the sheet is 421.
+    const square = pictureFor(1000, 1000);
+    expect(square).toMatchObject({ sheet: 421, top: 73, height: 275 });
+    // Top: the picture starts where Main does.
+    expect(bands("top").map((r) => r[1])).toEqual([73, 189, 305]);
+    // Middle: the picture's centre is the three windows' centre, to a pixel.
+    const mid = windowsTop({ ...square, at: "middle" });
+    expect(Math.abs(mid + PICTURE_H / 2 - (square.top + square.height / 2))).toBeLessThanOrEqual(0.5);
+    expect(bands("middle").map((r) => r[1])).toEqual([mid, mid + 116, mid + 232]);
+    // Bottom: it ends where the playlist does at its base height.
+    expect(bands("bottom").map((r) => r[1])).toEqual([0, 116, 232]);
+    // Every band stays inside the sheet, and the playlist's runs to its end.
+    for (const at of PLACES) {
+      const b = bands(at);
+      for (const r of b) expect(r[1] + r[3]).toBeLessThanOrEqual(square.sheet);
+      expect(b[2][1] + b[2][3]).toBe(square.sheet);
+    }
+    // A tall picture moves the other way: the windows slide down it, and the
+    // playlist still has the rest of it below to reveal.
+    const tall = pictureFor(275, 900);
+    expect(bands("top", tall)[0][1]).toBe(0);
+    expect(bands("middle", tall)[0][1]).toBe(276);
+    expect(bands("bottom", tall)[0][1]).toBe(552);
+    expect(bands("bottom", tall)[2]).toEqual([0, 784, 275, 116]);
+  });
+
+  it("offers a place only where the places differ", () => {
+    expect(canMove(pictureFor(1000, 1000))).toBe(true);
+    expect(canMove(pictureFor(275, 900))).toBe(true);
+    // Exactly three windows tall looks the same at every place.
+    expect(canMove(pictureFor(275, PICTURE_H))).toBe(false);
+  });
+
+  it("reads back where the picture is, and reads a skin made before that as it was drawn", () => {
+    const m = madeManifest({ ...made(), picture: { ...pictureFor(4000, 1000), at: "middle" } });
+    expect(pictureOf(JSON.parse(JSON.stringify(m)))).toEqual({ sheet: 627, top: 279, height: 69, at: "middle" });
+    // Before D127: no record, the picture from the top of a sheet that ends
+    // where the playlist's backdrop does, and no room to move a short one.
+    const old = madeManifest({ ...made(), picture: pictureFor(0, 0) }) as Record<string, any>;
+    delete old.picture;
+    expect(pictureOf(old)).toEqual({ sheet: PICTURE_H, top: 0, height: PICTURE_H, at: "top" });
+    expect(canMove(pictureOf(old))).toBe(false);
+    // A record that does not match the sheet is not trusted.
+    const lying = JSON.parse(JSON.stringify(m));
+    lying.picture.sheet = 1200;
+    expect(pictureOf(lying)).toMatchObject({ top: 0, at: "top" });
+  });
+
+  it("moves the picture without touching anything else", () => {
+    const m = madeManifest({ ...made(), picture: pictureFor(1000, 1000) }) as Record<string, any>;
+    const written = JSON.parse(JSON.stringify(m));
+    const moved = remade(written, { ...pictureOf(written), at: "bottom" }) as Record<string, any>;
+    expect(moved.picture.at).toBe("bottom");
+    expect(moved.windows.main.elements.backdrop.sprite.rect[1]).toBe(0);
+    expect(moved.palette).toEqual(m.palette);
+    expect(moved.sheets).toEqual(m.sheets);
+    // And back.
+    expect(remade(moved, { ...pictureOf(moved), at: "top" })).toEqual(m);
   });
 
   // Seen on the first real made skin: Eyewall's quiet chrome (0.14 edges, 0.3
@@ -162,15 +233,28 @@ describe("a skin made from a picture (#131)", () => {
     expect(() => parseSkin(m)).toThrow(/well/);
   });
 
+  // The rail was the one thing the floor could not reach while its 0.22 was
+  // baked into the sheet (D126).
+  it("lifts the EQ rail over the floor, and keeps it quieter than the fill", () => {
+    const { skin } = parseSkin(madeManifest(made()));
+    const sliders = skin.windows.equalizer.full.elements.filter((e) => e.type === "slider");
+    expect(sliders).toHaveLength(11);
+    for (const s of sliders) {
+      if (s.type !== "slider") continue;
+      expect(s.trackOpacity).toBeGreaterThanOrEqual(QUIET_FLOOR);
+      expect(s.trackOpacity).toBeLessThan(1);
+    }
+  });
+
   it("is made again, unchanged, from its own manifest", () => {
-    const m = madeManifest({ ...made(), pictureHeight: 700 });
+    const m = madeManifest({ ...made(), picture: { ...pictureFor(1000, 500), at: "middle" } });
     expect(remade(JSON.parse(JSON.stringify(m)))).toEqual(m);
   });
 
   // SEL was the first thing Eyewall gained that made skins never got: they
   // copied Eyewall's layout when they were made (D124).
   it("picks up what Eyewall has gained since the skin was made", () => {
-    const old = madeManifest({ ...made(), pictureHeight: 500 }) as Record<string, any>;
+    const old = madeManifest({ ...made(), picture: pictureFor(275, 500) }) as Record<string, any>;
     delete old.windows.playlist.elements.selectButton;
     delete old.windows.playlist.elements.selectWell;
     const again = remade(old) as Record<string, any>;

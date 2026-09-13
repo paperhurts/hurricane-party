@@ -196,7 +196,7 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 | `slot` | A box with no art, for something the window draws (D99) | `rect` |
 | `visualizer` | Where the component from `visualizer` draws | `rect` |
 
-A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter.
+A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter. The `track` may carry its own `opacity`, 0..1 (D126): Eyewall draws its EQ rail at full alpha in the sheet and quiets it to 0.22 here, so a skin that needs the rail stronger — a made skin, over a picture — changes a number rather than the art.
 
 **A centred slider (D98).** `origin`, 0..1, makes a slider a centred control: the fill runs from the origin to the value rather than from the start, the wheel nudges it by 1/48 of its range, and a double press returns it to the origin. The EQ's gains sit at `0.5`, which is 0 dB. `lit` is the same shape as on a text, `{ bind, when, tint?, opacity? }`, and gives the fill and thumb a second look while the binding holds; every EQ slider dims while the EQ is off. `hot`, `{ beyond, tint }`, tints the thumb once the value is more than `beyond` from the origin, and needs an origin to measure from. The dim wins over hot. A text's `align` is `left` (the default), `center` or `right`.
 
@@ -234,7 +234,9 @@ A sheet in the object form may say **`"art": "final"`**, and its sprites are dra
 
 An `image` may say **`"fit": "reveal"`** instead of the default `"stretch"`. A stretched sprite is scaled to its box; a revealed one is drawn at the box's width with its own proportions, from the top, so a box that grows taller uncovers more of a tall sprite instead of smearing a short one. Past the sprite's end the ground shows. A made skin's playlist backdrop is revealed: its sprite runs from the playlist's third of the picture to the bottom of the sheet, and dragging the window down shows the rest of the picture.
 
-A made skin carries `"maker": <version>` the way an imported one carries `generator` (D107). Only `generator` triggers a rebuild.
+A made skin carries `"maker": <version>` the way an imported one carries `generator` (D107). Only `generator` triggers a rebuild of the art; a made skin's manifest is made again from Eyewall's layout every time it is worn (D124), and it wears Eyewall's current sheets rather than the copies in its folder (D126).
+
+A made skin also records **where its picture is**, as `"picture": { "sheet", "top", "height", "at" }` (D127): the picture sheet's height, the band of it the picture fills, and `at`, `top`, `middle` or `bottom`, which part of it the three stacked windows show. It is the maker's own key, not part of the format, and the validator ignores it. A picture shorter than the windows is drawn with clear room above and below it, so moving it only moves the backdrops' sprite rectangles; the library's `picture` menu does that.
 
 ### Glow is declared, not assumed
 
@@ -293,7 +295,7 @@ Classic skins set `resizable: false` on all three windows (except playlist), so 
 
 **The windowshade strip's controls are painted into its art** (D111). The classic gave the shade transport no sprites of its own and no pressed state; Winamp hit-tested fixed rectangles over the picture, and so does the importer — six `button` elements whose sprite is the strip's own pixels at the same offset, in the focused and the idle strip both. The seek bar there does have four small sprites of its own, the time is two `text` elements either side of the colon painted into the strip (D104's split, at 5 × 6), and the analyser is a 38 × 5 `visualizer` box.
 
-**What an imported skin does not get, and why it is said out loud** (D110). A classic skin also draws balance, mono/stereo, the playlist's own transport row, and its SEL and MISC menus. This app has one transport (D81), no balance and no menus, so in an imported skin those stay pictures. The importer writes what it could not use into the manifest as `notes` — an unknown key, ignored by the validator, beside `generator` (D107) — and the library repeats it every time that skin is picked, rather than once at import where a person reads it and forgets. The promise is that a skin wears and that anything making the app *unusable* is a bug; a control this app has no feature for is not.
+**What an imported skin does not get, and why it is said out loud** (D110). A classic skin also draws balance, mono/stereo, the playlist's own transport row, and its MISC menu (its SEL loads the list selected in the library, as Eyewall's does, D125). This app has one transport (D81), no balance and no menus, so in an imported skin those stay pictures. The importer writes what it could not use into the manifest as `notes` — an unknown key, ignored by the validator, beside `generator` (D107) — and the library repeats it every time that skin is picked, rather than once at import where a person reads it and forgets. The promise is that a skin wears and that anything making the app *unusable* is a bug; a control this app has no feature for is not.
 
 ### `.wal` — partial, explicitly, and not v0.5 (D110)
 

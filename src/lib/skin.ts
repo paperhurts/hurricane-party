@@ -248,6 +248,10 @@ export type Element =
       /** All three are optional and at least one is required: track plus fill
        * plus thumb is a seek bar, fill alone is a level meter. */
       track?: SpriteRef;
+      /** How strongly the track draws, 0..1, from the track's own `opacity`
+       * (D126). A rail's quietness lives here rather than in the sheet's
+       * alpha, where a made skin's floor could not reach it. */
+      trackOpacity: number;
       fill?: SpriteRef;
       thumb?: SpriteRef;
       orientation: "horizontal" | "vertical";
@@ -637,6 +641,7 @@ function element(
         ...placed(v, name, path),
         type,
         track: optSprite(v, "track", skin.sheets, path),
+        trackOpacity: isObj(v.track) ? opacityOf(v.track, `${path}.track`) : 1,
         fill: optSprite(v, "fill", skin.sheets, path),
         thumb: optSprite(v, "thumb", skin.sheets, path),
         orientation: oneOf(v.orientation, ["horizontal", "vertical"] as const, `${path}.orientation`),
