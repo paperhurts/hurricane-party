@@ -632,7 +632,7 @@
   }
   /* Off: the well, and nothing drawing into it. */
   .visbox.off {
-    background: var(--surface);
+    background: color-mix(in srgb, var(--surface) calc(var(--vis-well, 1) * 100%), transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
   }
 

@@ -528,7 +528,9 @@
     {/if}
   </div>
 {:else if el.type === "visualizer"}
-  <div class="sp-vis" style={box}>
+  <!-- `--vis-well` reaches the analyser inside: how strongly its well paints
+       behind the bars (D122). -->
+  <div class="sp-vis" style="{box};--vis-well:{el.well}">
     {#if slot}{@render slot()}{/if}
   </div>
 {:else if el.type === "list"}

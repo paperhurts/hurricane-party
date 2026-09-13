@@ -262,7 +262,13 @@ export type Element =
        * origin: a band pushed past 8 dB either way turns `strike`. */
       hot?: { beyond: number; tint: Token };
     })
-  | (Placed & { type: "visualizer" })
+  | (Placed & {
+      type: "visualizer";
+      /** How strongly the analyser's own well paints behind the bars, 0..1
+       * (D122). 1, the default, is Eyewall's solid well; a skin with a
+       * picture behind its chrome lets it show through. */
+      well: number;
+    })
   | (Placed & {
       type: "list";
       /** The playlist's rows (D99). The window draws them, since they scroll,
@@ -653,8 +659,14 @@ function element(
       }
       return e;
     }
-    case "visualizer":
-      return { ...placed(v, name, path), type };
+    case "visualizer": {
+      let well = 1;
+      if (v.well !== undefined) {
+        well = num(v.well, `${path}.well`);
+        if (well < 0 || well > 1) fail(`${path}.well`, "must be between 0 and 1");
+      }
+      return { ...placed(v, name, path), type, well };
+    }
     case "list":
       // The playlist's rows (D99): the skin's box, metrics and colours; the
       // window's rows inside them.

@@ -113,7 +113,9 @@
     display: block;
     width: 100%;
     height: 100%;
-    background: var(--surface);
+    /* The skin's well strength (D122): solid on Eyewall, a wash over a
+       made skin's picture. */
+    background: color-mix(in srgb, var(--surface) calc(var(--vis-well, 1) * 100%), transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
   }
 </style>
