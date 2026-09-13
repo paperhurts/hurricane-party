@@ -196,7 +196,7 @@ Every element is an absolute rectangle in window space. Origin is the window's t
 | `slot` | A box with no art, for something the window draws (D99) | `rect` |
 | `visualizer` | Where the component from `visualizer` draws | `rect` |
 
-A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter.
+A `slider`'s three pieces are each optional and at least one is required: `track` under the whole length, `fill` from the start to the value, `thumb` at it. All three is a seek bar; a `fill` alone is a level meter. The `track` may carry its own `opacity`, 0..1 (D126): Eyewall draws its EQ rail at full alpha in the sheet and quiets it to 0.22 here, so a skin that needs the rail stronger — a made skin, over a picture — changes a number rather than the art.
 
 **A centred slider (D98).** `origin`, 0..1, makes a slider a centred control: the fill runs from the origin to the value rather than from the start, the wheel nudges it by 1/48 of its range, and a double press returns it to the origin. The EQ's gains sit at `0.5`, which is 0 dB. `lit` is the same shape as on a text, `{ bind, when, tint?, opacity? }`, and gives the fill and thumb a second look while the binding holds; every EQ slider dims while the EQ is off. `hot`, `{ beyond, tint }`, tints the thumb once the value is more than `beyond` from the origin, and needs an origin to measure from. The dim wins over hot. A text's `align` is `left` (the default), `center` or `right`.
 

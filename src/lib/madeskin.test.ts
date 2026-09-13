@@ -162,6 +162,19 @@ describe("a skin made from a picture (#131)", () => {
     expect(() => parseSkin(m)).toThrow(/well/);
   });
 
+  // The rail was the one thing the floor could not reach while its 0.22 was
+  // baked into the sheet (D126).
+  it("lifts the EQ rail over the floor, and keeps it quieter than the fill", () => {
+    const { skin } = parseSkin(madeManifest(made()));
+    const sliders = skin.windows.equalizer.full.elements.filter((e) => e.type === "slider");
+    expect(sliders).toHaveLength(11);
+    for (const s of sliders) {
+      if (s.type !== "slider") continue;
+      expect(s.trackOpacity).toBeGreaterThanOrEqual(QUIET_FLOOR);
+      expect(s.trackOpacity).toBeLessThan(1);
+    }
+  });
+
   it("is made again, unchanged, from its own manifest", () => {
     const m = madeManifest({ ...made(), pictureHeight: 700 });
     expect(remade(JSON.parse(JSON.stringify(m)))).toEqual(m);

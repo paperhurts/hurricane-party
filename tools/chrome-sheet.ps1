@@ -11,10 +11,11 @@
     looks like, and writes the sheet at every scale the manifest lists (1x and
     2x, D73), with strokes that thick.
 
-    The look is the CSS chrome that shipped in v0.4b, transcribed. Two sprites
-    are shared by many elements and drawn at full alpha, because the element
-    carries the strength as `opacity` (D93): `ring`, a one-pixel border, is the
-    window frame at 0.3 and a control's edge at 0.14; `solid` is every well.
+    The look is the CSS chrome that shipped in v0.4b, transcribed. Three sprites
+    are drawn at full alpha, because the manifest carries their strength as
+    `opacity` (D93): `ring`, a one-pixel border, is the window frame at 0.3 and
+    a control's edge at 0.14; `solid` is every well; and the EQ's rail is its
+    sliders' `track` at 0.22 (D126).
 
     Windows PowerShell 5.1, System.Drawing only. Re-run after editing the
     manifest's rectangles or the glyphs below; commit the PNGs it writes.
@@ -365,11 +366,14 @@ function Draw-Sprite($g, $job, [int]$s) {
 
     switch ($recipe) {
         # The EQ's rail: one hairline down the middle and the 0 dB tick across
-        # it, both at the CSS rail's strength. One tint: the tick was the text colour,
-        # now the accent like the rail, a 5-pixel difference nobody will miss.
+        # it. One tint: the tick was the text colour, now the accent like the
+        # rail, a 5-pixel difference nobody will miss. At full alpha: the CSS
+        # rail's 0.22 is the track's `opacity` in the manifest (D126), where a
+        # made skin's floor can lift it. Baked in here, it could not, and the
+        # rail was the one thing left faint over a picture.
         "eq.track" {
-            Fill $g ($x + 8 * $s) $y $s $h 0.22
-            Fill $g ($x + 6 * $s) ($y + 34 * $s) (5 * $s) $s 0.22
+            Fill $g ($x + 8 * $s) $y $s $h 1.0
+            Fill $g ($x + 6 * $s) ($y + 34 * $s) (5 * $s) $s 1.0
         }
         # The lit part of the rail, 0 dB to the thumb: one column, stretched.
         "eq.fill" { Fill $g ($x + 8 * $s) $y $s $h 1.0 }

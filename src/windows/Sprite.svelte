@@ -504,7 +504,12 @@
   >
     {#if el.track}
       {@const s = skin.slice(el.track)}
-      <div class="sp sp-track" class:mask class:final={!mask} style={vars({ n: s })}></div>
+      <div
+        class="sp sp-track"
+        class:mask
+        class:final={!mask}
+        style="{vars({ n: s })};opacity:{el.trackOpacity}"
+      ></div>
     {/if}
     {#if el.fill}
       {@const s = skin.slice(el.fill)}

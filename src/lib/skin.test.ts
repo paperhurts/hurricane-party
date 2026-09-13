@@ -276,6 +276,21 @@ describe("the Eyewall manifest", () => {
     expect(by("eqCurveWell")).toMatchObject({ type: "image", rect: [4, 42, 60, 55] });
   });
 
+  // The rail is drawn at full alpha and quieted here, where a skin can change
+  // it (D126); a slider with no track opacity draws its track at full strength.
+  it("carries the EQ rail's strength as the track's opacity", () => {
+    const { skin } = parseSkin(eyewall);
+    const eq = skin.windows.equalizer.full.elements;
+    const sliders = eq.filter((e) => e.type === "slider");
+    expect(sliders).toHaveLength(11);
+    for (const s of sliders) expect(s).toMatchObject({ trackOpacity: 0.22 });
+    const seek = skin.windows.main.full.elements.find((e) => e.name === "seek");
+    expect(seek).toMatchObject({ trackOpacity: 1 });
+    const bad = JSON.parse(JSON.stringify(eyewall));
+    bad.windows.equalizer.elements.eqPre.track.opacity = 1.5;
+    expect(() => parseSkin(bad)).toThrow(/eqPre\.track\.opacity/);
+  });
+
   it("draws the playlist's interior: the rows, seven buttons, the count and the link field (D99, D124)", () => {
     const { skin } = parseSkin(eyewall);
     const els = elementsOf(skin, "playlist", false).elements;

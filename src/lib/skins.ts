@@ -61,7 +61,7 @@ export async function currentSkin(): Promise<Wearable> {
   if (id === "eyewall") return { id, skin: EYEWALL, resolve: eyewallFile };
   try {
     const on = await invoke<SkinOnDisk>("read_skin", { id });
-    const resolve = (file: string) => convertFileSrc(`${on.dir}/${file}`);
+    const own = (file: string) => convertFileSrc(`${on.dir}/${file}`);
     const written = JSON.parse(on.manifest) as { generator?: number };
     // A manifest is not the skin, it is what this importer made of it, so an
     // importer that has learned something rebuilds it from the art rather
@@ -84,6 +84,11 @@ export async function currentSkin(): Promise<Wearable> {
     }
     const parsed = again ? parseSkin(again) : stale ? await rebuild(id, on, "an older import") : parseSkin(written);
     for (const w of parsed.warnings) console.warn(`${id}: ${w}`);
+    // And it wears Eyewall's sheets as they are now, not the copies made with
+    // it (D126): a layout from today on a sheet from the day it was made
+    // reads sprites that have since moved or changed strength. The copies stay
+    // in the folder, so the folder is still a whole skin wherever it goes.
+    const resolve = again ? (file: string) => FILES[file] ?? own(file) : own;
     return { id, skin: parsed.skin, resolve };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
