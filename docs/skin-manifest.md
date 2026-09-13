@@ -232,6 +232,8 @@ A `slot` is a placed box with nothing drawn in it: where the window puts somethi
 
 A sheet in the object form may say **`"art": "final"`**, and its sprites are drawn as the pixels they are even in a `mask` skin: `"picture": { "1": "picture.png", "2": "picture@2x.png", "art": "final" }`. That is how a made skin's picture sits behind the tinted chrome without being tinted into a silhouette of itself. A sheet named by a bare file name follows the skin's `art`.
 
+An `image` may say **`"fit": "reveal"`** instead of the default `"stretch"`. A stretched sprite is scaled to its box; a revealed one is drawn at the box's width with its own proportions, from the top, so a box that grows taller uncovers more of a tall sprite instead of smearing a short one. Past the sprite's end the ground shows. A made skin's playlist backdrop is revealed: its sprite runs from the playlist's third of the picture to the bottom of the sheet, and dragging the window down shows the rest of the picture.
+
 A made skin carries `"maker": <version>` the way an imported one carries `generator` (D107). Only `generator` triggers a rebuild.
 
 ### Glow is declared, not assumed

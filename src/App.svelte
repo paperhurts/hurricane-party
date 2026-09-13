@@ -8,7 +8,7 @@
   import { parseSkin } from "./lib/skin";
   import { measureSheets, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
-  import { backdropPng, madeManifest, nameFrom, pixelsOf } from "./lib/madeskin";
+  import { backdropPng, madeManifest, nameFrom, pictureHeightFor, pixelsOf } from "./lib/madeskin";
   import { paletteFromPixels } from "./lib/palette";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
@@ -1203,11 +1203,12 @@
       const bitmap = await createImageBitmap(new Blob([bytes]));
       const { palette, viscolor } = paletteFromPixels(pixelsOf(bitmap));
       const [one, two] = await Promise.all([backdropPng(bitmap, 1), backdropPng(bitmap, 2)]);
+      const pictureHeight = pictureHeightFor(bitmap.width, bitmap.height);
       bitmap.close();
       id = (await invoke<{ id: string; dir: string }>("make_skin", { name })).id;
       await invoke("write_skin_picture", one, { headers: { "x-hp-skin": id, "x-hp-scale": "1" } });
       await invoke("write_skin_picture", two, { headers: { "x-hp-skin": id, "x-hp-scale": "2" } });
-      const manifest = madeManifest({ name, palette, viscolor });
+      const manifest = madeManifest({ name, palette, viscolor, pictureHeight });
       // The same validator every skin goes through, before anything is worn.
       parseSkin(manifest);
       await invoke("write_skin_manifest", { id, json: JSON.stringify(manifest, null, 1) });

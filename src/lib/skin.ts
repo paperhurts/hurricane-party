@@ -180,6 +180,13 @@ export type Element =
       sprite: SpriteRef;
       inactive?: SpriteRef;
       role?: "drag";
+      /** How the sprite fills a box that has grown (D122). `stretch`, the
+       * default, scales it to the box. `reveal` draws it at the box's width
+       * with its own proportions, from the top, so a taller box shows more of
+       * a tall sprite instead of stretching a short one: a made skin's
+       * playlist uncovering more of its picture as the window is dragged
+       * down. */
+      fit: "stretch" | "reveal";
       /** Over the tint, so one full-alpha sprite serves every strength a skin
        * wants: the same 8x8 ring is the window's frame at 0.3 and a control's
        * edge at 0.14. */
@@ -535,6 +542,7 @@ function element(
         sprite: sprite(v.sprite, skin.sheets, `${path}.sprite`),
         inactive: optSprite(v, "inactive", skin.sheets, path),
         opacity: opacityOf(v, path),
+        fit: v.fit === undefined ? "stretch" : oneOf(v.fit, ["stretch", "reveal"] as const, `${path}.fit`),
       };
       if (v.role !== undefined) e.role = oneOf(v.role, ["drag"] as const, `${path}.role`);
       return e;

@@ -394,6 +394,7 @@
     class="sp sp-image"
     class:mask
     class:final={!mask}
+    class:reveal={el.fit === "reveal"}
     class:drag={el.role === "drag"}
     style="{box};opacity:{el.opacity};{vars(states)}"
     {onpointerdown}
