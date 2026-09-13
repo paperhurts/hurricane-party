@@ -230,6 +230,20 @@ fn ffmpeg_for(app: &AppHandle) -> Option<PathBuf> {
     own_ffmpeg(app).or_else(bundled_ffmpeg)
 }
 
+/// Whether a file is named as an ffmpeg is, before it is run to ask (D133):
+/// `ffmpeg.exe`, or a name that begins with it, like the sidecar's own
+/// `ffmpeg-x86_64-pc-windows-msvc.exe`.
+pub fn named_like_ffmpeg(name: &str) -> std::result::Result<(), String> {
+    let n = name.to_ascii_lowercase();
+    if n.starts_with("ffmpeg") && n.ends_with(".exe") {
+        Ok(())
+    } else {
+        Err(format!(
+            "{name} is not ffmpeg: pick a file called ffmpeg.exe"
+        ))
+    }
+}
+
 /// Whether an ffmpeg can do this app's work, from what it says about itself:
 /// `-version` and `-encoders`. The version line when it can; the reason when
 /// it cannot, in words for the person who picked it (D133). The one encoder
@@ -2238,6 +2252,17 @@ mod tests {
         // Anything else keeps yt-dlp's words rather than guessing.
         let odd = explain_export("opera", "ERROR: something nobody has seen");
         assert!(odd.contains("something nobody has seen"), "{odd}");
+    }
+
+    #[test]
+    fn only_a_file_named_as_ffmpeg_is_run_to_ask() {
+        assert!(named_like_ffmpeg("ffmpeg.exe").is_ok());
+        assert!(named_like_ffmpeg("FFmpeg.EXE").is_ok());
+        assert!(named_like_ffmpeg("ffmpeg-x86_64-pc-windows-msvc.exe").is_ok());
+        let why = named_like_ffmpeg("notepad.exe").unwrap_err();
+        assert!(why.contains("notepad.exe"), "{why}");
+        assert!(named_like_ffmpeg("ffmpeg.txt").is_err());
+        assert!(named_like_ffmpeg("my-ffmpeg.exe").is_err());
     }
 
     #[test]

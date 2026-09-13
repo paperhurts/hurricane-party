@@ -634,13 +634,42 @@ async fn set_ffmpeg(app: AppHandle, path: String) -> Result<String, String> {
         if !pb.is_file() {
             return Err("there is no file there".into());
         }
+        // Asking a program what it is means running it, so only a file that
+        // says it is ffmpeg gets run. Picking Notepad opened Notepad, and the
+        // check then waited for someone to close it (#18).
+        let named = pb
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        pipeline::named_like_ffmpeg(&named)?;
         let ask = |flag: &'static str| {
             let cmd = app.shell().command(&pb).args(["-hide_banner", flag]);
             async move {
-                cmd.output()
+                use tauri_plugin_shell::process::CommandEvent;
+                let (mut rx, child) = cmd.spawn().map_err(|e| format!("it would not run: {e}"))?;
+                let mut out = Vec::new();
+                // An ffmpeg answers these in well under a second. One that
+                // has not answered in ten is not one to keep, and is stopped.
+                let read = async {
+                    while let Some(ev) = rx.recv().await {
+                        match ev {
+                            CommandEvent::Stdout(b) => {
+                                out.extend_from_slice(&b);
+                                out.push(b'\n');
+                            }
+                            CommandEvent::Terminated(_) => break,
+                            _ => {}
+                        }
+                    }
+                };
+                if tokio::time::timeout(std::time::Duration::from_secs(10), read)
                     .await
-                    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-                    .map_err(|e| format!("it would not run: {e}"))
+                    .is_err()
+                {
+                    let _ = child.kill();
+                    return Err("it did not answer within ten seconds".to_string());
+                }
+                Ok(String::from_utf8_lossy(&out).into_owned())
             }
         };
         let version = ask("-version").await?;
