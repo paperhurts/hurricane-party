@@ -118,9 +118,12 @@
       say(String(e).toUpperCase());
     }
   }
-  // A menu that closes takes an unfinished name with it.
+  // A menu that closes takes an unfinished name with it; one that opens
+  // shows the preset in use, which can be below the list's fold.
+  let menuEl = $state<HTMLElement | null>(null);
   $effect(() => {
     if (!menuOpen) naming = false;
+    else menuEl?.querySelector(".plist .on")?.scrollIntoView({ block: "nearest" });
   });
   function nameKey(e: KeyboardEvent) {
     if (e.key === "Enter") saveAs();
@@ -247,19 +250,27 @@
     <polyline points={curve} class="line" />
   </svg>
   {#if menuOpen}
-    <div class="pmenu" role="menu">
-      {#each SHIPPED as p (p.name)}
-        <button role="menuitem" class:on={p.name === preset} onclick={() => pick(p)}>{p.name}</button>
-      {/each}
-      {#if mine.length}
-        <hr />
-        {#each mine as p (p.id)}
-          <div class="mine">
-            <button role="menuitem" class:on={p.name === preset} title={p.name} onclick={() => pick(p)}>{p.name}</button>
-            <button class="x" title="Remove {p.name}" aria-label="Remove {p.name}" onclick={() => remove(p)}>×</button>
-          </div>
+    <div class="pmenu" role="menu" bind:this={menuEl}>
+      <!-- The list scrolls; SAVE and IMPORT stay at the bottom where they can
+           be reached, however many presets the person has. -->
+      <div class="plist">
+        {#each SHIPPED as p (p.name)}
+          <button role="menuitem" class:on={p.name === preset} onclick={() => pick(p)}>{p.name}</button>
         {/each}
-      {/if}
+        {#if mine.length}
+          <hr />
+          {#each mine as p (p.id)}
+            <div class="mine">
+              <button role="menuitem" class:on={p.name === preset} title={p.name} onclick={() => pick(p)}
+                >{p.name}</button
+              >
+              <button class="x" title="Remove {p.name}" aria-label="Remove {p.name}" onclick={() => remove(p)}
+                >×</button
+              >
+            </div>
+          {/each}
+        {/if}
+      </div>
       <hr />
       {#if naming}
         <input
@@ -273,7 +284,7 @@
       {:else}
         <div class="acts">
           <button role="menuitem" title="Keep the EQ as it is now under a name" onclick={startNaming}>SAVE…</button>
-          <button role="menuitem" title="Presets from Winamp .eqf files" onclick={importEqf}>IMPORT .EQF…</button>
+          <button role="menuitem" title="Presets from Winamp .eqf files" onclick={importEqf}>IMPORT…</button>
         </div>
       {/if}
     </div>
@@ -334,9 +345,9 @@
 
   /* The preset menu, over the curve. The skin's boxes let the pointer
      through; the menu takes it back. */
-  /* As wide as its names need, and as tall as the window leaves below the
-     curve's top, scrolling past that: the person's presets can outnumber
-     the rows the curve box has. */
+  /* Wider than the curve box, over the first sliders while it is open, so a
+     name from a Winamp file reads; as tall as the window leaves below the
+     curve's top, with the list scrolling past that. */
   .pmenu {
     position: absolute;
     left: 0;
@@ -344,12 +355,8 @@
     z-index: 5;
     display: flex;
     flex-direction: column;
-    min-width: 100%;
-    width: max-content;
-    max-width: 150px;
+    width: 110px;
     max-height: 70px;
-    overflow-y: auto;
-    scrollbar-width: thin;
     padding: 2px 0;
     pointer-events: auto;
     background: var(--ground);
@@ -389,6 +396,14 @@
     margin: 2px 0;
     border: 0;
     background: color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .plist {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--accent) 50%, transparent) transparent;
   }
   /* One of the person's: the name, and the × that removes it. */
   .mine {
