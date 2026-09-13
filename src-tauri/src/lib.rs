@@ -1,6 +1,7 @@
 pub mod bond;
 mod control;
 mod db;
+mod eq_presets;
 mod jobs;
 mod library;
 mod localimport;
@@ -913,6 +914,46 @@ fn get_glow(app: AppHandle) -> bool {
     db::glow(&conn)
 }
 
+// ---- EQ presets (#145) --------------------------------------------------------
+
+/// The person's own EQ presets, oldest first. The four that ship are the
+/// frontend's constant and never pass through here.
+#[tauri::command]
+fn eq_presets(app: AppHandle) -> Result<Vec<eq_presets::Preset>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::list(&conn)
+}
+
+/// Save the EQ as it is under a name; the same name again replaces it.
+#[tauri::command]
+fn save_eq_preset(
+    app: AppHandle,
+    name: String,
+    preamp: f64,
+    bands: Vec<f64>,
+) -> Result<eq_presets::Preset, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::save(&conn, &name, preamp, &bands)
+}
+
+#[tauri::command]
+fn delete_eq_preset(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::delete(&conn, id)
+}
+
+/// Every preset in the `.eqf` files the person picked (D31). Read here, not
+/// over the asset protocol: a preset file lives wherever they keep it.
+#[tauri::command]
+fn import_eqf(app: AppHandle, paths: Vec<String>) -> eq_presets::Imported {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::import(&conn, &paths)
+}
+
 #[tauri::command]
 fn set_glow(app: AppHandle, on: bool) -> Result<(), db::DbError> {
     {
@@ -1128,6 +1169,10 @@ pub fn run() {
             set_play_mode,
             get_glow,
             set_glow,
+            eq_presets,
+            save_eq_preset,
+            delete_eq_preset,
+            import_eqf,
             import_skin,
             write_skin_manifest,
             discard_skin,
