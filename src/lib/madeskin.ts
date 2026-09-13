@@ -29,7 +29,9 @@ export const PICTURE_MAX_H = 1600;
  * playlist can uncover more of it as it grows (D122). The first made skin
  * cropped it to exactly three windows and the playlist stretched that crop,
  * throwing away a tall picture's lower half. At least three windows tall, so
- * a wide picture still covers all three; at most `PICTURE_MAX_H`.
+ * every window's third exists in the sheet — a picture shorter than that
+ * fills what it can from the top and leaves the rest clear — and at most
+ * `PICTURE_MAX_H`.
  */
 export function pictureHeightFor(width: number, height: number): number {
   if (!(width > 0 && height > 0)) return PICTURE_H;
@@ -135,23 +137,28 @@ export function pixelsOf(bitmap: ImageBitmap, size = 96): Uint8ClampedArray {
   return g.getImageData(0, 0, size, size).data;
 }
 
-/** The backdrop sheet at one scale: the picture at the windows' width and its
- * own proportions, from its top, as tall as `pictureHeightFor` says. A picture
- * too wide to be three windows tall at that width is scaled to that height
- * instead and centred across, the way a wallpaper covers a screen. */
+/**
+ * The backdrop sheet at one scale: the whole picture at the windows' width,
+ * its own proportions, from the top.
+ *
+ * Always fitted by width, never cropped at the sides. The first version scaled
+ * a picture that was too short for three windows up to their height instead,
+ * which made a square picture wider than the windows and cut its sides off —
+ * the owner's picture lost the balloon its skeleton was reaching for. So a
+ * short or wide picture covers as far down the windows as it reaches and the
+ * sheet is clear below it, where the ground shows, exactly as it does past
+ * the end of a tall picture in a grown playlist.
+ */
 export async function backdropPng(bitmap: ImageBitmap, scale: 1 | 2): Promise<Uint8Array> {
   const W = PICTURE_W * scale;
   const H = pictureHeightFor(bitmap.width, bitmap.height) * scale;
   const c = new OffscreenCanvas(W, H);
   const g = c.getContext("2d")!;
-  const byWidth = W / bitmap.width;
-  const k = bitmap.height * byWidth >= H ? byWidth : H / bitmap.height;
-  const w = bitmap.width * k;
-  const h = bitmap.height * k;
+  const k = W / bitmap.width;
   g.imageSmoothingQuality = "high";
   // From the top: the equalizer's third ends where the playlist's begins, and
   // a picture taller than the cap loses its bottom, never its middle.
-  g.drawImage(bitmap, (W - w) / 2, 0, w, h);
+  g.drawImage(bitmap, 0, 0, W, bitmap.height * k);
   const blob = await c.convertToBlob({ type: "image/png" });
   return new Uint8Array(await blob.arrayBuffer());
 }

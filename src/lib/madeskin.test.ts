@@ -90,7 +90,10 @@ describe("a skin made from a picture (#131)", () => {
   it("keeps a picture at the windows' width and its own height, within bounds", () => {
     // A tall portrait keeps its height, so the playlist has something to reveal.
     expect(pictureHeightFor(1000, 2000)).toBe(550);
-    // A wide landscape still covers all three windows.
+    // A wide landscape still gets a sheet three windows tall, so every
+    // window's third exists; the picture fills its top at the windows' width
+    // and the rest is clear (backdropPng), rather than being scaled up to
+    // that height and cropped at the sides.
     expect(pictureHeightFor(4000, 1000)).toBe(PICTURE_H);
     // A very tall strip stops at the cap.
     expect(pictureHeightFor(100, 100000)).toBe(PICTURE_MAX_H);
