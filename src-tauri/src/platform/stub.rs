@@ -5,7 +5,7 @@
 //! without `#[cfg(windows)]` leaking into the callers — it is a compile target,
 //! not a supported platform.
 
-use super::{NativeWindow, WindowPlatform};
+use super::{NativeWindow, TreeEvent, TreeWatch, WindowPlatform};
 
 pub struct StubPlatform;
 
@@ -42,5 +42,18 @@ impl WindowPlatform for StubPlatform {
 
     fn open_folder(&self, _path: &std::path::Path) -> Result<(), String> {
         Err("opening a folder is not supported on this platform".into())
+    }
+
+    // Elsewhere the library notices a folder when its root is clicked (D95).
+    fn watch_tree(
+        &self,
+        _root: &std::path::Path,
+        _on_event: Box<dyn FnMut(TreeEvent) + Send>,
+    ) -> Result<TreeWatch, String> {
+        Err("watching a folder is not supported on this platform".into())
+    }
+
+    fn in_use(&self, _path: &std::path::Path) -> bool {
+        false
     }
 }

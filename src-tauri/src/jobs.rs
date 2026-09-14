@@ -518,6 +518,8 @@ async fn run_one(app: AppHandle, job: Job) {
                 }
             }
             let _ = app.emit("library-changed", ());
+            // Its folder may have just become a root (D136): watch it (#111).
+            crate::watch::nudge(&app);
         }
         Err(e) => {
             let conn = db.0.lock().unwrap();
