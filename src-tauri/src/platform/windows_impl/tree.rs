@@ -1,7 +1,7 @@
 //! Watching a folder on Windows (#111, D137).
 //!
 //! `ReadDirectoryChangesW` on the folder's handle, overlapped, on a thread of
-//! the watch's own. Two things make it more than a loop.
+//! the watch's own. Three things make it more than a loop.
 //!
 //! **An open handle refuses an eject.** A library root is exactly the folder
 //! that lives on a drive a person unplugs (D28), and Windows answers *Eject*
@@ -17,6 +17,12 @@
 //!
 //! **Stopping is prompt.** Dropping the `TreeWatch` signals the thread, which
 //! cancels its read and closes the handle before the drop returns.
+//!
+//! **Starting is complete.** Windows only collects changes for a handle once
+//! the first read has been issued on it, so `watch` waits for that before it
+//! returns. Returning straight away lost whatever changed in between, which a
+//! slow CI runner found: a file written just after `watch` came back was never
+//! reported.
 
 use crate::platform::{TreeEvent, TreeWatch};
 use std::ffi::{c_void, OsString};
@@ -48,6 +54,10 @@ use windows::Win32::UI::WindowsAndMessaging::{GUID_IO_VOLUME_DISMOUNT, GUID_IO_V
 /// straight away and closes one handle, so this is a ceiling for a thread
 /// that is stuck, not a delay anyone sees.
 const LET_GO_MS: u32 = 5_000;
+
+/// How long `watch` waits for its thread's first read. A ceiling for a
+/// thread that never gets going, not a delay anyone sees.
+const READY_MS: u32 = 5_000;
 
 /// A manual-reset event that can cross threads. `HANDLE` holds a raw pointer
 /// and so is not `Send`; an event is safe to signal from any thread.
@@ -93,6 +103,9 @@ struct Signals {
     /// Set by the thread once the folder's handle is closed. The device
     /// callback waits for it before it lets Windows go ahead.
     let_go: Event,
+    /// Set by the thread once its first read is issued, or when it ends
+    /// without one. `watch` waits for it.
+    ready: Event,
 }
 
 /// Held inside the `TreeWatch`. Dropping it stops the thread and waits.
@@ -118,6 +131,7 @@ pub(super) fn watch(
         stop: Event::new()?,
         release: Event::new()?,
         let_go: Event::new()?,
+        ready: Event::new()?,
     });
     let wide: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
     // SAFETY: a NUL-terminated path that outlives the call. BACKUP_SEMANTICS
@@ -144,10 +158,16 @@ pub(super) fn watch(
         .name("hp-watch-tree".into())
         .spawn(move || run(HANDLE(raw as *mut c_void), thread_signals, on_event));
     match thread {
-        Ok(t) => Ok(TreeWatch::new(Box::new(Guard {
-            signals,
-            thread: Some(t),
-        }))),
+        Ok(t) => {
+            // SAFETY: a live event handle, owned by `signals`.
+            unsafe {
+                let _ = WaitForSingleObject(signals.ready.0, READY_MS);
+            }
+            Ok(TreeWatch::new(Box::new(Guard {
+                signals,
+                thread: Some(t),
+            })))
+        }
         Err(e) => {
             // SAFETY: the thread never started, so the handle is still ours.
             unsafe {
@@ -197,6 +217,8 @@ fn run(dir: HANDLE, signals: Arc<Signals>, mut on_event: Box<dyn FnMut(TreeEvent
                 on_event(TreeEvent::Ended);
                 break;
             }
+            // From here, Windows keeps what changes for the next read.
+            signals.ready.set();
             // SAFETY: three live event handles.
             let which = unsafe {
                 WaitForMultipleObjects(&[io.0, signals.stop.0, signals.release.0], false, INFINITE)
@@ -243,6 +265,8 @@ fn run(dir: HANDLE, signals: Arc<Signals>, mut on_event: Box<dyn FnMut(TreeEvent
         let _ = CloseHandle(dir);
     }
     signals.let_go.set();
+    // A thread that ended before its first read must not keep `watch` waiting.
+    signals.ready.set();
     if released {
         on_event(TreeEvent::Released);
     }
