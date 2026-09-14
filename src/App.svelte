@@ -18,6 +18,7 @@
   import { eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
   import { alertsStale, issued, readout, type RadarSite, type RadarStatus } from "./lib/radar";
+  import { estimate, meter, pressure, sayAudio, sayPressure, size, tipsOver, type StorageStatus } from "./lib/storage";
   import {
     backdropPng,
     madeManifest,
@@ -45,6 +46,8 @@
     bytes_total: number | null;
     error: string | null;
     attempts: number;
+    /** A video download, which a storage warning can make audio only (#162). */
+    want_video: boolean;
     playlist_id: number | null;
     playlist_name: string | null;
   };
@@ -60,7 +63,7 @@
     position: number | null;
   };
 
-  type Root = { id: number; label: string; path: string; count: number; present: boolean };
+  type Root = { id: number; label: string; path: string; count: number; bytes: number; present: boolean };
 
   // What a scan says, whether the folder was just added or is being looked at
   // again: a known root is found by its path, so the same call serves both.
@@ -137,6 +140,20 @@
   let roots = $state<Root[]>([]);
   let scanning = $state(false);
   let notice = $state<string | null>(null);
+  // The storage budget (#162, D138): the figures, the notice a warning wrote
+  // (shown in the warning colour while it is still the one showing), and the
+  // downloads that notice offers to make audio only.
+  let storage = $state<StorageStatus | null>(null);
+  let storageAt = 0;
+  let warnNotice = $state<string | null>(null);
+  let pendingAudio = $state<{ ids: number[]; notice: string } | null>(null);
+  // A finished video being made into an MP3 (#162): the job, and once it has
+  // landed, the offer to remove the video, which leads to D83's delete step.
+  let pendingSwap = $state<{ jobId: number; mediaId: number; title: string; bytes: number | null } | null>(null);
+  let swapOffer = $state<{ mediaId: number; notice: string } | null>(null);
+  let ceilingEditing = $state(false);
+  let ceilingGb = $state<number | null>(null);
+  let storageMeter = $derived(storage ? meter(storage) : null);
   // Drag-to-reorder within a playlist: the lifted row, and the insertion
   // index in `shown` (0..n) it would land at.
   let dragId = $state<number | null>(null);
@@ -293,8 +310,35 @@
   async function refreshJobs() {
     try {
       jobs = await invoke<Job[]>("list_jobs");
+      if (pendingSwap) swapLanded(pendingSwap);
     } catch (e) {
       error = String(e);
+    }
+  }
+
+  /** The MP3 made from a video has landed, or failed (#162). */
+  function swapLanded(s: { jobId: number; mediaId: number; title: string; bytes: number | null }) {
+    const j = jobs.find((j) => j.id === s.jobId);
+    if (j?.status === "done") {
+      pendingSwap = null;
+      notice = `The MP3 of “${s.title}” is in the library. The video still takes ${s.bytes ? size(s.bytes) : "its space"} until you remove it.`;
+      swapOffer = { mediaId: s.mediaId, notice };
+    } else if (j?.status === "failed") {
+      pendingSwap = null;
+      error = `The MP3 of “${s.title}” could not be made: ${j.error ?? "the download failed"}`;
+    }
+  }
+
+  /** Make an MP3 of a video already in the library, from the file on disk (#162, D80). */
+  async function audioFromVideo(t: MediaRow) {
+    clearNotice();
+    try {
+      const made = await invoke<{ job_id: number; title: string; bytes: number | null }>("audio_from_video", { id: t.id });
+      pendingSwap = { jobId: made.job_id, mediaId: t.id, title: made.title, bytes: made.bytes };
+      notice = `Making an MP3 of “${made.title}” from the video already on disk. When it lands, this offers to remove the video.`;
+      refreshJobs();
+    } catch (e) {
+      notice = e instanceof Error ? e.message : String(e);
     }
   }
   async function refreshLibrary() {
@@ -318,6 +362,7 @@
     refreshLibrary();
     invoke<string>("library_path").then((p) => (libraryPath = p));
     refreshDownloadDir();
+    refreshStorage();
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
     invoke<string>("get_theme").then((t) => {
@@ -350,11 +395,15 @@
         refreshJobs();
         // A drive coming back, or a download waiting for one, shows here.
         refreshDownloadDir();
+        refreshStorage();
       }),
       // Purricane's Main has a calm pill of its own (D132); the box here
       // moves with it.
       listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "library" } }),
-      listen("library-changed", refreshLibrary),
+      listen("library-changed", () => {
+        refreshLibrary();
+        refreshStorage();
+      }),
       // A root's watch saw files leave (#111): counted and offered, the way
       // a click on the root offers it, never dropped.
       listen<{ root_id: number; root: string; missing: number }>("library-watched", (e) => watchedGone(e.payload)),
@@ -422,6 +471,8 @@
     // previous run.
     const tick = setInterval(() => {
       if (active.length) refreshJobs();
+      // The meter follows a download as it writes, every few seconds (#162).
+      if (active.length && Date.now() - storageAt > 5000) refreshStorage();
     }, 400);
     // A finished download leaves the list five minutes after it lands. Rust
     // applies that cutoff (jobs::list), but only when asked, and the poll
@@ -477,6 +528,17 @@
       .reduce((n, i) => n + (i.duration_s ?? 0), 0),
   );
   let listHave = $derived((list?.items ?? []).filter((i) => i.have).length);
+  // What the picked entries will take, at this library's own rate for the
+  // kind being queued, and what that does to the budget (#162).
+  let listEstimate = $derived(
+    storage && list
+      ? estimate(
+          list.items.filter((i) => listPick.has(i.id)).map((i) => i.duration_s),
+          wantVideo ? storage.video_bps : storage.audio_bps,
+        )
+      : null,
+  );
+  let listPressure = $derived(storage && listEstimate ? pressure(storage, listEstimate.bytes) : null);
 
   /** mm:ss, or a dash for an entry yt-dlp gave no duration. */
   const dur = (s: number | null) =>
@@ -513,9 +575,87 @@
 
   async function queueOne(u: string) {
     try {
-      await invoke<number>("enqueue_url", { url: u, wantVideo });
+      const id = await invoke<number>("enqueue_url", { url: u, wantVideo });
       url = "";
       refreshJobs();
+      // Its size is not known until it is probed, so the warning is about
+      // where the budget stands now. It is queued either way (#162).
+      await refreshStorage();
+      const p = storage ? pressure(storage, 0) : null;
+      if (storage && p) {
+        warnAbout(`${sayPressure(p, storage, 0)} Queued anyway.`, wantVideo ? [id] : [], null);
+      }
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /**
+   * A storage warning in the notice line (#162, D138): the download is
+   * already queued, and the way out is offered beside it when it is a video.
+   */
+  function warnAbout(text: string, videoIds: number[], videoBytes: number | null) {
+    const way = videoIds.length && storage ? sayAudio(storage, videoBytes) : null;
+    notice = way ? `${text} ${way}` : text;
+    warnNotice = notice;
+    pendingAudio = videoIds.length ? { ids: videoIds, notice } : null;
+  }
+
+  async function refreshStorage() {
+    storageAt = Date.now();
+    try {
+      storage = await invoke<StorageStatus>("storage_status");
+    } catch {
+      // The meter keeps its last figures; nothing else depends on it.
+    }
+  }
+
+  /** Make downloads audio only: the way out a warning offers, or a job's own button. */
+  async function makeAudio(ids: number[]) {
+    type Switched = { id: number; outcome: string; leftovers: { path: string; bytes: number }[] };
+    pendingAudio = null;
+    try {
+      const done = await invoke<Switched[]>("make_audio_only", { ids });
+      const switched = done.filter((d) => d.outcome === "switched");
+      const finished = done.filter((d) => d.outcome === "finished").length;
+      const left = done.flatMap((d) => d.leftovers);
+      const said: string[] = [];
+      if (switched.length) {
+        said.push(
+          switched.length === 1 ? "It will download as audio only." : `${switched.length} will download as audio only.`,
+        );
+      }
+      if (finished) said.push(finished === 1 ? "One had already finished as a video." : `${finished} had already finished as videos.`);
+      if (left.length) {
+        const bytes = left.reduce((n, l) => n + l.bytes, 0);
+        const more = left.length > 1 ? ` and ${left.length - 1} more` : "";
+        said.push(
+          `The video download had already written ${size(bytes)} (${left[0].path}${more}). Delete ${left.length === 1 ? "it" : "them"} by hand to get the space back.`,
+        );
+      }
+      notice = said.join(" ") || "Nothing to change: those are audio already.";
+      warnNotice = null;
+      refreshJobs();
+      refreshStorage();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  function editCeiling() {
+    ceilingGb = storage?.ceiling ? Math.round(storage.ceiling / 1024 ** 3) : null;
+    ceilingEditing = true;
+  }
+
+  /** A ceiling on the whole library, in GB; empty or zero takes it away. It warns, and never holds a download. */
+  async function saveCeiling() {
+    const gb = ceilingGb != null && ceilingGb > 0 ? ceilingGb : null;
+    try {
+      storage = await invoke<StorageStatus>("set_storage_ceiling", { bytes: gb == null ? null : Math.round(gb * 1024 ** 3) });
+      ceilingEditing = false;
+      notice = gb == null
+        ? "No ceiling: the download drive's room is the limit, with a warning at 85% full."
+        : `The library's ceiling is ${size(gb * 1024 ** 3)}. Going past it warns, and never stops a download.`;
     } catch (e) {
       error = String(e);
     }
@@ -526,13 +666,19 @@
     const picked = list.items.filter((i) => listPick.has(i.id));
     if (picked.length === 0) return;
     listBusy = true;
+    // Worked out before the list goes, against the budget as it stands.
+    const est = listEstimate;
+    const p = listPressure;
     try {
-      const made = await invoke<{ playlist_id: number; queued: number }>("enqueue_playlist", {
+      const made = await invoke<{ playlist_id: number; queued: number; ids: number[] }>("enqueue_playlist", {
         name: list.title,
         urls: picked.map((i) => i.url),
         wantVideo,
       });
       notice = `Queued ${made.queued} of ${list.items.length} into "${list.title}". They land in that playlist as each one finishes.`;
+      if (storage && est && p) {
+        warnAbout(`${notice} ${sayPressure(p, storage, est.bytes)}`, wantVideo ? made.ids : [], est.bytes);
+      }
       list = null;
       url = "";
       refreshJobs();
@@ -959,6 +1105,8 @@
     pendingDelete = [];
     pendingPrune = null;
     pendingKeep = null;
+    pendingAudio = null;
+    swapOffer = null;
   }
 
   /**
@@ -1770,7 +1918,14 @@
       <button onclick={queueList} disabled={listBusy || listPick.size === 0}>
         {listBusy ? "Queueing\u2026" : `Queue ${listPick.size}`}
       </button>
-      <span class="dim">{runtime(listTotal)} of audio</span>
+      <span class="dim">
+        {runtime(listTotal)} of {wantVideo ? "video" : "audio"}{listEstimate
+          ? `, about ${size(listEstimate.bytes)}${listEstimate.unknown ? `, plus ${listEstimate.unknown} with no length` : ""}`
+          : ""}
+      </span>
+      {#if listPressure && storage && listEstimate}
+        <span class="budget warn">{sayPressure(listPressure, storage, listEstimate.bytes)}</span>
+      {/if}
       <span class="spacer"></span>
       <button class="mini ghost" onclick={() => (list = null)}>Cancel</button>
     </footer>
@@ -1793,8 +1948,18 @@
     </div>
   {/if}
   {#if notice}
-    <p class="notice">
+    <p class="notice" class:warn={notice === warnNotice}>
       <span>{notice}</span>
+      {#if swapOffer && swapOffer.notice === notice}
+        <button class="mini" onclick={() => removeTracks([swapOffer!.mediaId])} title="Takes the video's row out of the library; deleting its file is the step after, and asks first">
+          Remove the video…
+        </button>
+      {/if}
+      {#if pendingAudio && pendingAudio.notice === notice}
+        <button class="mini" onclick={() => makeAudio(pendingAudio!.ids)} title="Switch to audio only, even one already downloading">
+          {pendingAudio.ids.length === 1 ? "Make it audio only" : "Make them audio only"}
+        </button>
+      {/if}
       {#if pendingDelete.length}
         <button class="mini danger" onclick={deleteFiles} title="Asks first, and shows every path">
           {pendingDelete.length === 1 ? "Delete the file…" : `Delete the ${pendingDelete.length} files…`}
@@ -1859,6 +2024,13 @@
             <span class="what">{j.title ?? j.url}</span>
             {#if j.status === "running" && j.bytes_total}
               <span class="bytes">{mb(j.bytes_done)} / {mb(j.bytes_total)}</span>
+              {#if storage && tipsOver(storage, j.bytes_total - j.bytes_done)}
+                <!-- Bigger than the budget has room for: reported, not stopped (#162). -->
+                <span class="budget warn" title={sayPressure(pressure(storage, j.bytes_total - j.bytes_done)!, storage, j.bytes_total - j.bytes_done)}>over budget</span>
+              {/if}
+            {/if}
+            {#if j.want_video && j.status !== "done"}
+              <button class="mini" onclick={() => makeAudio([j.id])} title="Download it as audio only instead: a fraction of the space">Audio only</button>
             {/if}
             {#if j.status === "failed"}
               <button class="mini" onclick={() => jobAction("retry_job", j.id)}>Retry</button>
@@ -1955,7 +2127,8 @@
               title={r.present ? `Rescan ${r.path}` : `${r.path} is not connected`}
               onclick={() => rescan(r)}
             >
-              {r.label} <span class="n">{r.count}</span>
+              <span class="rl">{r.label}</span> <span class="n">{r.count}</span>
+              <span class="n size">{r.bytes ? size(r.bytes) : ""}</span>
             </button>
           {/each}
         </div>
@@ -2066,6 +2239,10 @@
                     <div class="none">No playlists yet</div>
                   {/each}
                   <button role="menuitem" class="new" onclick={() => { addMenuFor = null; newListWith(t.id); }}>+ New playlist…</button>
+                  {#if t.kind === "video"}
+                    <!-- The storage budget's way out for a video already downloaded (#162). -->
+                    <button role="menuitem" class="new" onclick={() => { addMenuFor = null; audioFromVideo(t); }}>Make it audio only…</button>
+                  {/if}
                 </div>
               {/if}
             </span>
@@ -2110,6 +2287,36 @@
     {#if downloadDir.chosen}
       <button class="mini" onclick={resetDownloadDir} title="Send new downloads to the app's own library folder again">&times;</button>
     {/if}
+    <span class="spacer"></span>
+    <!-- The storage budget (#162, D138): the whole library, and the room on
+         the drive downloads go to. -->
+    {#if storageMeter}
+      <span class="meter" class:warn={storageMeter.warn} title={storageMeter.title}>{storageMeter.text}</span>
+    {/if}
+    {#if ceilingEditing}
+      <input
+        class="ceil"
+        type="number"
+        min="1"
+        step="1"
+        placeholder="GB"
+        bind:value={ceilingGb}
+        onkeydown={(e) => {
+          if (e.key === "Enter") saveCeiling();
+          if (e.key === "Escape") ceilingEditing = false;
+        }}
+      />
+      <span>GB</span>
+      <button class="mini" onclick={saveCeiling}>Set</button>
+      <button class="mini ghost" onclick={() => (ceilingEditing = false)}>Cancel</button>
+    {:else}
+      <button class="mini" onclick={editCeiling} title="A limit on the whole library. Going past it warns, and never stops a download">
+        {storage?.ceiling ? "Ceiling…" : "Set a ceiling…"}
+      </button>
+      {#if storage?.ceiling}
+        <button class="mini" onclick={() => { ceilingGb = null; saveCeiling(); }} title="No ceiling: the drive's room is the limit">&times;</button>
+      {/if}
+    {/if}
   </footer>
 </main>
 
@@ -2141,8 +2348,10 @@
            padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--accent) 12%, transparent); }
   .rootlabel { font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
                color: color-mix(in srgb, var(--text) 30%, transparent); }
-  .root { font-size: 11px; padding: 2px 8px; display: flex; justify-content: space-between;
-          color: color-mix(in srgb, var(--text) 70%, transparent); }
+  .root { font-size: 11px; padding: 2px 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+          gap: 8px; text-align: left; color: color-mix(in srgb, var(--text) 70%, transparent); }
+  .root .rl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .root .size { min-width: 44px; text-align: right; }
   .root:hover:not(:disabled) { color: var(--accent); }
   .root.gone { color: var(--warn); text-decoration: line-through; }
   /* Not offered, but still read at full strength: the global disabled dim
@@ -2241,6 +2450,8 @@
   .listpick .picks { flex: 0 0 auto; display: inline-flex; gap: 6px; }
   .listpick header { border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .listpick footer { border-top: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
+  .listpick footer button { flex: 0 0 auto; }
+  .listpick footer .budget { min-width: 0; }
   .listpick .spacer { flex: 1 1 auto; }
   .listpick .dim { font-size: 11px; color: color-mix(in srgb, var(--text) 50%, transparent); }
   .listpick ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
@@ -2328,5 +2539,12 @@
                  color: inherit; cursor: pointer; text-align: left; }
   footer .path:hover:not(:disabled) { background: none; color: var(--accent); text-decoration: underline; }
   footer .missing { color: var(--warn); flex: 0 0 auto; }
+  footer .spacer { flex: 1 1 auto; }
+  /* The meter keeps its words; the folder's path is what gives way. */
+  footer .meter { flex: 0 0 auto; white-space: nowrap; }
+  footer .ceil { width: 72px; font-size: 11px; padding: 1px 4px; }
+  /* Storage pressure is ember, the role the design brief gives it (#162). */
+  .warn.meter, .budget.warn, .notice.warn { color: var(--warn); }
+  .budget { font-size: 11px; flex: 0 1 auto; }
   footer .mini { flex: 0 0 auto; }
 </style>

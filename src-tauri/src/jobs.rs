@@ -15,9 +15,10 @@ use crate::db::{self, Db, DbError};
 use crate::pipeline::{self, Progress};
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::CommandChild;
 use tokio::sync::Notify;
@@ -74,6 +75,11 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
 pub struct RunnerHandle {
     pub notify: Arc<Notify>,
     pub active: Arc<AtomicUsize>,
+    /// The jobs whose run has not returned yet (#162). A paused job's row
+    /// says `paused` the moment Pause is pressed, but its run is still
+    /// unwinding the child it killed; changing what the job is before that
+    /// run has returned would race it.
+    pub in_flight: Arc<Mutex<HashSet<i64>>>,
 }
 
 impl Default for RunnerHandle {
@@ -81,6 +87,7 @@ impl Default for RunnerHandle {
         Self {
             notify: Arc::new(Notify::new()),
             active: Arc::new(AtomicUsize::new(0)),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }
@@ -97,6 +104,19 @@ pub fn enqueue(
     let root = pipeline::library_root(app)
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
+    enqueue_in(app, url, want_video, playlist_id, root)
+}
+
+/// Queue a download for a given folder: the one a finished video is in, when
+/// its audio is made from it (#162), so the audio path finds the video there
+/// and extracts rather than fetching again (D80).
+pub fn enqueue_in(
+    app: &AppHandle,
+    url: &str,
+    want_video: bool,
+    playlist_id: Option<i64>,
+    root: Option<String>,
+) -> Result<i64, DbError> {
     let id = {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
@@ -360,6 +380,157 @@ pub fn cancel(app: &AppHandle, id: i64) -> Result<(), DbError> {
     Ok(())
 }
 
+/// What asking for a download to be audio only did (#162, D138).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AudioOnly {
+    pub id: i64,
+    /// `switched`, `already_audio`, `finished` (it landed first, as a video),
+    /// or `gone` (cancelled, or never there).
+    pub outcome: &'static str,
+    /// What its video download had already written, named so the space can
+    /// be got back by hand. Nothing here deletes them: a `.part` is kept on
+    /// purpose (D26), and deleting stays a person's (D83).
+    pub leftovers: Vec<Leftover>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Leftover {
+    pub path: String,
+    pub bytes: u64,
+}
+
+/// What `switch_idle` did, and for a job it switched, its video id and the
+/// folder it was queued for, to look for what its video download left.
+type Idle = (&'static str, Option<(String, Option<String>)>);
+
+/// Change a job that is not running into an audio download. `None` when it
+/// is running, which only its run can let go of.
+fn switch_idle(conn: &Connection, id: i64) -> Result<Option<Idle>, DbError> {
+    let row: Option<(String, bool, Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT status, want_video, video_id, download_root FROM jobs WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get(2)?, r.get(3)?)),
+        )
+        .ok();
+    let Some((status, want_video, video_id, root)) = row else {
+        return Ok(Some(("gone", None)));
+    };
+    if !want_video {
+        return Ok(Some(("already_audio", None)));
+    }
+    match status.as_str() {
+        "done" => return Ok(Some(("finished", None))),
+        "running" => return Ok(None),
+        _ => {}
+    }
+    // Stage is kept, as a retry keeps it: the audio path works out what is
+    // already on disk for itself (`import_job`), and a finished video there
+    // is a source to extract from rather than something to fetch again (D80).
+    let changed = conn.execute(
+        "UPDATE jobs SET want_video = 0, want_audio = 1, updated_at = ?2
+         WHERE id = ?1 AND want_video = 1 AND status IN ('queued', 'paused', 'failed')",
+        params![id, db::now()],
+    )?;
+    if changed == 0 {
+        // Claimed between the read and the write: it is running now.
+        return Ok(None);
+    }
+    Ok(Some(("switched", video_id.map(|v| (v, root)))))
+}
+
+/// What a video download of `video_id` left under `root`: its `.part` files,
+/// and the separate video and audio streams yt-dlp writes before it merges
+/// them (`Song [id].f137.mp4`). Never the finished video, which the audio
+/// download extracts from.
+fn leftovers(root: &Path, video_id: &str) -> Vec<Leftover> {
+    let marker = format!("[{video_id}]");
+    walkdir::WalkDir::new(root)
+        .max_depth(4)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let (_, after) = name.split_once(&marker)?;
+            let fragment = after
+                .strip_prefix(".f")
+                .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+            (fragment || after.ends_with(".part")).then(|| Leftover {
+                path: e.path().to_string_lossy().into_owned(),
+                bytes: e.metadata().map(|m| m.len()).unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+fn in_flight(app: &AppHandle, id: i64) -> bool {
+    app.state::<RunnerHandle>()
+        .in_flight
+        .lock()
+        .unwrap()
+        .contains(&id)
+}
+
+/// Make a video download an audio one (#162, D138): the way out a storage
+/// warning offers. A running download is paused the way Pause pauses it, its
+/// run is let finish unwinding, and then it is switched and resumed, so two
+/// runs never write the same `.part` (D117). One that finished first stays a
+/// video, and says so.
+pub async fn make_audio(app: &AppHandle, id: i64) -> Result<AudioOnly, DbError> {
+    let first = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        switch_idle(&conn, id)?
+    };
+    let (outcome, found, resumed) = match first {
+        Some((outcome, found)) => (outcome, found, false),
+        None => {
+            pause(app, id)?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while in_flight(app, id) && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            if in_flight(app, id) {
+                return Err(DbError::Io(
+                    "the download is paused, but did not stop in time to switch; press Audio only again"
+                        .into(),
+                ));
+            }
+            let second = {
+                let db = app.state::<Db>();
+                let conn = db.0.lock().unwrap();
+                switch_idle(&conn, id)?
+            };
+            match second {
+                Some((outcome, found)) => (outcome, found, outcome == "switched"),
+                None => return Err(DbError::Io("the download would not stop".into())),
+            }
+        }
+    };
+    let leftovers = match found {
+        Some((video_id, root)) => {
+            let root = root
+                .map(PathBuf::from)
+                .or_else(|| pipeline::default_root(app).ok());
+            root.map(|r| leftovers(&r, &video_id)).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    if resumed {
+        resume(app, id)?;
+    } else if outcome == "switched" {
+        app.state::<RunnerHandle>().notify.notify_one();
+        let _ = app.emit("jobs-changed", ());
+    }
+    Ok(AudioOnly {
+        id,
+        outcome,
+        leftovers,
+    })
+}
+
 /// What a list-wide action applies to (D117).
 #[derive(Clone, Copy)]
 pub enum ListAction {
@@ -539,6 +710,7 @@ pub fn spawn_runner(app: AppHandle) {
     let handle = app.state::<RunnerHandle>();
     let notify = handle.notify.clone();
     let active = handle.active.clone();
+    let in_flight = handle.in_flight.clone();
 
     tauri::async_runtime::spawn(async move {
         loop {
@@ -577,11 +749,15 @@ pub fn spawn_runner(app: AppHandle) {
                 Claim::Job(job) => {
                     let job = *job;
                     active.fetch_add(1, Ordering::SeqCst);
+                    in_flight.lock().unwrap().insert(job.id);
                     let app2 = app.clone();
                     let active2 = active.clone();
                     let notify2 = notify.clone();
+                    let in_flight2 = in_flight.clone();
                     tauri::async_runtime::spawn(async move {
+                        let id = job.id;
                         run_one(app2, job).await;
+                        in_flight2.lock().unwrap().remove(&id);
                         active2.fetch_sub(1, Ordering::SeqCst);
                         notify2.notify_one(); // a slot freed
                     });
@@ -602,6 +778,96 @@ pub fn spawn_runner(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn job(conn: &Connection, id: i64, status: &str, want_video: bool, video_id: Option<&str>) {
+        conn.execute(
+            "INSERT INTO jobs (id, url, want_video, want_audio, status, stage, video_id, created_at, updated_at)
+             VALUES (?1, 'https://youtu.be/x', ?2, ?3, ?4, 'download', ?5, 0, 0)",
+            params![id, want_video as i64, !want_video as i64, status, video_id],
+        )
+        .unwrap();
+    }
+
+    /// #162: a waiting, paused or failed video download becomes an audio
+    /// one where it stands; a running one is left to its run, a finished one
+    /// stays what it is, and asking twice is harmless.
+    #[test]
+    fn a_video_download_not_running_becomes_audio_where_it_stands() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        job(&conn, 1, "queued", true, None);
+        job(&conn, 2, "paused", true, Some("abc123"));
+        job(&conn, 3, "running", true, Some("run"));
+        job(&conn, 4, "done", true, Some("done"));
+        job(&conn, 5, "queued", false, None);
+
+        assert_eq!(switch_idle(&conn, 1).unwrap(), Some(("switched", None)));
+        assert_eq!(
+            switch_idle(&conn, 2).unwrap(),
+            Some(("switched", Some(("abc123".to_string(), None))))
+        );
+        assert_eq!(switch_idle(&conn, 3).unwrap(), None);
+        assert_eq!(switch_idle(&conn, 4).unwrap(), Some(("finished", None)));
+        assert_eq!(
+            switch_idle(&conn, 5).unwrap(),
+            Some(("already_audio", None))
+        );
+        assert_eq!(
+            switch_idle(&conn, 1).unwrap(),
+            Some(("already_audio", None))
+        );
+        assert_eq!(switch_idle(&conn, 99).unwrap(), Some(("gone", None)));
+
+        let (want_video, want_audio, status): (i64, i64, String) = conn
+            .query_row(
+                "SELECT want_video, want_audio, status FROM jobs WHERE id = 2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((want_video, want_audio, status.as_str()), (0, 1, "paused"));
+    }
+
+    /// The video's partial download is named, never the finished video the
+    /// audio download will extract from, and never another video's files.
+    #[test]
+    fn what_a_video_download_left_is_its_parts_and_streams() {
+        let root = std::env::temp_dir().join("hp-162-leftovers");
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("youtube");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, len) in [
+            ("Song [abc123].f137.mp4", 7usize),
+            ("Song [abc123].f251.webm.part", 3),
+            ("Song [abc123].mp4.part", 2),
+            ("Song [abc123].mp4", 11),
+            ("Song [abc123].jpg", 1),
+            ("Other [zzz999].f137.mp4", 5),
+        ] {
+            std::fs::write(dir.join(name), vec![0u8; len]).unwrap();
+        }
+        let mut got: Vec<(String, u64)> = leftovers(&root, "abc123")
+            .into_iter()
+            .map(|l| {
+                let name = Path::new(&l.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                (name, l.bytes)
+            })
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                ("Song [abc123].f137.mp4".to_string(), 7),
+                ("Song [abc123].f251.webm.part".to_string(), 3),
+                ("Song [abc123].mp4.part".to_string(), 2),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn a_download_waits_for_its_folder_and_the_rest_carry_on() {

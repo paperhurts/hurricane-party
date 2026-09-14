@@ -11,6 +11,7 @@ pub mod platform;
 mod playlist;
 mod radar;
 mod skins;
+mod storage;
 mod tray;
 mod video;
 mod viz;
@@ -83,21 +84,23 @@ fn enqueue_playlist(
         let conn = state.0.lock().unwrap();
         playlist::create(&conn, name).map_err(|e| e.to_string())?
     };
-    let mut queued = 0usize;
+    let mut ids = Vec::with_capacity(urls.len());
     for url in urls {
-        jobs::enqueue(
-            &app,
-            url.trim(),
-            want_video.unwrap_or(false),
-            Some(playlist_id),
-        )
-        .map_err(|e| e.to_string())?;
-        queued += 1;
+        ids.push(
+            jobs::enqueue(
+                &app,
+                url.trim(),
+                want_video.unwrap_or(false),
+                Some(playlist_id),
+            )
+            .map_err(|e| e.to_string())?,
+        );
     }
     let _ = app.emit("library-changed", ());
     Ok(QueuedList {
         playlist_id,
-        queued,
+        queued: ids.len(),
+        ids,
     })
 }
 
@@ -106,6 +109,124 @@ fn enqueue_playlist(
 struct QueuedList {
     playlist_id: i64,
     queued: usize,
+    /// The jobs, so a storage warning can offer to make them audio (#162).
+    ids: Vec<i64>,
+}
+
+// ---- the storage budget (#162, D138) ------------------------------------------
+
+/// What the library takes, the download drive's room, the ceiling, and the
+/// rates estimates are made from.
+#[tauri::command]
+fn storage_status(app: AppHandle) -> Result<storage::Status, String> {
+    storage::status(&app).map_err(|e| e.to_string())
+}
+
+/// Set a ceiling on the whole library in bytes, or take it away with null.
+#[tauri::command]
+fn set_storage_ceiling(app: AppHandle, bytes: Option<u64>) -> Result<storage::Status, String> {
+    {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        storage::set_ceiling(&conn, bytes).map_err(|e| e.to_string())?;
+    }
+    storage::status(&app).map_err(|e| e.to_string())
+}
+
+/// What `audio_from_video` queued.
+#[derive(serde::Serialize)]
+struct FromVideo {
+    job_id: i64,
+    title: String,
+    /// What the video takes, the space removing it would give back.
+    bytes: Option<i64>,
+}
+
+/// Make an MP3 of a video already in the library (#162, D138): an audio job
+/// for the same video, queued for the folder the video is in, so the audio
+/// path extracts from the file on disk (D80). The video stays; removing it
+/// and deleting its file is the person's next step, as it always is (D83).
+#[tauri::command]
+fn audio_from_video(app: AppHandle, id: i64) -> Result<FromVideo, String> {
+    let (root, relpath, kind, title, bytes) = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        conn.query_row(
+            "SELECT r.path, m.relpath, m.kind, m.title, m.filesize
+             FROM media m JOIN library_roots r ON r.id = m.root_id WHERE m.id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<i64>>(4)?,
+                ))
+            },
+        )
+        .map_err(|_| "That track is not in the library any more.".to_string())?
+    };
+    if kind != "video" {
+        return Err("That is already audio.".into());
+    }
+    let file = std::path::Path::new(&root).join(&relpath);
+    // The audio path tidies a .webm next to the MP3 it makes, as its own
+    // scratch, so a .webm video would go before a person chose to delete it.
+    if file
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("webm"))
+    {
+        return Err("A .webm video can't be made audio only here: making the MP3 would delete the video before you chose to.".into());
+    }
+    let no_link = || {
+        "This video didn't come from a download, so there is no link to make its audio from."
+            .to_string()
+    };
+    let video_id = pipeline::video_id_of(&file).ok_or_else(no_link)?;
+    let url = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        conn.query_row(
+            "SELECT url FROM jobs WHERE video_id = ?1 ORDER BY id DESC LIMIT 1",
+            [&video_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    }
+    .or_else(|| {
+        // Downloads nest by extractor (`youtube\Song [id].mp4`); a row whose
+        // job has been cleared still says where it came from.
+        relpath
+            .split(['\\', '/'])
+            .next()
+            .filter(|dir| dir.eq_ignore_ascii_case("youtube"))
+            .map(|_| format!("https://www.youtube.com/watch?v={video_id}"))
+    })
+    .ok_or_else(no_link)?;
+    let job_id =
+        jobs::enqueue_in(&app, &url, false, None, Some(root)).map_err(|e| e.to_string())?;
+    Ok(FromVideo {
+        job_id,
+        title,
+        bytes,
+    })
+}
+
+/// Make video downloads audio ones, the way out a storage warning offers.
+/// Each says what happened to it, and what its video download left behind.
+#[tauri::command]
+async fn make_audio_only(app: AppHandle, ids: Vec<i64>) -> Result<Vec<jobs::AudioOnly>, String> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        out.push(
+            jobs::make_audio(&app, id)
+                .await
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(out)
 }
 
 // ---- queue ------------------------------------------------------------------
@@ -1548,6 +1669,10 @@ pub fn run() {
             open_library_folder,
             get_download_dir,
             set_download_dir,
+            storage_status,
+            set_storage_ceiling,
+            make_audio_only,
+            audio_from_video,
             radar_sites,
             get_radar,
             set_radar_site,
