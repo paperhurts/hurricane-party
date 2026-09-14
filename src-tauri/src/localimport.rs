@@ -329,6 +329,9 @@ pub struct Root {
     pub label: String,
     pub path: String,
     pub count: i64,
+    /// What its rows take on disk, in bytes (#162): the roots list's third
+    /// column. Counted from the rows, so an unplugged drive keeps its figure.
+    pub bytes: i64,
     /// False when the drive isn't plugged in. The storm-drive case (D28) is a
     /// missing root, not a broken library.
     pub present: bool,
@@ -337,7 +340,9 @@ pub struct Root {
 pub fn list_roots(conn: &rusqlite::Connection) -> Result<Vec<Root>, DbError> {
     let mut st = conn.prepare(
         "SELECT r.id, r.label, r.path,
-                (SELECT COUNT(*) FROM media m WHERE m.root_id = r.id) AS count
+                (SELECT COUNT(*) FROM media m WHERE m.root_id = r.id) AS count,
+                (SELECT COALESCE(SUM(filesize), 0) FROM media m
+                  WHERE m.root_id = r.id AND filesize > 0) AS bytes
          FROM library_roots r ORDER BY r.id",
     )?;
     let rows = st.query_map([], |r| {
@@ -348,6 +353,7 @@ pub fn list_roots(conn: &rusqlite::Connection) -> Result<Vec<Root>, DbError> {
             present: PathBuf::from(&path).is_dir(),
             path,
             count: r.get("count")?,
+            bytes: r.get("bytes")?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())

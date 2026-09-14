@@ -140,6 +140,20 @@ pub trait WindowPlatform: Send + Sync {
     /// Whether another program has this file open (#111). A file still being
     /// copied in is not read: its tags and its length are not there yet.
     fn in_use(&self, path: &std::path::Path) -> bool;
+
+    /// The space on the drive a folder is on (#162, D138): what this process
+    /// may still write there, and the drive's size, in bytes. `None` when the
+    /// folder is not there, which is an unplugged drive, not a full one.
+    fn disk_space(&self, path: &std::path::Path) -> Option<DiskSpace>;
+}
+
+/// A drive's room, in bytes (#162).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct DiskSpace {
+    /// What this process may still write. Quotas count, so this is the
+    /// figure that fills up, not the drive's raw free space.
+    pub free: u64,
+    pub total: u64,
 }
 
 /// What a watched folder says happened (#111).
