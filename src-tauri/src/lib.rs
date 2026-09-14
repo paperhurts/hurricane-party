@@ -250,6 +250,12 @@ fn cancel_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
     jobs::cancel(&app, id)
 }
 
+/// Clear finished downloads from the Downloads list. Returns how many.
+#[tauri::command]
+fn dismiss_jobs(app: AppHandle, ids: Vec<i64>) -> Result<usize, db::DbError> {
+    jobs::dismiss(&app, &ids)
+}
+
 /// Stop a download and keep its bytes for later (D117).
 #[tauri::command]
 fn pause_job(app: AppHandle, id: i64) -> Result<(), db::DbError> {
@@ -1672,6 +1678,7 @@ pub fn run() {
             storage_status,
             set_storage_ceiling,
             make_audio_only,
+            dismiss_jobs,
             audio_from_video,
             radar_sites,
             get_radar,

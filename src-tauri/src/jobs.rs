@@ -145,7 +145,8 @@ pub fn list(conn: &Connection) -> Result<Vec<Job>, DbError> {
     let mut st = conn.prepare(
         "SELECT j.*, p.name AS playlist_name FROM jobs j
          LEFT JOIN playlists p ON p.id = j.playlist_id
-         WHERE j.status != 'done' OR j.updated_at > ?1
+         WHERE (j.status != 'done' OR j.updated_at > ?1)
+           AND NOT (j.status = 'done' AND j.dismissed)
          -- A paused job keeps a running job's place (D117): pressing Pause
          -- must not move the row out from under the pointer, or the Resume
          -- that replaces the button is somewhere else by the time anyone
@@ -363,6 +364,32 @@ pub fn resume(app: &AppHandle, id: i64) -> Result<(), DbError> {
     app.state::<RunnerHandle>().notify.notify_one();
     let _ = app.emit("jobs-changed", ());
     Ok(())
+}
+
+/// Clear finished downloads from the Downloads list, before the five minutes
+/// they would otherwise stay. Only a finished one: anything else still has
+/// something to do, and its own Cancel or Dismiss. The row is kept, hidden.
+pub fn dismiss(app: &AppHandle, ids: &[i64]) -> Result<usize, DbError> {
+    let n = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        dismiss_in(&conn, ids)?
+    };
+    if n > 0 {
+        let _ = app.emit("jobs-changed", ());
+    }
+    Ok(n)
+}
+
+fn dismiss_in(conn: &Connection, ids: &[i64]) -> Result<usize, DbError> {
+    let mut n = 0;
+    for id in ids {
+        n += conn.execute(
+            "UPDATE jobs SET dismissed = 1 WHERE id = ?1 AND status = 'done' AND dismissed = 0",
+            [id],
+        )?;
+    }
+    Ok(n)
 }
 
 /// Cancel: stop the child and drop the row (D117). A finished job is not
@@ -786,6 +813,32 @@ mod tests {
             params![id, want_video as i64, !want_video as i64, status, video_id],
         )
         .unwrap();
+    }
+
+    /// A finished download can be cleared from the list at once; one still
+    /// under way cannot, and the row itself is kept.
+    #[test]
+    fn a_finished_download_is_cleared_from_the_list_and_kept() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        let t = db::now();
+        for (id, status) in [(1, "done"), (2, "done"), (3, "queued")] {
+            conn.execute(
+                "INSERT INTO jobs (id, url, status, stage, created_at, updated_at)
+                 VALUES (?1, 'https://youtu.be/x', ?2, 'verify', ?3, ?3)",
+                params![id, status, t],
+            )
+            .unwrap();
+        }
+        assert_eq!(list(&conn).unwrap().len(), 3);
+        assert_eq!(dismiss_in(&conn, &[1, 3, 99]).unwrap(), 1);
+        let shown: Vec<i64> = list(&conn).unwrap().iter().map(|j| j.id).collect();
+        assert_eq!(shown, [3, 2]);
+        assert_eq!(dismiss_in(&conn, &[1]).unwrap(), 0);
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 3);
     }
 
     /// #162: a waiting, paused or failed video download becomes an audio

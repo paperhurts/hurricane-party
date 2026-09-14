@@ -180,6 +180,7 @@
   let missing = $state<{ id: number; title: string } | null>(null);
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
+  let finished = $derived(jobs.filter((j) => j.status === "done"));
   let shown = $derived(selectedList == null ? tracks : listItems);
 
   // The list playback belongs to (D120): what the classic playlist window
@@ -824,6 +825,16 @@
   // Cancel drops the job. An import of a playlist is many jobs, so it also
   // gets one line that does the same to all of them at once: a Pause button
   // that flickers past while each 40-second job runs is not a way to stop 40.
+  /** Clear finished downloads from the list before their five minutes are up. */
+  async function dismissJobs(ids: number[]) {
+    try {
+      await invoke<number>("dismiss_jobs", { ids });
+      jobs = jobs.filter((j) => !(ids.includes(j.id) && j.status === "done"));
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function jobAction(cmd: "pause_job" | "resume_job" | "cancel_job" | "retry_job", id: number) {
     try {
       await invoke(cmd, { id });
@@ -1989,7 +2000,12 @@
 
   {#if jobs.length}
     <section class="queue">
-      <h2>Downloads</h2>
+      <div class="queuehead">
+        <h2>Downloads</h2>
+        {#if finished.length > 1}
+          <button class="mini ghost" onclick={() => dismissJobs(finished.map((j) => j.id))} title="Clear every finished download from this list">Clear finished</button>
+        {/if}
+      </div>
       <!-- One line per playlist import that is still going (D117). -->
       {#each imports as g (g.id)}
         <div class="import">
@@ -2039,6 +2055,9 @@
             {#if j.status === "queued" || j.status === "running"}
               <button class="mini" onclick={() => jobAction("pause_job", j.id)} title="Stop, and keep what has downloaded">Pause</button>
               <button class="mini ghost" onclick={() => jobAction("cancel_job", j.id)} title="Stop, and take it off the list">Cancel</button>
+            {/if}
+            {#if j.status === "done"}
+              <button class="mini ghost" onclick={() => dismissJobs([j.id])} title="Clear it from this list; the track stays in the library">Dismiss</button>
             {/if}
             {#if j.status === "paused"}
               <button class="mini" onclick={() => jobAction("resume_job", j.id)} title="Carry on from where it stopped">Resume</button>
@@ -2327,6 +2346,7 @@
   header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   h1 { margin: 0; font-size: 19px; font-weight: 400; letter-spacing: 2px; text-transform: uppercase;
        color: var(--accent); text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .queuehead { display: flex; align-items: baseline; gap: 10px; }
   h2 { margin: 0 0 6px; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
        color: color-mix(in srgb, var(--text) 45%, transparent); font-weight: 400; }
   .ver { font-size: 12px; color: color-mix(in srgb, var(--text) 45%, transparent); }
