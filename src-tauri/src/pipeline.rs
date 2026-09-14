@@ -1451,6 +1451,19 @@ fn downloaded_output(root: &Path, id: &str, want_video: bool) -> Option<PathBuf>
     }
 }
 
+/// The `[id]` yt-dlp wrote into a downloaded file's name (`Song [abc123].mp4`),
+/// or `None` for a file the app did not download.
+pub fn video_id_of(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_str()?;
+    let inner = stem.strip_suffix(']')?;
+    let id = &inner[inner.rfind('[')? + 1..];
+    let ok = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    ok.then(|| id.to_string())
+}
+
 /// Locate a downloaded file by the `[id]` yt-dlp writes into its name.
 ///
 /// Recursive, because the template nests by extractor and uploader. Skips
@@ -2696,6 +2709,23 @@ mod tests {
         assert_eq!(total, None, "unknown total must not become 0");
         assert_eq!(speed, None);
         assert_eq!(eta, None);
+    }
+
+    /// #162: the id a download's name carries, and nothing for a file the
+    /// app did not download.
+    #[test]
+    fn a_downloaded_name_gives_up_its_video_id() {
+        assert_eq!(
+            video_id_of(Path::new(r"C:\lib\youtube\Song - Live [dQw4w9WgXcQ].mp4")).as_deref(),
+            Some("dQw4w9WgXcQ")
+        );
+        assert_eq!(
+            video_id_of(Path::new("A [b] [x_Y-9].mkv")).as_deref(),
+            Some("x_Y-9")
+        );
+        assert_eq!(video_id_of(Path::new("Holiday.mp4")), None);
+        assert_eq!(video_id_of(Path::new("Notes [a b].mp4")), None);
+        assert_eq!(video_id_of(Path::new("Song [abc].f137.mp4")), None);
     }
 
     #[test]
