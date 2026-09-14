@@ -1119,9 +1119,11 @@ pub struct PlaylistItem {
     pub title: String,
     pub url: String,
     pub duration_s: Option<f64>,
-    /// A file whose name already carries this id is in the library, so the
-    /// picker can say so rather than queueing a second copy.
-    pub have: bool,
+    /// A row whose file name carries this id is in the library, per kind, so
+    /// the picker can say so for the kind being queued rather than queueing a
+    /// second copy (D139). The MP3 of a video is not the video (D80).
+    pub have_audio: bool,
+    pub have_video: bool,
     /// Why YouTube told us nothing about it, when it did not (D119):
     /// `"deleted"` or `"private"` when the list says so, `"no details"` when
     /// the entry is a bare id. A bare id is usually a deleted or private video
@@ -1225,8 +1227,7 @@ pub async fn probe_playlist(app: &AppHandle, url: &str) -> Result<PlaylistProbe>
     }
     let v: serde_json::Value =
         serde_json::from_str(json.trim()).map_err(|e| PipelineError::Metadata(e.to_string()))?;
-    let have =
-        |id: &str| with_db(app, |conn| crate::library::have_video_id(conn, id)).unwrap_or(false);
+    let have = |id: &str| with_db(app, |conn| crate::library::held(conn, id)).unwrap_or_default();
     Ok(playlist_from(&v, &list_id, have))
 }
 
@@ -1235,7 +1236,7 @@ pub async fn probe_playlist(app: &AppHandle, url: &str) -> Result<PlaylistProbe>
 fn playlist_from(
     v: &serde_json::Value,
     list_id: &str,
-    have: impl Fn(&str) -> bool,
+    have: impl Fn(&str) -> crate::library::Held,
 ) -> PlaylistProbe {
     let str_of = |node: &serde_json::Value, k: &str| {
         node.get(k)
@@ -1259,6 +1260,7 @@ fn playlist_from(
                         Some(_) => None,
                     }
                     .map(str::to_string);
+                    let held = have(&id);
                     Some(PlaylistItem {
                         title: match (&title, &missing) {
                             (Some(t), None) => t.clone(),
@@ -1270,7 +1272,8 @@ fn playlist_from(
                         // a job must name one video and nothing else.
                         url: format!("https://www.youtube.com/watch?v={id}"),
                         duration_s: e.get("duration").and_then(|x| x.as_f64()),
-                        have: have(&id),
+                        have_audio: held.audio,
+                        have_video: held.video,
                         id,
                     })
                 })
@@ -2365,7 +2368,10 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let probe = playlist_from(&v, "PL123", |id| id == "aaaaaaaaaaa");
+        let probe = playlist_from(&v, "PL123", |id| crate::library::Held {
+            audio: id == "aaaaaaaaaaa",
+            video: false,
+        });
         assert_eq!(probe.title, "Storm Prep");
         assert_eq!(probe.uploader.as_deref(), Some("paperhurts"));
         // An entry with no id is not something that can be queued.
@@ -2380,14 +2386,18 @@ mod tests {
             "https://www.youtube.com/watch?v=aaaaaaaaaaa"
         );
         assert_eq!(probe.items[0].duration_s, Some(213.0));
-        assert!(probe.items[0].have, "the library already has this one");
+        assert!(
+            probe.items[0].have_audio,
+            "the library already has this one"
+        );
+        assert!(!probe.items[0].have_video, "as audio, not as video (D139)");
         // A bare id is an entry YouTube gave no details for (D119): it is
         // named for what it is, and says why, rather than showing the id.
         assert_eq!(probe.items[1].title, "Unknown video");
         assert_eq!(probe.items[1].missing.as_deref(), Some("no details"));
         assert_eq!(probe.items[0].missing, None);
         assert_eq!(probe.items[1].duration_s, None);
-        assert!(!probe.items[1].have);
+        assert!(!probe.items[1].have_audio && !probe.items[1].have_video);
     }
 
     #[test]

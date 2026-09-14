@@ -514,7 +514,9 @@
     title: string;
     url: string;
     duration_s: number | null;
-    have: boolean;
+    /** Held in the library as audio, and as video: per kind (D139). */
+    have_audio: boolean;
+    have_video: boolean;
     missing: string | null;
   };
   type ListProbe = { id: string; title: string; uploader: string | null; items: ListItem[] };
@@ -528,7 +530,20 @@
       .filter((i) => listPick.has(i.id))
       .reduce((n, i) => n + (i.duration_s ?? 0), 0),
   );
-  let listHave = $derived((list?.items ?? []).filter((i) => i.have).length);
+  // "In the library" is per kind, and follows the video checkbox (D139): the
+  // MP3 of a video is not the video (D80).
+  const held = (i: ListItem) => (wantVideo ? i.have_video : i.have_audio);
+  const newFor = (items: ListItem[]) => items.filter((i) => !held(i) && !i.missing).map((i) => i.id);
+  // Whether a person has changed the picks since the list was read. Until
+  // they have, ticking video re-picks it for that kind.
+  let listPickTouched = false;
+  $effect(() => {
+    void wantVideo;
+    untrack(() => {
+      if (list && !listPickTouched) listPick = new SvelteSet(newFor(list.items));
+    });
+  });
+  let listHave = $derived((list?.items ?? []).filter(held).length);
   // What the picked entries will take, at this library's own rate for the
   // kind being queued, and what that does to the budget (#162).
   let listEstimate = $derived(
@@ -561,7 +576,8 @@
       // import of the same list should offer.
       // What is new and what YouTube described; an entry it gave no details
       // for is usually gone, and queueing it only makes a failed row (D119).
-      listPick = new SvelteSet(probe.items.filter((i) => !i.have && !i.missing).map((i) => i.id));
+      listPick = new SvelteSet(newFor(probe.items));
+      listPickTouched = false;
       notice = null;
     } catch (e) {
       // A mix YouTube makes up as it goes, or a list that cannot be read.
@@ -693,13 +709,9 @@
 
   function pickAll(which: "all" | "none" | "new") {
     if (!list) return;
-    const keep =
-      which === "all"
-        ? list.items
-        : which === "new"
-          ? list.items.filter((i) => !i.have && !i.missing)
-          : [];
-    listPick = new SvelteSet(keep.map((i) => i.id));
+    listPickTouched = true;
+    const keep = which === "all" ? list.items.map((i) => i.id) : which === "new" ? newFor(list.items) : [];
+    listPick = new SvelteSet(keep);
   }
 
   /** Broadcast the play queue, as the playlist window sees it (D120). */
@@ -1900,12 +1912,13 @@
     </header>
     <ul>
       {#each list.items as item, i (item.id)}
-        <li class:have={item.have} class:gone={!!item.missing}>
+        <li class:have={held(item)} class:gone={!!item.missing}>
           <input
             class="tick"
             type="checkbox"
             checked={listPick.has(item.id)}
             onchange={(e) => {
+              listPickTouched = true;
               if (e.currentTarget.checked) listPick.add(item.id);
               else listPick.delete(item.id);
             }}
@@ -1920,7 +1933,12 @@
                 : `${item.id} is ${item.missing} on YouTube.`}
             >{item.missing}</span>
           {/if}
-          {#if item.have}<span class="tag">in the library</span>{/if}
+          {#if held(item)}
+            <span class="tag">in the library</span>
+          {:else if wantVideo ? item.have_audio : item.have_video}
+            <!-- The other kind is here: why a familiar row is still checked (D139). -->
+            <span class="tag other">{wantVideo ? "MP3" : "video"} in the library</span>
+          {/if}
           <span class="dur">{dur(item.duration_s)}</span>
         </li>
       {/each}
@@ -2477,6 +2495,7 @@
   .listpick ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
   .listpick li { display: flex; align-items: center; gap: 8px; padding: 3px 9px; font-size: 12px; }
   .listpick li.have { color: color-mix(in srgb, var(--text) 45%, transparent); }
+  .listpick .tag.other { opacity: 0.6; }
   .listpick li.gone { color: color-mix(in srgb, var(--text) 35%, transparent); font-style: italic; }
   .listpick .gonetag { color: color-mix(in srgb, var(--text) 45%, transparent); font-style: normal; }
   .listpick .num { font-size: 10px; color: color-mix(in srgb, var(--text) 40%, transparent); }

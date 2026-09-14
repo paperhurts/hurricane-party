@@ -167,25 +167,45 @@ pub fn delete_file(conn: &Connection, path: &str) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Whether the library already holds the file a video id produced (#137).
+/// Which kinds of a video the library already holds (#137, D139).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Held {
+    pub audio: bool,
+    pub video: bool,
+}
+
+/// Which kinds of the file a video id produced the library already holds.
 ///
 /// The id is *in the file name* because D49 made it load-bearing for resume:
 /// `%(title)s [%(id)s].%(ext)s`. That makes the name the cheapest fingerprint
 /// there is — `media.source_id` would be the better answer and nothing
 /// populates it yet, so this is what a second import of the same list can
-/// honestly check. Underscores and percents are escaped: a YouTube id may
-/// contain `_`, which LIKE would otherwise treat as "any character".
-pub fn have_video_id(conn: &Connection, video_id: &str) -> bool {
+/// honestly check. Per kind, because a finished import is its id *and* its
+/// kind (D80): the MP3 of a video is not the video (D139). Underscores and
+/// percents are escaped: a YouTube id may contain `_`, which LIKE would
+/// otherwise treat as "any character".
+pub fn held(conn: &Connection, video_id: &str) -> Held {
     let esc = video_id
         .replace('\\', "\\\\")
         .replace('_', "\\_")
         .replace('%', "\\%");
-    conn.query_row(
-        r"SELECT 1 FROM media WHERE relpath LIKE ?1 ESCAPE '\' LIMIT 1",
-        [format!("%[{esc}]%")],
-        |_| Ok(()),
-    )
-    .is_ok()
+    let mut out = Held::default();
+    let Ok(mut st) =
+        conn.prepare(r"SELECT DISTINCT kind FROM media WHERE relpath LIKE ?1 ESCAPE '\'")
+    else {
+        return out;
+    };
+    let Ok(kinds) = st.query_map([format!("%[{esc}]%")], |r| r.get::<_, String>(0)) else {
+        return out;
+    };
+    for kind in kinds.filter_map(|k| k.ok()) {
+        match kind.as_str() {
+            "audio" => out.audio = true,
+            "video" => out.video = true,
+            _ => {}
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -224,8 +244,28 @@ mod tests {
             ["youtube/A Song [dQw4w9WgXcQ].mp3"],
         )
         .unwrap();
-        assert!(have_video_id(&conn, "dQw4w9WgXcQ"));
-        assert!(!have_video_id(&conn, "aaaaaaaaaaa"));
+        assert_eq!(
+            held(&conn, "dQw4w9WgXcQ"),
+            Held {
+                audio: true,
+                video: false
+            }
+        );
+        assert_eq!(held(&conn, "aaaaaaaaaaa"), Held::default());
+        // D139: the video of the same id is the other kind, held separately.
+        conn.execute(
+            "INSERT INTO media (root_id, relpath, kind, title, added_at)
+             VALUES (1, ?1, 'video', 'have it', 0)",
+            ["youtube/A Song [dQw4w9WgXcQ].mp4"],
+        )
+        .unwrap();
+        assert_eq!(
+            held(&conn, "dQw4w9WgXcQ"),
+            Held {
+                audio: true,
+                video: true
+            }
+        );
         // `_` is a LIKE wildcard and a legal character in a YouTube id, so an
         // id that differs only there must not count as a match.
         conn.execute(
@@ -234,8 +274,8 @@ mod tests {
             ["youtube/Another [ab_defghijk].mp3"],
         )
         .unwrap();
-        assert!(have_video_id(&conn, "ab_defghijk"));
-        assert!(!have_video_id(&conn, "abXdefghijk"));
+        assert!(held(&conn, "ab_defghijk").audio);
+        assert_eq!(held(&conn, "abXdefghijk"), Held::default());
     }
 
     /// What the library holds, sorted: the browser orders by added_at, and
