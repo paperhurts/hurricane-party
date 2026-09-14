@@ -3,7 +3,7 @@
 //! Every `unsafe` block in the window engine is in this file. The folder
 //! watch (#111) is in `tree`, beside it.
 
-use super::{NativeWindow, TreeEvent, TreeWatch, WindowPlatform};
+use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, WindowPlatform};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::HiDpi::{
@@ -199,6 +199,30 @@ impl WindowPlatform for Win32Platform {
         }
     }
 
+    fn disk_space(&self, path: &std::path::Path) -> Option<DiskSpace> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        if !path.is_dir() {
+            return None;
+        }
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let (mut free, mut total) = (0u64, 0u64);
+        // SAFETY: a NUL-terminated path that outlives the call, and two
+        // stack u64s it writes into. Any folder on the drive will do: the
+        // call answers for the volume it is on, a mounted folder included.
+        unsafe {
+            GetDiskFreeSpaceExW(
+                PCWSTR(wide.as_ptr()),
+                Some(&mut free),
+                Some(&mut total),
+                None,
+            )
+        }
+        .ok()?;
+        (total > 0).then_some(DiskSpace { free, total })
+    }
+
     fn restore_no_activate(&self, w: NativeWindow) {
         // SW_SHOWNOACTIVATE rather than SW_RESTORE: the rescue runs from a
         // WM_DISPLAYCHANGE handler, and stealing focus because a monitor was
@@ -222,6 +246,17 @@ mod tests {
         assert!(why.contains("not a folder"), "{why}");
         let file = std::env::current_exe().unwrap();
         assert!(Win32Platform.open_folder(&file).is_err());
+    }
+
+    /// #162: a real folder has a drive with room on it, and a folder that
+    /// is not there has none to report.
+    #[test]
+    fn a_folder_reports_its_drive_and_a_missing_one_reports_nothing() {
+        let here = Win32Platform.disk_space(&std::env::temp_dir()).unwrap();
+        assert!(here.total > 0 && here.free <= here.total, "{here:?}");
+        let gone = std::env::temp_dir().join("hp-no-such-folder-162");
+        let _ = std::fs::remove_dir_all(&gone);
+        assert_eq!(Win32Platform.disk_space(&gone), None);
     }
 
     /// #111: a file another handle still has open is in use; once it is

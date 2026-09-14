@@ -398,6 +398,8 @@ Ship **your own** default skin — don't bundle third-party Winamp skins, those 
 
 **Storage budget.** Set a ceiling (say 40 GB). Show a meter. Warn before crossing. Offer "audio only" as a per-source downgrade that cuts size ~90%.
 
+*As built* (#162, D138): the meter is in the library footer, beside the download folder, with each root's size in the roots list. The ceiling is optional and counts the whole library. It warns at 85% of the download drive or past the ceiling, and never holds a download. The audio-only saving is measured from the library's own files rather than assumed.
+
 **Battery mode.** Video decode eats battery. A toggle that forces audio-only playback and kills the visualizer extends runtime meaningfully on a laptop running off an inverter.
 
 **Integrity check.** Hash on import, verify on launch (throttled, background). Surface a "3 files failed verification" banner. Finding out mid-outage that your download truncated is the exact failure this app exists to prevent.
