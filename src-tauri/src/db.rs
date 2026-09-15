@@ -129,7 +129,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at    INTEGER NOT NULL,
   -- The folder this download was queued for (#154, D136). NULL on a job
   -- queued before a person could choose, which is the app's own folder.
-  download_root TEXT
+  download_root TEXT,
+  -- A finished download a person has cleared from the Downloads list. The
+  -- row stays: making audio from a finished video finds its link here.
+  dismissed     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS play_history (
@@ -199,6 +202,9 @@ pub fn migrate(conn: &Connection) -> Result<(), DbError> {
     // `id` is on every jobs table there has been, so its absence is no table.
     if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", "download_root")? {
         conn.execute_batch("ALTER TABLE jobs ADD COLUMN download_root TEXT;")?;
+    }
+    if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", "dismissed")? {
+        conn.execute_batch("ALTER TABLE jobs ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;")?;
     }
     if !has_column(conn, "playlists", "position")? {
         // The order a person already sees is creation order, so that is the
@@ -638,6 +644,7 @@ mod tests {
         assert!(!has_column(&conn, "jobs", "download_root").unwrap());
         migrate(&conn).unwrap();
         assert!(has_column(&conn, "jobs", "download_root").unwrap());
+        assert!(has_column(&conn, "jobs", "dismissed").unwrap());
         // Twice is a no-op.
         migrate(&conn).unwrap();
     }
