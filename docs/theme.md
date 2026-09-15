@@ -116,7 +116,7 @@ Ships in two pieces — the kaleidoscope visualizer and palette at **v0.5** with
 
 Live NEXRAD reflectivity as the window backdrop. Named for the cone of uncertainty, which is the right emotional register: you're watching a thing you can't control and don't fully know.
 
-*Status:* **built at v0.6** (#85, D135). Cone is picked in the library header, with your radar picked beside it. The last four hours of NOAA reflectivity loop behind Main, the EQ and the playlist, redrawn in the analyser's ramp. Main's title bar says how old the loop is, the library carries the Weather Service's alerts for the radar's state, and stale or offline data turns grey with its age in the warning colour. Not yet: prep mode pre-caching the loop, because prep mode is not built.
+*Status:* **built at v0.6** (#85, D135). Cone is picked in the library header, with your radar picked beside it. The last four hours of NOAA reflectivity loop behind Main, the EQ and the playlist, redrawn in the analyser's ramp. Main's title bar says how old the loop is, the library carries the Weather Service's alerts for the radar's state, and stale or offline data turns grey with its age in the warning colour. Prep mode pre-caches it: while a Hurricane Party Planning run has downloads to make, the loop keeps filling whatever the theme (#163, D140).
 
 This is the best idea in the project and it's yours. But it has a conflict to resolve first.
 
