@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS playlist_items (
   PRIMARY KEY (playlist_id, position)
 );
 
+-- A prep run (#163, D140): the downloads one press of Hurricane Party
+-- Planning queued, so its progress can be shown as one thing and survive a
+-- restart like the rest of the queue.
+CREATE TABLE IF NOT EXISTS batches (
+  id            INTEGER PRIMARY KEY,
+  want_video    INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL
+);
+
 -- Survives power loss. This is the point (D10).
 CREATE TABLE IF NOT EXISTS jobs (
   id            INTEGER PRIMARY KEY,
@@ -132,7 +141,14 @@ CREATE TABLE IF NOT EXISTS jobs (
   download_root TEXT,
   -- A finished download a person has cleared from the Downloads list. The
   -- row stays: making audio from a finished video finds its link here.
-  dismissed     INTEGER NOT NULL DEFAULT 0
+  dismissed     INTEGER NOT NULL DEFAULT 0,
+  -- The prep run it was queued by, and what prep estimated it would take
+  -- (#163, D140).
+  batch_id      INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+  estimate_bytes INTEGER,
+  -- Not tried again before this time: a download that failed for want of a
+  -- connection waits a minute and tries again (D141).
+  not_before    INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS play_history (
@@ -205,6 +221,22 @@ pub fn migrate(conn: &Connection) -> Result<(), DbError> {
     }
     if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", "dismissed")? {
         conn.execute_batch("ALTER TABLE jobs ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    // #163, D140 and D141.
+    for (column, ddl) in [
+        (
+            "batch_id",
+            "ALTER TABLE jobs ADD COLUMN batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL;",
+        ),
+        (
+            "estimate_bytes",
+            "ALTER TABLE jobs ADD COLUMN estimate_bytes INTEGER;",
+        ),
+        ("not_before", "ALTER TABLE jobs ADD COLUMN not_before INTEGER;"),
+    ] {
+        if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", column)? {
+            conn.execute_batch(ddl)?;
+        }
     }
     if !has_column(conn, "playlists", "position")? {
         // The order a person already sees is creation order, so that is the
@@ -645,6 +677,9 @@ mod tests {
         migrate(&conn).unwrap();
         assert!(has_column(&conn, "jobs", "download_root").unwrap());
         assert!(has_column(&conn, "jobs", "dismissed").unwrap());
+        assert!(has_column(&conn, "jobs", "batch_id").unwrap());
+        assert!(has_column(&conn, "jobs", "estimate_bytes").unwrap());
+        assert!(has_column(&conn, "jobs", "not_before").unwrap());
         // Twice is a no-op.
         migrate(&conn).unwrap();
     }

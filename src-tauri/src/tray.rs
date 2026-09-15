@@ -92,6 +92,7 @@ fn install(app: &AppHandle) -> tauri::Result<()> {
     // worth having without a window, and the exit.
     let menu = MenuBuilder::new(app)
         .text("show", "Show library")
+        .text("prep", "Hurricane Party Planning")
         .text("toggle", "Play / Pause")
         .separator()
         .text("quit", "Quit")
@@ -103,6 +104,12 @@ fn install(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e: MenuEvent| match e.id().as_ref() {
             "show" => reveal_library(app),
+            // Opened from the tray too, the owner's call on #163.
+            "prep" => {
+                if let Err(e) = crate::show_prep(app) {
+                    eprintln!("tray: planning: {e}");
+                }
+            }
             "toggle" => {
                 if let Err(e) = crate::control::route(app, "toggle", None) {
                     eprintln!("tray: play/pause: {e}");

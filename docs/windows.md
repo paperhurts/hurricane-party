@@ -175,12 +175,12 @@ Design phase needs the native manifest schema locked, since both importers are m
 | Library | arbitrary | **yes** | ❌ | ❌ |
 | Video | arbitrary | **yes** | ❌ | ❌ |
 | Downloads | arbitrary | **yes** | ❌ | ❌ |
-| Prep mode | arbitrary | **yes** | ❌ | ❌ |
+| Prep mode (Hurricane Party Planning) | arbitrary | **yes** | ❌ | ❌ |
 | Settings | arbitrary | **yes** | ❌ | ❌ |
 
 **The rule:** the three classic 275px windows are skinned, undecorated, and snap. Everything else is a normal OS window with modern chrome. Don't try to make the library window sprite-skinned — you'd be inventing sprite layouts Winamp never had, and no `.wsz` file contains art for it.
 
-*Built so far:* the three classic windows, the library, and the video window, which opens on demand. Downloads are the job list inside the library rather than a window of their own, and so are the settings — concurrency, glow, skin and cookies sit in the library's header. Prep mode is v0.6 (D27). The library goes to the tray rather than closing (D87), and the playlist's LIB button shows it or puts it away (D123).
+*Built so far:* the three classic windows, the library, and the video window, which opens on demand. Downloads are the job list inside the library rather than a window of their own, and so are the settings — concurrency, glow, skin and cookies sit in the library's header. Prep mode is built at v0.6 as *Hurricane Party Planning* (#163, D140), opened from the library header or the tray. The library goes to the tray rather than closing (D87), and the playlist's LIB button shows it or puts it away (D123).
 
 All dimensions above are at 1x. Double them for 2x mode.
 

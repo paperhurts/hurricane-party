@@ -1758,6 +1758,10 @@
   <header>
     <h1>hurricane-party</h1>
     <span class="ver">v0.5 — skins of your own: a .wsz, a picture, a painting, or Purricane</span>
+    <!-- Prep mode (#163, D140): its own window, from here or the tray. -->
+    <button class="prepbtn" onclick={() => invoke("open_prep").catch((e) => (error = String(e)))} title="Paste every link you want before a storm, see whether it fits, and save it all with one press">
+      Hurricane Party Planning
+    </button>
     <label class="conc">
       concurrent
       <select value={concurrency} onchange={(e) => setConc(+e.currentTarget.value)}>
@@ -2367,6 +2371,7 @@
   .queuehead { display: flex; align-items: baseline; gap: 10px; }
   h2 { margin: 0 0 6px; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
        color: color-mix(in srgb, var(--text) 45%, transparent); font-weight: 400; }
+  .prepbtn { padding: 3px 10px; font-size: 12px; }
   .ver { font-size: 12px; color: color-mix(in srgb, var(--text) 45%, transparent); }
   .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
          color: color-mix(in srgb, var(--text) 55%, transparent); white-space: nowrap; }

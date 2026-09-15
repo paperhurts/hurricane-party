@@ -9,6 +9,7 @@ mod localimport;
 mod pipeline;
 pub mod platform;
 mod playlist;
+mod prep;
 mod radar;
 mod skins;
 mod storage;
@@ -131,6 +132,77 @@ fn set_storage_ceiling(app: AppHandle, bytes: Option<u64>) -> Result<storage::St
         storage::set_ceiling(&conn, bytes).map_err(|e| e.to_string())?;
     }
     storage::status(&app).map_err(|e| e.to_string())
+}
+
+// ---- Hurricane Party Planning: prep mode (#163, D140) -------------------------
+
+/// The prep window, opened on demand and brought forward if it is open (O5).
+/// Async, as a window must be built off the main thread on Windows.
+#[tauri::command]
+async fn open_prep(app: AppHandle) -> Result<(), String> {
+    show_prep(&app)
+}
+
+pub(crate) fn show_prep(app: &AppHandle) -> Result<(), String> {
+    const LABEL: &str = "prep";
+    if let Some(w) = app.get_webview_window(LABEL) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App("prep.html".into()))
+        .title("Hurricane Party Planning")
+        .inner_size(760.0, 620.0)
+        .min_inner_size(520.0, 420.0)
+        .resizable(true)
+        .decorations(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn prep_lines(app: AppHandle, text: String) -> Vec<prep::Line> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    prep::lines(&conn, &text)
+}
+
+#[tauri::command]
+async fn prep_read(app: AppHandle, url: String) -> prep::Read {
+    prep::read(&app, url.trim()).await
+}
+
+#[tauri::command]
+fn prep_go(app: AppHandle, run: prep::Go) -> Result<i64, String> {
+    prep::go(&app, &run)
+}
+
+#[tauri::command]
+fn prep_progress(app: AppHandle) -> Result<Option<prep::Progress>, String> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    prep::latest(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn prep_act(app: AppHandle, batch_id: i64, action: String) -> Result<usize, String> {
+    prep::act(&app, batch_id, &action)
+}
+
+#[tauri::command]
+fn get_prep_draft(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::get_setting(&conn, prep::DRAFT_SETTING).unwrap_or_default()
+}
+
+#[tauri::command]
+fn set_prep_draft(app: AppHandle, text: String) -> Result<(), String> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::set_setting(&conn, prep::DRAFT_SETTING, &text).map_err(|e| e.to_string())
 }
 
 /// What `audio_from_video` queued.
@@ -1678,6 +1750,14 @@ pub fn run() {
             storage_status,
             set_storage_ceiling,
             make_audio_only,
+            open_prep,
+            prep_lines,
+            prep_read,
+            prep_go,
+            prep_progress,
+            prep_act,
+            get_prep_draft,
+            set_prep_draft,
             dismiss_jobs,
             audio_from_video,
             radar_sites,
