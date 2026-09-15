@@ -97,6 +97,40 @@ yt-dlp ({code}) said: {tail}"
     }
 }
 
+impl PipelineError {
+    /// Whether this failed for want of a connection rather than because of
+    /// the video (D141): nothing to try differently, only to try again.
+    pub fn is_offline(&self) -> bool {
+        matches!(self, PipelineError::YtDlp { tail, .. } if is_offline(tail))
+    }
+}
+
+/// Whether yt-dlp's last words are a connection that is not there (D141).
+///
+/// Read off the real binary (2026-09-15): a name that does not resolve reads
+/// `Failed to resolve '…' ([Errno 11001] getaddrinfo failed)` and a connection
+/// nothing answers reads `[WinError 10061] No connection could be made`, and
+/// yt-dlp raises its `TransportError` for both, where a refusal from YouTube is
+/// an HTTP error or an extractor's message instead. The rest are the same
+/// failure on a network that is down in another way.
+pub fn is_offline(tail: &str) -> bool {
+    const SIGNS: &[&str] = &[
+        "TransportError",
+        "getaddrinfo failed",
+        "Failed to resolve",
+        "NameResolutionError",
+        "Temporary failure in name resolution",
+        "Failed to establish a new connection",
+        "WinError 10051",
+        "WinError 10060",
+        "WinError 10061",
+        "WinError 10065",
+        "Network is unreachable",
+        "No route to host",
+    ];
+    SIGNS.iter().any(|s| tail.contains(s))
+}
+
 // Fully qualified: the `Result<T>` alias below shadows std's in this module.
 impl serde::Serialize for PipelineError {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
@@ -878,6 +912,9 @@ pub(crate) fn explain(tail: &str, cookies: &Jar) -> Option<String> {
             }
         }
     };
+    if is_offline(tail) {
+        return Some("There is no connection to the internet right now.".to_string());
+    }
     let (why, needs_cookies) = if tail.contains("Sign in to confirm your age") {
         (
             "YouTube wants a signed-in session for this one: it is age-restricted.",
@@ -1145,6 +1182,38 @@ pub fn list_id_of(url: &str) -> Option<String> {
         .find(|(k, _)| *k == "list")
         .map(|(_, v)| v.to_string())
         .filter(|v| !v.is_empty())
+}
+
+/// The id of the YouTube video a link names, when it names one (#163): a
+/// `watch?v=`, a `youtu.be/`, a `shorts/`, `live/` or `embed/` link. `None` for
+/// any other site, which yt-dlp may still fetch but which prep cannot tell
+/// apart from another line naming the same thing.
+pub fn youtube_video_id(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    let host = parsed
+        .host_str()?
+        .trim_start_matches("www.")
+        .trim_start_matches("m.");
+    let id = if host == "youtu.be" {
+        parsed.path_segments()?.next().map(str::to_string)
+    } else if host == "youtube.com" || host == "music.youtube.com" {
+        let mut segs = parsed.path_segments()?;
+        match segs.next() {
+            Some("watch") => parsed
+                .query_pairs()
+                .find(|(k, _)| k == "v")
+                .map(|(_, v)| v.into_owned()),
+            Some("shorts") | Some("live") | Some("embed") => segs.next().map(str::to_string),
+            _ => None,
+        }
+    } else {
+        None
+    }?;
+    let ok = (6..=20).contains(&id.len())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    ok.then_some(id)
 }
 
 /// Whether a URL names one video rather than only a list (#137).
@@ -2736,6 +2805,54 @@ mod tests {
         assert_eq!(video_id_of(Path::new("Holiday.mp4")), None);
         assert_eq!(video_id_of(Path::new("Notes [a b].mp4")), None);
         assert_eq!(video_id_of(Path::new("Song [abc].f137.mp4")), None);
+    }
+
+    /// D141: the wording of a connection that is not there, as the real
+    /// binary gave it with a name that would not resolve and a port nothing
+    /// answered, and a refusal from YouTube that is not one.
+    #[test]
+    fn a_missing_connection_is_told_apart_from_a_refusal() {
+        let dns = "ERROR: [generic] playlist?list=PLx: Unable to download webpage: HTTPSConnection(host='www.youtube.invalid', port=443): Failed to resolve 'www.youtube.invalid' ([Errno 11001] getaddrinfo failed) (caused by TransportError(\"HTTPSConnection(host='www.youtube.invalid', port=443): Failed to resolve 'www.youtube.invalid' ([Errno 11001] getaddrinfo failed)\"))";
+        let refused = "ERROR: [youtube:tab] PLx: Unable to download API page: ('Unable to connect to proxy', NewConnectionError(\"HTTPSConnection(host='127.0.0.1', port=9): Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it\"))";
+        let forbidden =
+            "ERROR: [youtube] abc: Unable to download webpage: HTTP Error 403: Forbidden";
+        assert!(is_offline(dns));
+        assert!(is_offline(refused));
+        assert!(!is_offline(forbidden));
+        assert!(!is_offline("ERROR: [youtube] abc: Video unavailable"));
+        assert_eq!(
+            explain(dns, &Jar::None).as_deref(),
+            Some("There is no connection to the internet right now.")
+        );
+    }
+
+    /// #163: the video a link names, from every shape YouTube hands out.
+    #[test]
+    fn a_youtube_link_gives_up_the_video_it_names() {
+        for (url, id) in [
+            (
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                Some("dQw4w9WgXcQ"),
+            ),
+            ("https://youtu.be/dQw4w9WgXcQ?si=abc", Some("dQw4w9WgXcQ")),
+            (
+                "https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx",
+                Some("dQw4w9WgXcQ"),
+            ),
+            (
+                "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+                Some("dQw4w9WgXcQ"),
+            ),
+            (
+                "https://www.youtube.com/shorts/aBcDeFgHiJk",
+                Some("aBcDeFgHiJk"),
+            ),
+            ("https://www.youtube.com/playlist?list=PLx", None),
+            ("https://vimeo.com/12345678", None),
+            ("not a link", None),
+        ] {
+            assert_eq!(youtube_video_id(url).as_deref(), id, "{url}");
+        }
     }
 
     #[test]
