@@ -765,16 +765,31 @@ async fn run_one(app: AppHandle, job: Job) {
                     let _ = fail(&conn, job.id, &format!("downloaded, but not recorded: {e}"));
                 }
                 Ok(media_id) => {
-                    let conn = db.0.lock().unwrap();
-                    // The list this job was queued for (#137). A track that
-                    // lands twice is added once: `playlist::add` is the same
-                    // call the library's own button makes.
-                    if let Some(pid) = job.playlist_id {
-                        if let Err(e) = crate::playlist::add(&conn, pid, media_id) {
-                            eprintln!("job {}: downloaded, but not filed: {e}", job.id);
+                    {
+                        let conn = db.0.lock().unwrap();
+                        // The list this job was queued for (#137). A track that
+                        // lands twice is added once: `playlist::add` is the same
+                        // call the library's own button makes.
+                        if let Some(pid) = job.playlist_id {
+                            if let Err(e) = crate::playlist::add(&conn, pid, media_id) {
+                                eprintln!("job {}: downloaded, but not filed: {e}", job.id);
+                            }
                         }
+                        let _ = finish(&conn, job.id);
                     }
-                    let _ = finish(&conn, job.id);
+                    // Fingerprinted as it lands, and checked against the
+                    // length the site said (#164, D142). Off the async
+                    // runtime: a film is gigabytes to read.
+                    let (app2, path, seconds) = (app.clone(), track.path.clone(), track.duration_s);
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        crate::integrity::at_import(
+                            &app2,
+                            media_id,
+                            std::path::Path::new(&path),
+                            seconds,
+                        );
+                    })
+                    .await;
                 }
             }
             let _ = app.emit("library-changed", ());

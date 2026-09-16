@@ -61,6 +61,8 @@
     kind: string;
     path: string;
     position: number | null;
+    /** What the last integrity check made of it (#164, D142). */
+    integrity: string | null;
   };
 
   type Root = { id: number; label: string; path: string; count: number; bytes: number; present: boolean };
@@ -178,6 +180,14 @@
   // A track Main could not open. It says so in its own strip; this is the
   // same message where the row is, with the way out beside it.
   let missing = $state<{ id: number; title: string } | null>(null);
+  // What an integrity check marked, and whether the list is showing only
+  // those rows (#164, D142).
+  type Failed = { id: number; title: string; state: string; note: string | null; path: string; url: string | null };
+  let failures = $state<Failed[]>([]);
+  let checkOnly = $state(false);
+  let checking = $state(false);
+  let failedIds = $derived(new Set(failures.map((f) => f.id)));
+  const failureOf = (id: number) => failures.find((f) => f.id === id);
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let finished = $derived(jobs.filter((j) => j.status === "done"));
@@ -243,10 +253,11 @@
   /** Case- and accent-blind, so "beyonce" finds "Beyoncé". */
   const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   let terms = $derived(fold(search).split(/\s+/).filter(Boolean));
+  let marked = $derived(checkOnly ? shown.filter((t) => failedIds.has(t.id)) : shown);
   let searched = $derived(
     terms.length === 0
-      ? shown
-      : shown.filter((t) => {
+      ? marked
+      : marked.filter((t) => {
           const hay = fold(`${t.title} ${t.uploader ?? ""}`);
           return terms.every((w) => hay.includes(w));
         }),
@@ -267,11 +278,69 @@
     return by;
   });
   /** Whether the list shows less than all of itself, or in another order. */
-  let narrowed = $derived(terms.length > 0 || kind !== "all");
+  let narrowed = $derived(terms.length > 0 || kind !== "all" || checkOnly);
 
   function clearFind() {
     search = "";
     kind = "all";
+    checkOnly = false;
+  }
+
+  // ---- integrity checking (#164, D142) --------------------------------------
+
+  async function refreshFailures() {
+    failures = await invoke<Failed[]>("integrity_failures").catch(() => failures);
+    if (checkOnly && !failures.length) checkOnly = false;
+  }
+
+  /** Take the file as it is now: what a person presses when they retagged it themselves. */
+  async function acceptFile(id: number) {
+    try {
+      await invoke("integrity_accept", { id });
+      await refreshFailures();
+      await refreshLibrary();
+      notice = "Taken as it is now, and fingerprinted again.";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /**
+   * Fetch a damaged download again (the owner's call): the file is set aside
+   * first, behind D83's dialog with its path, and then the link is queued.
+   */
+  async function redownload(f: Failed, kindOf: string) {
+    if (!f.url) return;
+    const yes = await ask(
+      `Delete this file and download it again?\n\n${f.path}\n\nThere is no undo for the file on disk.`,
+      { title: "Download it again", kind: "warning", okLabel: "Delete and download", cancelLabel: "Keep" },
+    );
+    if (!yes) return;
+    try {
+      await invoke("remove_tracks", { ids: [f.id] });
+      await invoke("delete_media_file", { path: f.path });
+      await invoke("enqueue_url", { url: f.url, wantVideo: kindOf === "video" });
+      pendingDelete = [];
+      notice = `Deleted it and queued it again. It lands in the library when it finishes.`;
+      await refreshFailures();
+      await refreshLibrary();
+      refreshJobs();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /** Check every file now, for the day before a storm. */
+  async function checkNow() {
+    checking = true;
+    clearNotice();
+    notice = "Checking every file in the library\u2026";
+    try {
+      await invoke("integrity_check_now");
+    } catch (e) {
+      checking = false;
+      error = String(e);
+    }
   }
 
   /** Make the list showing the queue, because a row of it was just played. */
@@ -364,6 +433,7 @@
     invoke<string>("library_path").then((p) => (libraryPath = p));
     refreshDownloadDir();
     refreshStorage();
+    refreshFailures();
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
     invoke<string>("get_theme").then((t) => {
@@ -404,6 +474,22 @@
       listen("library-changed", () => {
         refreshLibrary();
         refreshStorage();
+      }),
+      // A check marked something, or cleared it (#164).
+      listen("integrity:changed", () => {
+        refreshFailures();
+        refreshLibrary();
+      }),
+      listen<{ looked: number; failed: number }>("integrity:progress", (e) => {
+        notice = `Checking\u2026 ${e.payload.looked} looked at, ${e.payload.failed} failed so far.`;
+      }),
+      listen<{ looked: number; passed: number; failed: number; missing: number }>("integrity:done", (e) => {
+        checking = false;
+        const r = e.payload;
+        notice =
+          r.failed > 0
+            ? `Checked ${r.looked} files: ${r.failed} failed.`
+            : `Checked ${r.looked} files. Everything is as it was.`;
       }),
       // A root's watch saw files leave (#111): counted and offered, the way
       // a click on the root offers it, never dropped.
@@ -1980,6 +2066,20 @@
       {#if (radar?.alerts.length ?? 0) > 3}<span class="more">+{(radar?.alerts.length ?? 0) - 3} more</span>{/if}
     </div>
   {/if}
+  {#if failures.length}
+    <!-- One line, where the library already speaks (#164). What to do about
+         each row is on the row itself. -->
+    <p class="checkline warn">
+      <span>
+        {failures.length} file{failures.length === 1 ? "" : "s"} failed the integrity check:
+        {[
+          failures.filter((f) => f.state === "changed").length && `${failures.filter((f) => f.state === "changed").length} changed`,
+          failures.filter((f) => f.state === "unreadable").length && `${failures.filter((f) => f.state === "unreadable").length} unreadable`,
+        ].filter(Boolean).join(" \u00b7 ")}.
+      </span>
+      <button class="mini" onclick={() => (checkOnly = !checkOnly)}>{checkOnly ? "Show everything" : "Show them"}</button>
+    </p>
+  {/if}
   {#if notice}
     <p class="notice" class:warn={notice === warnNotice}>
       <span>{notice}</span>
@@ -2259,6 +2359,13 @@
           <span class="title"
             >{t.title}{#if byline(t)}<span class="by"> · {byline(t)}</span>{/if}</span
           >
+          {#if t.integrity}
+            <span class="tag bad" title={failureOf(t.id)?.note ?? ""}>{t.integrity}</span>
+            <button class="mini" onclick={() => acceptFile(t.id)} title="Take it as it is now and fingerprint it again">Accept</button>
+            {#if failureOf(t.id)?.url}
+              <button class="mini danger" onclick={() => redownload(failureOf(t.id)!, t.kind)} title="Delete this file and download it again">Download again…</button>
+            {/if}
+          {/if}
           <span class="meta">{duration(t.duration_s)} · {mb(t.filesize)}</span>
           {#if selectedList == null}
             <!-- Pointerdowns inside stay inside, so the window-level
@@ -2351,6 +2458,9 @@
       <button class="mini" onclick={saveCeiling}>Set</button>
       <button class="mini ghost" onclick={() => (ceilingEditing = false)}>Cancel</button>
     {:else}
+      <button class="mini" onclick={checkNow} disabled={checking} title="Read every file back and check it against its fingerprint. For the day before a storm; it runs quietly by itself after launch.">
+        {checking ? "Checking…" : "Check files"}
+      </button>
       <button class="mini" onclick={editCeiling} title="A limit on the whole library. Going past it warns, and never stops a download">
         {storage?.ceiling ? "Ceiling…" : "Set a ceiling…"}
       </button>
@@ -2375,6 +2485,10 @@
   .ver { font-size: 12px; color: color-mix(in srgb, var(--text) 45%, transparent); }
   .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
          color: color-mix(in srgb, var(--text) 55%, transparent); white-space: nowrap; }
+  .checkline { margin: 0; font-size: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .checkline.warn { color: var(--warn); }
+  .tag.bad { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+             font-size: 10px; padding: 0 4px; text-transform: uppercase; letter-spacing: 0.5px; flex: 0 0 auto; }
   .notice { margin: 0; font-size: 12px; color: var(--accent); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .radarline { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: 11px; letter-spacing: 0.06em;
                color: var(--accent); }
