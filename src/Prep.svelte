@@ -367,9 +367,24 @@
           {#if progress.failed}<span class="warn">· {progress.failed} failed</span>{/if}
         </span>
         <span class="acts">
-        {#if progress.running + progress.queued + progress.offline}<button class="mini" onclick={() => act("pause")}>Pause all</button>{/if}
-        {#if progress.paused}<button class="mini" onclick={() => act("resume")}>Resume all</button>{/if}
-        {#if progress.failed}<button class="mini" onclick={() => act("retry")}>Retry failed</button>{/if}
+        <!-- Each says how many it acts on: a run that is part paused can be
+             pushed either way, and the counts say these are two actions
+             rather than one toggle (the owner's call, 2026-09-16). -->
+        {#if progress.running + progress.queued + progress.offline}
+          <button class="mini" onclick={() => act("pause")} title="Stop these, and keep what has downloaded">
+            Pause {progress.running + progress.queued + progress.offline}
+          </button>
+        {/if}
+        {#if progress.paused}
+          <button class="mini" onclick={() => act("resume")} title="Carry on from where they stopped">
+            Resume {progress.paused}
+          </button>
+        {/if}
+        {#if progress.failed}
+          <button class="mini" onclick={() => act("retry")} title="Try the ones that failed again">
+            Retry {progress.failed} failed
+          </button>
+        {/if}
         <button class="mini ghost" onclick={hide} title="Hide this run here; its downloads carry on">Hide</button>
         </span>
       </div>
