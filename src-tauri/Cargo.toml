@@ -44,6 +44,9 @@ hp-control = { path = "../crates/hp-control" }
 reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
 # Redrawing the radar frames in the analyser's ramp. Already in the tree.
 png = "0.18"
+# Fingerprinting a file so damage can be told from a retag (#164, D142).
+# Already in the tree through Tauri's own dependencies.
+sha2 = "0.10"
 
 # D44: the entire platform surface of the window engine is six calls, all of
 # them behind the `platform` trait. Ownership (D41), the forcing SetWindowPos
