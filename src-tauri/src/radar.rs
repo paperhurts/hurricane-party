@@ -536,12 +536,15 @@ pub fn wake(app: &AppHandle) {
 }
 
 fn wanted(app: &AppHandle) -> Option<Site> {
-    let theme = {
+    let (theme, precaching) = {
         let state = app.state::<crate::Db>();
         let conn = state.0.lock().unwrap();
-        crate::db::theme(&conn)
+        (crate::db::theme(&conn), crate::prep::precaching(&conn))
     };
-    if theme == "cone" {
+    // A prep run fills the loop whatever the theme, so it is there when the
+    // lights go out (#163, D140). Still only with a radar picked, still on
+    // the ten-minute timer, still through `egress::get` (D29).
+    if theme == "cone" || precaching {
         current_site(app)
     } else {
         None

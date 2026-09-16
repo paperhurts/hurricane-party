@@ -396,6 +396,8 @@ Ship **your own** default skin — don't bundle third-party Winamp skins, those 
 
 **Prep mode.** A pre-storm bulk screen: paste everything, see total GB, see free disk, hit go. Progress that survives reboots. This is the killer feature and nothing else on the market does it well.
 
+*As built* (#163, D140): *Hurricane Party Planning*, a window of its own from the library header or the tray. One paste box sorts its lines, reads lists without downloading, and shows the run in audio and in video against the drive; one press queues it as a batch through the ordinary queue, and the run's progress, the radar pre-cache, and a download's wait for a lost connection (D141) all outlast a restart.
+
 **Storage budget.** Set a ceiling (say 40 GB). Show a meter. Warn before crossing. Offer "audio only" as a per-source downgrade that cuts size ~90%.
 
 *As built* (#162, D138): the meter is in the library footer, beside the download folder, with each root's size in the roots list. The ceiling is optional and counts the whole library. It warns at 85% of the download drive or past the ceiling, and never holds a download. The audio-only saving is measured from the library's own files rather than assumed.

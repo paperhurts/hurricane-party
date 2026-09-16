@@ -117,21 +117,50 @@ pub fn enqueue_in(
     playlist_id: Option<i64>,
     root: Option<String>,
 ) -> Result<i64, DbError> {
+    enqueue_with(
+        app,
+        NewJob {
+            url,
+            want_video,
+            playlist_id,
+            root,
+            batch_id: None,
+            estimate_bytes: None,
+        },
+    )
+}
+
+/// A download to queue, with everything a caller may know about it.
+pub struct NewJob<'a> {
+    pub url: &'a str,
+    pub want_video: bool,
+    pub playlist_id: Option<i64>,
+    /// The folder it is for (D136).
+    pub root: Option<String>,
+    /// The prep run that queued it, and what prep estimated it would take
+    /// (#163, D140).
+    pub batch_id: Option<i64>,
+    pub estimate_bytes: Option<i64>,
+}
+
+pub fn enqueue_with(app: &AppHandle, job: NewJob) -> Result<i64, DbError> {
     let id = {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
         let t = db::now();
         conn.execute(
             "INSERT INTO jobs (url, want_video, want_audio, status, stage, playlist_id,
-                               created_at, updated_at, download_root)
-             VALUES (?1, ?2, ?3, 'queued', 'probe', ?5, ?4, ?4, ?6)",
+                               created_at, updated_at, download_root, batch_id, estimate_bytes)
+             VALUES (?1, ?2, ?3, 'queued', 'probe', ?5, ?4, ?4, ?6, ?7, ?8)",
             params![
-                url,
-                want_video as i64,
-                !want_video as i64,
+                job.url,
+                job.want_video as i64,
+                !job.want_video as i64,
                 t,
-                playlist_id,
-                root
+                job.playlist_id,
+                job.root,
+                job.batch_id,
+                job.estimate_bytes
             ],
         )?;
         conn.last_insert_rowid()
@@ -205,15 +234,26 @@ fn waiting_for(dir: &Path) -> String {
 /// two runner iterations can't take the same row, and mark the ones ahead of
 /// it that are waiting on a folder that is not.
 fn claim_next(conn: &Connection, default_root: &Path) -> Result<Claim, DbError> {
-    let queued: Vec<(i64, Option<String>)> = {
+    let all: Vec<(i64, Option<String>, Option<i64>)> = {
         let mut st = conn.prepare(
-            "SELECT id, download_root FROM jobs WHERE status = 'queued' ORDER BY created_at",
+            "SELECT id, download_root, not_before FROM jobs WHERE status = 'queued' ORDER BY created_at",
         )?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.filter_map(|r| r.ok()).collect()
     };
-    if queued.is_empty() {
+    if all.is_empty() {
         return Ok(Claim::Empty);
+    }
+    // A download waiting out a lost connection is not tried before its time
+    // (D141). The runner looks again every ten seconds while any wait.
+    let now = db::now();
+    let queued: Vec<(i64, Option<String>)> = all
+        .into_iter()
+        .filter(|(_, _, not_before)| not_before.is_none_or(|t| t <= now))
+        .map(|(id, root, _)| (id, root))
+        .collect();
+    if queued.is_empty() {
+        return Ok(Claim::Waiting);
     }
     let (ready, waiting) = first_ready(&queued, default_root, |p| p.is_dir());
     for (id, dir) in &waiting {
@@ -228,7 +268,8 @@ fn claim_next(conn: &Connection, default_root: &Path) -> Result<Claim, DbError> 
     let t = db::now();
     let claimed: Option<i64> = conn
         .query_row(
-            "UPDATE jobs SET status = 'running', updated_at = ?1, attempts = attempts + 1, error = NULL
+            "UPDATE jobs SET status = 'running', updated_at = ?1, attempts = attempts + 1, error = NULL,
+                             not_before = NULL
              WHERE id = ?2 AND status = 'queued'
              RETURNING id",
             params![t, id],
@@ -287,6 +328,27 @@ fn finish(conn: &Connection, id: i64) -> Result<(), DbError> {
     Ok(())
 }
 
+/// How long a download that lost its connection waits before it tries again
+/// (D141).
+pub const OFFLINE_RETRY_SECS: i64 = 60;
+
+/// The words on a download that is waiting for the connection to come back.
+pub const OFFLINE_WAIT: &str =
+    "No connection. It tries again every minute until there is one, and carries on from where it stopped.";
+
+/// Put a download that failed for want of a connection back in the queue,
+/// not to be tried for a minute (D141). A storm takes the connection for
+/// hours; a download that failed for good would need a person to notice and
+/// press Retry for each one, after the power is back.
+fn hold_offline(conn: &Connection, id: i64) -> Result<(), DbError> {
+    let now = db::now();
+    conn.execute(
+        "UPDATE jobs SET status = 'queued', error = ?2, not_before = ?3, updated_at = ?4 WHERE id = ?1",
+        params![id, OFFLINE_WAIT, now + OFFLINE_RETRY_SECS, now],
+    )?;
+    Ok(())
+}
+
 fn fail(conn: &Connection, id: i64, msg: &str) -> Result<(), DbError> {
     conn.execute(
         "UPDATE jobs SET status = 'failed', error = ?2, updated_at = ?3 WHERE id = ?1",
@@ -301,7 +363,7 @@ pub fn retry(app: &AppHandle, id: i64) -> Result<(), DbError> {
         let conn = db.0.lock().unwrap();
         // Stage is preserved deliberately: a retry resumes where it died.
         conn.execute(
-            "UPDATE jobs SET status = 'queued', error = NULL, updated_at = ?2 WHERE id = ?1",
+            "UPDATE jobs SET status = 'queued', error = NULL, not_before = NULL, updated_at = ?2 WHERE id = ?1",
             params![id, db::now()],
         )?;
     }
@@ -356,7 +418,7 @@ pub fn resume(app: &AppHandle, id: i64) -> Result<(), DbError> {
         let db = app.state::<Db>();
         let conn = db.0.lock().unwrap();
         conn.execute(
-            "UPDATE jobs SET status = 'queued', error = NULL, updated_at = ?2
+            "UPDATE jobs SET status = 'queued', error = NULL, not_before = NULL, updated_at = ?2
              WHERE id = ?1 AND status = 'paused'",
             params![id, db::now()],
         )?;
@@ -724,7 +786,11 @@ async fn run_one(app: AppHandle, job: Job) {
             // A killed child fails its stage; if a person paused or cancelled
             // the job, that is what happened, not an error (D117).
             if !stopped_on_purpose(&conn, job.id) {
-                let _ = fail(&conn, job.id, &e.to_string());
+                if e.is_offline() {
+                    let _ = hold_offline(&conn, job.id);
+                } else {
+                    let _ = fail(&conn, job.id, &e.to_string());
+                }
             }
         }
     }
@@ -813,6 +879,39 @@ mod tests {
             params![id, want_video as i64, !want_video as i64, status, video_id],
         )
         .unwrap();
+    }
+
+    /// D141: a download that lost its connection waits out its minute in the
+    /// queue, is not claimed before then, and is claimed after.
+    #[test]
+    fn a_download_without_a_connection_waits_its_minute_and_then_goes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        let here = std::env::temp_dir();
+        conn.execute(
+            "INSERT INTO jobs (id, url, status, stage, created_at, updated_at, download_root)
+             VALUES (1, 'https://youtu.be/x', 'running', 'download', 0, 0, ?1)",
+            [here.to_string_lossy()],
+        )
+        .unwrap();
+        hold_offline(&conn, 1).unwrap();
+        let (status, error): (String, String) = conn
+            .query_row("SELECT status, error FROM jobs WHERE id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((status.as_str(), error.as_str()), ("queued", OFFLINE_WAIT));
+        assert!(matches!(claim_next(&conn, &here).unwrap(), Claim::Waiting));
+
+        conn.execute(
+            "UPDATE jobs SET not_before = ?1 WHERE id = 1",
+            [db::now() - 1],
+        )
+        .unwrap();
+        match claim_next(&conn, &here).unwrap() {
+            Claim::Job(j) => assert_eq!((j.id, j.error), (1, None)),
+            _ => panic!("the wait was over, and it was not claimed"),
+        }
     }
 
     /// A finished download can be cleared from the list at once; one still
