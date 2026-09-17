@@ -3,7 +3,7 @@
 //! Every `unsafe` block in the window engine is in this file. The folder
 //! watch (#111) is in `tree`, beside it.
 
-use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, WindowPlatform};
+use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, Volume, WindowPlatform};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::HiDpi::{
@@ -20,6 +20,50 @@ use windows::Win32::UI::WindowsAndMessaging::{
 mod tree;
 
 pub struct Win32Platform;
+
+/// A volume's serial number as eight hex digits, from its NUL-terminated
+/// mount (`E:\`). `None` for a volume that will not say, or says zero, which
+/// is no id at all.
+fn serial(mount: &[u16]) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+    let mut serial = 0u32;
+    // SAFETY: a NUL-terminated mount that outlives the call, and one stack
+    // u32 it writes into; every other out-parameter is declined.
+    unsafe {
+        GetVolumeInformationW(
+            PCWSTR(mount.as_ptr()),
+            None,
+            Some(&mut serial),
+            None,
+            None,
+            None,
+        )
+    }
+    .ok()?;
+    (serial != 0).then(|| format!("{serial:08X}"))
+}
+
+/// Run `f` with Windows' "there is no disk in the drive" box off for this
+/// thread. Asking an empty card reader for its volume puts one on the screen
+/// otherwise, in front of whatever the person was doing.
+fn quietly<T>(f: impl FnOnce() -> T) -> T {
+    use windows::Win32::System::Diagnostics::Debug::{
+        SetThreadErrorMode, SEM_FAILCRITICALERRORS, THREAD_ERROR_MODE,
+    };
+    let mut was = THREAD_ERROR_MODE(0);
+    // SAFETY: this thread's own error mode, and a stack value the old one is
+    // written into.
+    let set = unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, Some(&mut was)) }.is_ok();
+    let out = f();
+    if set {
+        // SAFETY: as above, putting back what was there.
+        unsafe {
+            let _ = SetThreadErrorMode(was, None);
+        }
+    }
+    out
+}
 
 fn hwnd(w: NativeWindow) -> HWND {
     HWND(w.0 as _)
@@ -223,6 +267,55 @@ impl WindowPlatform for Win32Platform {
         (total > 0).then_some(DiskSpace { free, total })
     }
 
+    fn volume_of(&self, path: &std::path::Path) -> Option<Volume> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetVolumePathNameW;
+        if !path.is_dir() {
+            return None;
+        }
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // A mount is never longer than the path it holds.
+        let mut mount = vec![0u16; wide.len().max(261)];
+        // SAFETY: a NUL-terminated path that outlives the call, and a buffer
+        // the call is told the length of by the slice.
+        unsafe { GetVolumePathNameW(PCWSTR(wide.as_ptr()), &mut mount) }.ok()?;
+        let len = mount.iter().position(|c| *c == 0)?;
+        mount.truncate(len + 1);
+        let id = quietly(|| serial(&mount))?;
+        Some(Volume {
+            id,
+            mount: std::ffi::OsString::from_wide(&mount[..len]).into(),
+        })
+    }
+
+    fn mounts_of(&self, id: &str) -> Vec<std::path::PathBuf> {
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+        // DRIVE_REMOVABLE and DRIVE_FIXED. A USB hard drive says fixed.
+        // They live in a feature of the crate this app is not built with,
+        // for two numbers.
+        const REMOVABLE: u32 = 2;
+        const FIXED: u32 = 3;
+        // SAFETY: no arguments; a bit per drive letter in use.
+        let letters = unsafe { GetLogicalDrives() };
+        quietly(|| {
+            (0..26u8)
+                .filter(|i| letters & (1 << i) != 0)
+                .filter_map(|i| {
+                    let root = format!("{}:\\", (b'A' + i) as char);
+                    let wide: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
+                    // SAFETY: a NUL-terminated root that outlives the call.
+                    let kind = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
+                    if kind != REMOVABLE && kind != FIXED {
+                        return None;
+                    }
+                    (serial(&wide)? == id).then(|| root.into())
+                })
+                .collect()
+        })
+    }
+
     fn restore_no_activate(&self, w: NativeWindow) {
         // SW_SHOWNOACTIVATE rather than SW_RESTORE: the rescue runs from a
         // WM_DISPLAYCHANGE handler, and stealing focus because a monitor was
@@ -273,5 +366,22 @@ mod tests {
         assert!(!Win32Platform.in_use(&path));
         assert!(!Win32Platform.in_use(&dir.join("never.mp3")));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D143, on the real calls: a folder knows its drive and where the drive
+    /// is mounted, and looking for that drive by its id finds the same mount.
+    /// A folder that is not there has no drive, and an id no drive carries is
+    /// mounted nowhere.
+    #[test]
+    fn a_folder_names_its_drive_and_the_drive_is_found_by_that_name() {
+        let dir = std::env::temp_dir().join("hp-volume-143");
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Win32Platform.volume_of(&dir).unwrap();
+        assert_eq!(v.id.len(), 8, "{v:?}");
+        assert!(dir.starts_with(&v.mount), "{v:?}");
+        assert!(Win32Platform.mounts_of(&v.id).contains(&v.mount), "{v:?}");
+        assert!(Win32Platform.mounts_of("no drive").is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(Win32Platform.volume_of(&dir), None);
     }
 }
