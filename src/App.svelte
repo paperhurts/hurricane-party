@@ -31,6 +31,7 @@
   import { paletteFromPixels } from "./lib/palette";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
   import { onDrive, outRoots, placeAmong, sayOut } from "./lib/drives";
+  import { draftOf, fold, nameFor, ruleFromFind, ruleOf, sayRule, type Draft, type Rule } from "./lib/smart";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
   // allowed; everything around him is tokens.
@@ -75,7 +76,11 @@
   type ScanReport = { root_id: number; found: number; added: number; updated: number; missing: number };
 
   /** `offline`: of `count`, the tracks on a drive that is out (D143). */
-  type Playlist = { id: number; name: string; count: number; offline: number };
+  /**
+   * `smart`: fills itself from `rule`, which is null only when a stored rule
+   * does not read (#165, D144).
+   */
+  type Playlist = { id: number; name: string; count: number; offline: number; smart: boolean; rule: Rule | null };
 
   // What Rust says after a row is removed: the file is still at `path`, and
   // the row no longer exists to say so (#78).
@@ -208,6 +213,15 @@
   let outSaid = $derived(sayOut(whole, roots, showOut));
   let shown = $derived(showOut ? whole : whole.filter(here));
 
+  // A smart playlist (#165, D144) fills itself from its rule, so the list
+  // showing has no grip, no ×, and no place in a row's + menu.
+  let selectedSmart = $derived(playlists.find((p) => p.id === selectedList)?.smart ?? false);
+  let handLists = $derived(playlists.filter((p) => !p.smart));
+  // The rule being edited, as typed, and what is wrong with it.
+  let ruleFor = $state<number | null>(null);
+  let draft = $state<Draft | null>(null);
+  let draftWrong = $state<string | null>(null);
+
   /** List the tracks on a drive that is out, greyed, or stop. A check on one that goes out of sight goes with it. */
   function setShowOut(on: boolean) {
     showOut = on;
@@ -273,7 +287,7 @@
   });
 
   /** Case- and accent-blind, so "beyonce" finds "Beyoncé". */
-  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  // `fold` is in lib/smart, beside the Rust twin a saved search is matched by.
   let terms = $derived(fold(search).split(/\s+/).filter(Boolean));
   let marked = $derived(checkOnly ? shown.filter((t) => failedIds.has(t.id)) : shown);
   let searched = $derived(
@@ -306,6 +320,60 @@
     search = "";
     kind = "all";
     checkOnly = false;
+  }
+
+  // ---- smart playlists (#165, D144) -----------------------------------------
+
+  /** Whether the find bar says anything a smart playlist could keep. */
+  let saveable = $derived(selectedList == null && (terms.length > 0 || kind !== "all" || sort !== "added"));
+
+  /** Keep what the find bar is showing as a list that stays current, and show it. */
+  async function saveSmart() {
+    const rule = ruleFromFind(search, kind, sort);
+    const name = prompt("Smart playlist name", nameFor(rule))?.trim();
+    if (!name) return;
+    try {
+      const id = await invoke<number>("create_smart_playlist", { name, rule });
+      clearFind();
+      await refreshLibrary();
+      await openList(id);
+      notice = `“${name}” is a smart playlist: it fills itself as the library changes, and its rule is in its ⋯ menu.`;
+    } catch (e) {
+      notice = `Couldn't save it: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  /** Open a smart list's rule in the editor above its rows. */
+  async function editRule(p: Playlist) {
+    listMenuFor = null;
+    if (selectedList !== p.id) await openList(p.id);
+    ruleFor = p.id;
+    draft = draftOf(p.rule ?? { v: 1 });
+    draftWrong = null;
+  }
+
+  async function saveRule() {
+    if (ruleFor == null || !draft) return;
+    const rule = ruleOf(draft);
+    if (typeof rule === "string") {
+      draftWrong = rule;
+      return;
+    }
+    try {
+      await invoke("set_smart_rule", { id: ruleFor, rule });
+      ruleFor = null;
+      draft = null;
+      draftWrong = null;
+      await refreshLibrary();
+    } catch (e) {
+      draftWrong = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function cancelRule() {
+    ruleFor = null;
+    draft = null;
+    draftWrong = null;
   }
 
   // ---- integrity checking (#164, D142) --------------------------------------
@@ -851,7 +919,10 @@
       kind: t.kind,
       position: t.position,
     }));
-    emit("queue:set", { name, listId: queueListId, items }).catch(() => {});
+    // A smart queue is played and never edited by hand (#165): the playlist
+    // window turns REM and its drag off for it.
+    const smart = playlists.find((p) => p.id === queueListId)?.smart ?? false;
+    emit("queue:set", { name, listId: queueListId, smart, items }).catch(() => {});
   }
 
   // Re-broadcast whenever the queue changes: a list switch, a scan, a
@@ -862,7 +933,14 @@
 
   async function openList(id: number | null) {
     selectedList = id;
-    listItems = id == null ? [] : await invoke<MediaRow[]>("playlist_items", { id });
+    if (ruleFor !== null && ruleFor !== id) cancelRule();
+    try {
+      listItems = id == null ? [] : await invoke<MediaRow[]>("playlist_items", { id });
+    } catch (e) {
+      // A smart list whose stored rule does not read says why (#165).
+      listItems = [];
+      notice = e instanceof Error ? e.message : String(e);
+    }
   }
 
   // ---- managing the playlists themselves (D116) ----
@@ -1090,15 +1168,17 @@
     refreshLibrary();
   }
 
+  // A refusal is said, not swallowed: Rust turns away a hand edit on a smart
+  // playlist (#165) whichever window asked.
   async function removeFrom(listId: number | null, position: number) {
     if (listId == null) return;
-    await invoke("remove_from_playlist", { playlistId: listId, position });
+    await invoke("remove_from_playlist", { playlistId: listId, position }).catch((e) => (notice = String(e)));
     refreshLibrary();
   }
 
   async function moveIn(listId: number | null, from: number, to: number) {
     if (listId == null) return;
-    await invoke("reorder_playlist", { playlistId: listId, from, to });
+    await invoke("reorder_playlist", { playlistId: listId, from, to }).catch((e) => (notice = String(e)));
     refreshLibrary();
   }
 
@@ -2295,18 +2375,24 @@
               class:sel={selectedList === p.id}
               onclick={() => openList(p.id)}
               ondblclick={() => startRename(p)}
-              title={`${p.name} — double-click to rename`}
+              title={p.smart
+                ? `${p.name} — a smart playlist: it fills itself from its rule. Double-click to rename`
+                : `${p.name} — double-click to rename`}
             >
+              {#if p.smart}<span class="smartmark" aria-label="Smart playlist">✦</span>{/if}
               <span class="plt">{p.name}</span> <span class="n">{showOut ? p.count : p.count - p.offline}</span>
             </button>
             <button
               class="plmore"
               class:open={listMenuFor === p.id}
               onclick={() => (listMenuFor = listMenuFor === p.id ? null : p.id)}
-              title="Rename or delete"
+              title={p.smart ? "Its rule, rename or delete" : "Rename or delete"}
             >⋯</button>
             {#if listMenuFor === p.id}
               <div class="menu plmenu" role="menu">
+                {#if p.smart}
+                  <button role="menuitem" onclick={() => editRule(p)}>Edit rule…</button>
+                {/if}
                 <button role="menuitem" onclick={() => startRename(p)}>Rename</button>
                 <button role="menuitem" class="danger" onclick={() => deleteList(p)}>Delete playlist…</button>
               </div>
@@ -2369,6 +2455,12 @@
             <option value="longest">Longest</option>
           </select>
         {/if}
+        {#if saveable}
+          <!-- The common way to make a smart playlist (#165): keep this search. -->
+          <button class="mini" onclick={saveSmart} title="A playlist that stays this search as the library changes">
+            Save as smart playlist…
+          </button>
+        {/if}
       </div>
       <!-- The selection bar (D84): only while something is checked, so the
            list is quiet until it is asked for something. Removal here keeps
@@ -2382,6 +2474,58 @@
       {/if}
       <!-- Tracks on a drive that is out (D143): one quiet line, and the way
            to see them. Unplugging a stick is ordinary, so it is not a warning. -->
+      <!-- A smart playlist says what it fills itself with, and its rule is
+           edited here, above the rows it decides (#165). -->
+      {#if selectedSmart && ruleFor === selectedList && draft}
+        <form
+          class="ruleedit"
+          onsubmit={(e) => {
+            e.preventDefault();
+            saveRule();
+          }}
+        >
+          <label class="wide">Words <input type="search" bind:value={draft.words} placeholder="in the title or artist" /></label>
+          <label
+            >Type
+            <select bind:value={draft.kind}>
+              <option value="all">All</option>
+              <option value="audio">Audio</option>
+              <option value="video">Video</option>
+            </select>
+          </label>
+          <label>Added in the last <input class="num" inputmode="numeric" bind:value={draft.days} /> days</label>
+          <label>Longer than <input class="num" inputmode="decimal" bind:value={draft.longerMin} /> min</label>
+          <label>Shorter than <input class="num" inputmode="decimal" bind:value={draft.shorterMin} /> min</label>
+          <label
+            >On
+            <select bind:value={draft.root}>
+              <option value="">any root</option>
+              {#each roots as r (r.id)}<option value={String(r.id)}>{r.label}</option>{/each}
+            </select>
+          </label>
+          <label
+            >Order
+            <select bind:value={draft.sort}>
+              <option value="added">Recently added</option>
+              <option value="title">Title</option>
+              <option value="artist">Artist</option>
+              <option value="longest">Longest</option>
+            </select>
+          </label>
+          <label>Only the first <input class="num" inputmode="numeric" bind:value={draft.limit} /></label>
+          <span class="ruleacts">
+            <button class="mini" type="submit">Save rule</button>
+            <button class="mini ghost" type="button" onclick={cancelRule}>Cancel</button>
+          </span>
+          {#if draftWrong}<span class="rulewrong">{draftWrong}</span>{/if}
+        </form>
+      {:else if selectedSmart}
+        {@const p = playlists.find((x) => x.id === selectedList)}
+        <p class="outline">
+          <span>{p?.rule ? sayRule(p.rule, roots) : "Its rule cannot be read."}</span>
+          {#if p}<button class="mini" onclick={() => editRule(p)}>Edit rule…</button>{/if}
+        </p>
+      {/if}
       {#if outSaid}
         <p class="outline">
           <span>{outSaid}</span>
@@ -2398,7 +2542,9 @@
           class:drop-after={dragId != null && dropAt === visible.length && i === visible.length - 1}
           data-idx={i}
         >
-          {#if selectedList != null}
+          {#if selectedSmart}
+            <!-- Nobody arranged a smart playlist: its rule orders it (#165). -->
+          {:else if selectedList != null}
             <!-- A grip reorders the whole list, so it waits for the search to
                  clear rather than dropping a row between two it cannot see. -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -2456,7 +2602,7 @@
               >
               {#if addMenuFor === t.id}
                 <div class="menu" role="menu">
-                  {#each playlists as p (p.id)}
+                  {#each handLists as p (p.id)}
                     <button role="menuitem" onclick={() => { addTo(p.id, t.id); addMenuFor = null; }}>{p.name}</button>
                   {:else}
                     <div class="none">No playlists yet</div>
@@ -2469,7 +2615,7 @@
                 </div>
               {/if}
             </span>
-          {:else}
+          {:else if !selectedSmart}
             <button class="mini" onclick={() => removeAt(t.position!)} title="Remove from this playlist">×</button>
           {/if}
         </li>
@@ -2494,7 +2640,9 @@
             </div>
           </li>
         {:else}
-          <li class="empty">Empty playlist. Add tracks from the library.</li>
+          <li class="empty">
+            {selectedSmart ? "Nothing in the library matches its rule yet." : "Empty playlist. Add tracks from the library."}
+          </li>
         {/if}
       {/each}
     </ul>
@@ -2713,6 +2861,19 @@
   .findbar .kinds { display: inline-flex; gap: 2px; flex: 0 0 auto; }
   .findbar .kinds .sel { border-color: var(--accent); color: var(--accent); }
   .findbar .sort { flex: 0 0 auto; font-size: 11px; }
+  /* A smart playlist's rule, edited above its rows (#165). */
+  .ruleedit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; padding: 8px 9px;
+              font-size: 12px; background: var(--surface);
+              border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .ruleedit label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .ruleedit label.wide { flex: 1 1 100%; }
+  .ruleedit input { font: inherit; font-size: 12px; padding: 2px 6px; background: var(--ground); color: var(--text);
+                    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .ruleedit input:focus { outline: none; border-color: var(--accent); }
+  .ruleedit label.wide input { flex: 1 1 auto; }
+  .ruleedit input.num { width: 4.5em; }
+  .ruleedit .ruleacts { display: inline-flex; gap: 6px; margin-left: auto; }
+  .ruleedit .rulewrong { flex: 1 1 100%; color: var(--warn); }
   .grip.off { opacity: 0.25; cursor: not-allowed; }
   /* The right column: the selection bar, when there is one, sits on the list. */
   .listcol { display: flex; flex-direction: column; min-width: 0; }
@@ -2755,6 +2916,7 @@
   .plrow .plname { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
   .plrow .plt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plrow .plname .n { flex: 0 0 auto; }
+  .plrow .smartmark { flex: 0 0 auto; color: var(--accent); font-size: 10px; }
   .plgrip { flex: 0 0 auto; display: flex; align-items: center; padding: 0 2px; font-size: 11px;
             letter-spacing: -3px; cursor: grab; touch-action: none; user-select: none;
             color: color-mix(in srgb, var(--text) 30%, transparent); opacity: 0; }

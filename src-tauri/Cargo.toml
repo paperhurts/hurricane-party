@@ -44,6 +44,12 @@ hp-control = { path = "../crates/hp-control" }
 reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
 # Redrawing the radar frames in the analyser's ramp. Already in the tree.
 png = "0.18"
+# A smart playlist's words match the way the library's search box does,
+# blind to case and accents (#165, D144): NFD, then every mark dropped, the
+# same steps as `fold` in the webview. ICU4X, already in the tree through
+# `url`'s host names, with the same data it builds there.
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2", default-features = false, features = ["compiled_data"] }
 # Fingerprinting a file so damage can be told from a retag (#164, D142).
 # Already in the tree through Tauri's own dependencies.
 sha2 = "0.10"

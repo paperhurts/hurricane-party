@@ -18,7 +18,8 @@
     kind: string;
     position: number | null;
   };
-  type Queue = { name: string; listId: number | null; items: Item[] };
+  /** `smart`: a list that fills itself from a rule, played and never edited by hand (#165). */
+  type Queue = { name: string; listId: number | null; smart?: boolean; items: Item[] };
 
   let queue = $state<Queue>({ name: "", listId: null, items: [] });
   let nowId = $state<number | null>(null);
@@ -73,8 +74,10 @@
     now ? (now.uploader ? `${now.uploader} — ${now.title}` : now.title) : queue.name || "Library",
   );
   let selectedItem = $derived(queue.items.find((t) => t.id === selected) ?? null);
-  // Only a real playlist has rows to remove; the library is not a list.
-  let canRemove = $derived(queue.listId != null && selectedItem?.position != null);
+  // Only a playlist made by hand has rows to remove; the library is not a
+  // list, and a smart playlist's rule decides its rows (#165).
+  let handList = $derived(queue.listId != null && !queue.smart);
+  let canRemove = $derived(handList && selectedItem?.position != null);
 
   $effect(() => {
     const subs = [
@@ -147,7 +150,9 @@
         { path: picked },
       );
       let put = 0;
-      if (queue.listId != null) {
+      // A smart playlist takes in whatever its rule matches, so the folder
+      // goes to the library and the list fills itself (#165).
+      if (handList && queue.listId != null) {
         const have = new Set(queue.items.map((t) => t.id));
         for (const mediaId of r.ids) {
           if (have.has(mediaId)) continue;
@@ -159,7 +164,7 @@
       say(
         r.found === 0
           ? "No audio or video files in that folder."
-          : queue.listId != null
+          : handList
             ? `${put} put in ${queue.name}` +
               (r.ids.length - put > 0 ? `, ${r.ids.length - put} already there` : "") +
               (r.added ? `, ${r.added} new to the library` : "")
@@ -219,7 +224,7 @@
       play(t);
       return;
     }
-    if (queue.listId == null || t.position == null) return;
+    if (!handList || t.position == null) return;
 
     const row = e.currentTarget as HTMLElement;
     const startY = e.clientY;
