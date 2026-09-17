@@ -1,6 +1,7 @@
 pub mod bond;
 mod control;
 mod db;
+mod drives;
 mod egress;
 mod eq_presets;
 mod integrity;
@@ -13,6 +14,7 @@ mod playlist;
 mod prep;
 mod radar;
 mod skins;
+mod smart;
 mod storage;
 mod tray;
 mod video;
@@ -504,6 +506,16 @@ fn list_roots(app: AppHandle) -> Result<Vec<localimport::Root>, db::DbError> {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
     localimport::list_roots(&conn)
+}
+
+/// The root a track is under, named, when its drive is out (D143). Main asks
+/// when a file will not open, so it says "plug it in" rather than offering to
+/// remove a track that is only away.
+#[tauri::command]
+fn track_drive_out(app: AppHandle, id: i64) -> Result<Option<String>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    drives::out_for(&conn, id)
 }
 
 // ---- taking things out (#78) -------------------------------------------------
@@ -1067,6 +1079,28 @@ fn create_playlist(app: AppHandle, name: String) -> Result<i64, db::DbError> {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
     playlist::create(&conn, name.trim())
+}
+
+/// A playlist that fills itself from a rule (#165, D144). The rule arrives
+/// typed: a field this app does not know is refused by its name before it
+/// gets here.
+#[tauri::command]
+fn create_smart_playlist(
+    app: AppHandle,
+    name: String,
+    rule: smart::Rule,
+) -> Result<i64, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::create_smart(&conn, name.trim(), &rule)
+}
+
+/// Change a smart playlist's rule (#165).
+#[tauri::command]
+fn set_smart_rule(app: AppHandle, id: i64, rule: smart::Rule) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::set_rule(&conn, id, &rule)
 }
 
 /// Rename a playlist (D116).
@@ -1719,6 +1753,8 @@ pub fn run() {
             library_path,
             list_playlists,
             create_playlist,
+            create_smart_playlist,
+            set_smart_rule,
             rename_playlist,
             delete_playlist,
             move_playlist,
@@ -1756,6 +1792,7 @@ pub fn run() {
             read_skin,
             add_local_folder,
             list_roots,
+            track_drive_out,
             remove_from_library,
             remove_tracks,
             prune_root,

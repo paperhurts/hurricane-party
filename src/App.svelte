@@ -30,6 +30,8 @@
   } from "./lib/madeskin";
   import { paletteFromPixels } from "./lib/palette";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
+  import { onDrive, outRoots, placeAmong, sayOut } from "./lib/drives";
+  import { draftOf, fold, nameFor, ruleFromFind, ruleOf, sayRule, type Draft, type Rule } from "./lib/smart";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
   // allowed; everything around him is tokens.
@@ -59,6 +61,8 @@
     duration_s: number | null;
     filesize: number | null;
     kind: string;
+    /** The root it is under: out when that root's drive is (D143). */
+    root_id: number;
     path: string;
     position: number | null;
     /** What the last integrity check made of it (#164, D142). */
@@ -71,7 +75,12 @@
   // again: a known root is found by its path, so the same call serves both.
   type ScanReport = { root_id: number; found: number; added: number; updated: number; missing: number };
 
-  type Playlist = { id: number; name: string; count: number };
+  /** `offline`: of `count`, the tracks on a drive that is out (D143). */
+  /**
+   * `smart`: fills itself from `rule`, which is null only when a stored rule
+   * does not read (#165, D144).
+   */
+  type Playlist = { id: number; name: string; count: number; offline: number; smart: boolean; rule: Rule | null };
 
   // What Rust says after a row is removed: the file is still at `path`, and
   // the row no longer exists to say so (#78).
@@ -179,7 +188,8 @@
   let selected = $state<number[]>([]);
   // A track Main could not open. It says so in its own strip; this is the
   // same message where the row is, with the way out beside it.
-  let missing = $state<{ id: number; title: string } | null>(null);
+  // `drive` names the root when the file is on a drive that is out (D143).
+  let missing = $state<{ id: number; title: string; drive?: string | null } | null>(null);
   // What an integrity check marked, and whether the list is showing only
   // those rows (#164, D142).
   type Failed = { id: number; title: string; state: string; note: string | null; path: string; url: string | null };
@@ -191,7 +201,32 @@
 
   let active = $derived(jobs.filter((j) => j.status === "running" || j.status === "queued"));
   let finished = $derived(jobs.filter((j) => j.status === "done"));
-  let shown = $derived(selectedList == null ? tracks : listItems);
+
+  // Tracks on a drive that is not plugged in (D143). Their rows stay (D28);
+  // the list leaves them out unless asked, and the queue always does, so
+  // nothing steps onto a file that cannot open. Rust says within seconds when
+  // a drive goes or comes back, as `library-changed`.
+  let out = $derived(outRoots(roots));
+  const here = (t: MediaRow) => onDrive(t, out);
+  let showOut = $state(false);
+  let whole = $derived(selectedList == null ? tracks : listItems);
+  let outSaid = $derived(sayOut(whole, roots, showOut));
+  let shown = $derived(showOut ? whole : whole.filter(here));
+
+  // A smart playlist (#165, D144) fills itself from its rule, so the list
+  // showing has no grip, no ×, and no place in a row's + menu.
+  let selectedSmart = $derived(playlists.find((p) => p.id === selectedList)?.smart ?? false);
+  let handLists = $derived(playlists.filter((p) => !p.smart));
+  // The rule being edited, as typed, and what is wrong with it.
+  let ruleFor = $state<number | null>(null);
+  let draft = $state<Draft | null>(null);
+  let draftWrong = $state<string | null>(null);
+
+  /** List the tracks on a drive that is out, greyed, or stop. A check on one that goes out of sight goes with it. */
+  function setShowOut(on: boolean) {
+    showOut = on;
+    if (!on) selected = selected.filter((id) => tracks.some((t) => t.id === id && here(t)));
+  }
 
   // The list playback belongs to (D120): what the classic playlist window
   // shows, and what Next, Previous and a track ending walk. It used to be
@@ -206,7 +241,8 @@
   const QUEUE_KEY = "hp.queueFrom";
   let queueFrom = $state<number | null | undefined>(loadQueueFrom());
   let queueItems = $state<MediaRow[]>([]);
-  let queue = $derived(queueFrom === undefined ? shown : queueFrom === null ? tracks : queueItems);
+  let queueWhole = $derived(queueFrom === undefined ? whole : queueFrom === null ? tracks : queueItems);
+  let queue = $derived(queueWhole.filter(here));
   let queueListId = $derived(queueFrom === undefined ? selectedList : queueFrom);
 
   function loadQueueFrom(): number | null | undefined {
@@ -251,7 +287,7 @@
   });
 
   /** Case- and accent-blind, so "beyonce" finds "Beyoncé". */
-  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  // `fold` is in lib/smart, beside the Rust twin a saved search is matched by.
   let terms = $derived(fold(search).split(/\s+/).filter(Boolean));
   let marked = $derived(checkOnly ? shown.filter((t) => failedIds.has(t.id)) : shown);
   let searched = $derived(
@@ -284,6 +320,60 @@
     search = "";
     kind = "all";
     checkOnly = false;
+  }
+
+  // ---- smart playlists (#165, D144) -----------------------------------------
+
+  /** Whether the find bar says anything a smart playlist could keep. */
+  let saveable = $derived(selectedList == null && (terms.length > 0 || kind !== "all" || sort !== "added"));
+
+  /** Keep what the find bar is showing as a list that stays current, and show it. */
+  async function saveSmart() {
+    const rule = ruleFromFind(search, kind, sort);
+    const name = prompt("Smart playlist name", nameFor(rule))?.trim();
+    if (!name) return;
+    try {
+      const id = await invoke<number>("create_smart_playlist", { name, rule });
+      clearFind();
+      await refreshLibrary();
+      await openList(id);
+      notice = `“${name}” is a smart playlist: it fills itself as the library changes, and its rule is in its ⋯ menu.`;
+    } catch (e) {
+      notice = `Couldn't save it: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  /** Open a smart list's rule in the editor above its rows. */
+  async function editRule(p: Playlist) {
+    listMenuFor = null;
+    if (selectedList !== p.id) await openList(p.id);
+    ruleFor = p.id;
+    draft = draftOf(p.rule ?? { v: 1 });
+    draftWrong = null;
+  }
+
+  async function saveRule() {
+    if (ruleFor == null || !draft) return;
+    const rule = ruleOf(draft);
+    if (typeof rule === "string") {
+      draftWrong = rule;
+      return;
+    }
+    try {
+      await invoke("set_smart_rule", { id: ruleFor, rule });
+      ruleFor = null;
+      draft = null;
+      draftWrong = null;
+      await refreshLibrary();
+    } catch (e) {
+      draftWrong = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function cancelRule() {
+    ruleFor = null;
+    draft = null;
+    draftWrong = null;
   }
 
   // ---- integrity checking (#164, D142) --------------------------------------
@@ -417,11 +507,15 @@
     // window (Main's strip, the video's); a message about a row that is not
     // there any more is noise.
     if (missing && !tracks.some((t) => t.id === missing!.id)) missing = null;
-    // A check on a row that has gone (removed elsewhere, pruned) is dropped;
-    // the others keep their check across the refresh.
-    if (selected.length) selected = selected.filter((id) => tracks.some((t) => t.id === id));
     playlists = await invoke<Playlist[]>("list_playlists");
     roots = await invoke<Root[]>("list_roots");
+    // A drive back in: nothing left to show greyed, so the next time one goes
+    // out its tracks are hidden again, as the person first found them (D143).
+    if (!out.size) showOut = false;
+    // A check on a row that has gone (removed elsewhere, pruned) is dropped,
+    // and so is one on a row its drive just took out of sight (D143); the
+    // others keep their check across the refresh.
+    if (selected.length) selected = selected.filter((id) => tracks.some((t) => t.id === id && (showOut || here(t))));
     if (selectedList != null) await openList(selectedList);
     await refreshQueue();
   }
@@ -518,8 +612,17 @@
       }),
       // ...and when it could not open the file (#43), so the row's window can
       // offer to remove the row (#78).
-      listen<{ id: number; title: string }>("player:missing", (e) => {
-        missing = e.payload;
+      listen<{ id: number; title: string }>("player:missing", async (e) => {
+        // A file on a drive that is out is not gone, and not a row to offer
+        // to remove (D143). The roots are listed again too: the drive went
+        // since they were last looked at, or this row would not have played.
+        const drive = await invoke<string | null>("track_drive_out", { id: e.payload.id }).catch(() => null);
+        missing = { ...e.payload, drive };
+        if (drive) refreshLibrary();
+      }),
+      // A drive came back under another letter, and its root moved with it (D143).
+      listen<{ label: string; to: string }[]>("library-moved", (e) => {
+        notice = e.payload.map((m) => `${m.label} is at ${m.to} now, where its drive came back.`).join(" ");
       }),
       // A skin that will not load (#107). The classic windows fall back to
       // Eyewall so they are never bare; this is the window that can say why,
@@ -550,7 +653,11 @@
       // The playlist window edits the list it shows, which is the queue, not
       // whatever the library happens to be showing (D120).
       listen<number>("queue:remove", (e) => removeFrom(queueListId, e.payload)),
-      listen<{ from: number; to: number }>("queue:move", (e) => moveIn(queueListId, e.payload.from, e.payload.to)),
+      // `to` is an index among the rows that window shows, which leaves out
+      // the ones on a drive that is out (D143).
+      listen<{ from: number; to: number }>("queue:move", (e) =>
+        moveIn(queueListId, e.payload.from, placeIn(queueWhole, queue, e.payload.from, e.payload.to)),
+      ),
     ];
     // The DB is the source of truth for progress, and it's written throttled
     // to ~4Hz. Polling it while work is in flight beats trying to reconcile a
@@ -812,7 +919,10 @@
       kind: t.kind,
       position: t.position,
     }));
-    emit("queue:set", { name, listId: queueListId, items }).catch(() => {});
+    // A smart queue is played and never edited by hand (#165): the playlist
+    // window turns REM and its drag off for it.
+    const smart = playlists.find((p) => p.id === queueListId)?.smart ?? false;
+    emit("queue:set", { name, listId: queueListId, smart, items }).catch(() => {});
   }
 
   // Re-broadcast whenever the queue changes: a list switch, a scan, a
@@ -823,7 +933,14 @@
 
   async function openList(id: number | null) {
     selectedList = id;
-    listItems = id == null ? [] : await invoke<MediaRow[]>("playlist_items", { id });
+    if (ruleFor !== null && ruleFor !== id) cancelRule();
+    try {
+      listItems = id == null ? [] : await invoke<MediaRow[]>("playlist_items", { id });
+    } catch (e) {
+      // A smart list whose stored rule does not read says why (#165).
+      listItems = [];
+      notice = e instanceof Error ? e.message : String(e);
+    }
   }
 
   // ---- managing the playlists themselves (D116) ----
@@ -1051,21 +1168,32 @@
     refreshLibrary();
   }
 
+  // A refusal is said, not swallowed: Rust turns away a hand edit on a smart
+  // playlist (#165) whichever window asked.
   async function removeFrom(listId: number | null, position: number) {
     if (listId == null) return;
-    await invoke("remove_from_playlist", { playlistId: listId, position });
+    await invoke("remove_from_playlist", { playlistId: listId, position }).catch((e) => (notice = String(e)));
     refreshLibrary();
   }
 
   async function moveIn(listId: number | null, from: number, to: number) {
     if (listId == null) return;
-    await invoke("reorder_playlist", { playlistId: listId, from, to });
+    await invoke("reorder_playlist", { playlistId: listId, from, to }).catch((e) => (notice = String(e)));
     refreshLibrary();
   }
 
   // The library's own rows act on the list showing.
   const removeAt = (position: number) => removeFrom(selectedList, position);
-  const move = (from: number, to: number) => moveIn(selectedList, from, to);
+  const move = (from: number, to: number) => moveIn(selectedList, from, placeIn(listItems, shown, from, to));
+
+  /** A drop among the rows showing, as a place in the whole list (D143). */
+  const placeIn = (all: MediaRow[], showing: MediaRow[], from: number, to: number) =>
+    placeAmong(
+      all.map((t) => t.position ?? -1),
+      showing.map((t) => t.position ?? -1),
+      from,
+      to,
+    );
 
   /** A row's own play button: play it, and make its list the queue (D120). */
   function playFromView(t: MediaRow) {
@@ -1079,6 +1207,12 @@
     // audio play that worked.
     error = null;
     missing = null;
+    // A row greyed because its drive is out does not play (D143). Its button
+    // is off too; this is for anything else that asks.
+    if (!here(t)) {
+      missing = { id: t.id, title: t.title, drive: roots.find((r) => r.id === t.root_id)?.label ?? null };
+      return;
+    }
     // The cursor moves for either kind, so next and prev walk on from a video
     // as well as from a track.
     current = t;
@@ -1353,6 +1487,9 @@
       await refreshLibrary();
     } catch (e) {
       error = String(e);
+      // Most often the drive went out after the roots were last listed, and
+      // the root should say so rather than still offering a rescan (D143).
+      refreshLibrary();
     } finally {
       scanning = false;
     }
@@ -2113,7 +2250,12 @@
   <!-- Main could not open the file (#43). The same words it shows, here where
        the row is, with the way out (#78). The file is already gone, so there
        is nothing to offer to delete. -->
-  {#if missing}
+  {#if missing?.drive}
+    <!-- Not gone, only away: nothing to remove (D143). -->
+    <p class="notice">
+      <span>“{missing.title}” is on {missing.drive}, which isn't plugged in. Plug it in and it plays.</span>
+    </p>
+  {:else if missing}
     <p class="error">
       <span>Can't open “{missing.title}”. Moved or deleted?</span>
       <button class="mini" onclick={() => removeTrack(missing!.id)}>Remove from library</button>
@@ -2201,7 +2343,7 @@
   <section class="body">
     <nav bind:this={navEl}>
       <button class="lib" class:sel={selectedList == null} onclick={() => openList(null)}>
-        Library <span class="n">{tracks.length}</span>
+        Library <span class="n">{showOut ? tracks.length : tracks.filter(here).length}</span>
       </button>
       {#each playlists as p, i (p.id)}
         <!-- A playlist a person can rename, delete and put in order (D116). -->
@@ -2233,18 +2375,24 @@
               class:sel={selectedList === p.id}
               onclick={() => openList(p.id)}
               ondblclick={() => startRename(p)}
-              title={`${p.name} — double-click to rename`}
+              title={p.smart
+                ? `${p.name} — a smart playlist: it fills itself from its rule. Double-click to rename`
+                : `${p.name} — double-click to rename`}
             >
-              <span class="plt">{p.name}</span> <span class="n">{p.count}</span>
+              {#if p.smart}<span class="smartmark" aria-label="Smart playlist">✦</span>{/if}
+              <span class="plt">{p.name}</span> <span class="n">{showOut ? p.count : p.count - p.offline}</span>
             </button>
             <button
               class="plmore"
               class:open={listMenuFor === p.id}
               onclick={() => (listMenuFor = listMenuFor === p.id ? null : p.id)}
-              title="Rename or delete"
+              title={p.smart ? "Its rule, rename or delete" : "Rename or delete"}
             >⋯</button>
             {#if listMenuFor === p.id}
               <div class="menu plmenu" role="menu">
+                {#if p.smart}
+                  <button role="menuitem" onclick={() => editRule(p)}>Edit rule…</button>
+                {/if}
                 <button role="menuitem" onclick={() => startRename(p)}>Rename</button>
                 <button role="menuitem" class="danger" onclick={() => deleteList(p)}>Delete playlist…</button>
               </div>
@@ -2307,6 +2455,12 @@
             <option value="longest">Longest</option>
           </select>
         {/if}
+        {#if saveable}
+          <!-- The common way to make a smart playlist (#165): keep this search. -->
+          <button class="mini" onclick={saveSmart} title="A playlist that stays this search as the library changes">
+            Save as smart playlist…
+          </button>
+        {/if}
       </div>
       <!-- The selection bar (D84): only while something is checked, so the
            list is quiet until it is asked for something. Removal here keeps
@@ -2318,16 +2472,79 @@
           <button class="mini ghost" onclick={() => (selected = [])} title="Esc">Clear</button>
         </div>
       {/if}
+      <!-- Tracks on a drive that is out (D143): one quiet line, and the way
+           to see them. Unplugging a stick is ordinary, so it is not a warning. -->
+      <!-- A smart playlist says what it fills itself with, and its rule is
+           edited here, above the rows it decides (#165). -->
+      {#if selectedSmart && ruleFor === selectedList && draft}
+        <form
+          class="ruleedit"
+          onsubmit={(e) => {
+            e.preventDefault();
+            saveRule();
+          }}
+        >
+          <label class="wide">Words <input type="search" bind:value={draft.words} placeholder="in the title or artist" /></label>
+          <label
+            >Type
+            <select bind:value={draft.kind}>
+              <option value="all">All</option>
+              <option value="audio">Audio</option>
+              <option value="video">Video</option>
+            </select>
+          </label>
+          <label>Added in the last <input class="num" inputmode="numeric" bind:value={draft.days} /> days</label>
+          <label>Longer than <input class="num" inputmode="decimal" bind:value={draft.longerMin} /> min</label>
+          <label>Shorter than <input class="num" inputmode="decimal" bind:value={draft.shorterMin} /> min</label>
+          <label
+            >On
+            <select bind:value={draft.root}>
+              <option value="">any root</option>
+              {#each roots as r (r.id)}<option value={String(r.id)}>{r.label}</option>{/each}
+            </select>
+          </label>
+          <label
+            >Order
+            <select bind:value={draft.sort}>
+              <option value="added">Recently added</option>
+              <option value="title">Title</option>
+              <option value="artist">Artist</option>
+              <option value="longest">Longest</option>
+            </select>
+          </label>
+          <label>Only the first <input class="num" inputmode="numeric" bind:value={draft.limit} /></label>
+          <span class="ruleacts">
+            <button class="mini" type="submit">Save rule</button>
+            <button class="mini ghost" type="button" onclick={cancelRule}>Cancel</button>
+          </span>
+          {#if draftWrong}<span class="rulewrong">{draftWrong}</span>{/if}
+        </form>
+      {:else if selectedSmart}
+        {@const p = playlists.find((x) => x.id === selectedList)}
+        <p class="outline">
+          <span>{p?.rule ? sayRule(p.rule, roots) : "Its rule cannot be read."}</span>
+          {#if p}<button class="mini" onclick={() => editRule(p)}>Edit rule…</button>{/if}
+        </p>
+      {/if}
+      {#if outSaid}
+        <p class="outline">
+          <span>{outSaid}</span>
+          <button class="mini" onclick={() => setShowOut(!showOut)}>{showOut ? "Hide them" : "Show them"}</button>
+        </p>
+      {/if}
     <ul class="tracks" bind:this={rowsEl}>
       {#each visible as t, i (t.id + ":" + (t.position ?? "l"))}
         <li
           class:current={current?.id === t.id}
+          class:away={!here(t)}
           class:lifted={dragId === t.id}
           class:drop-before={dragId != null && dropAt === i}
           class:drop-after={dragId != null && dropAt === visible.length && i === visible.length - 1}
           data-idx={i}
         >
-          {#if selectedList != null}
+          {#if selectedSmart}
+            <!-- Nobody arranged a smart playlist: its rule orders it (#165). -->
+          {:else if selectedList != null}
             <!-- A grip reorders the whole list, so it waits for the search to
                  clear rather than dropping a row between two it cannot see. -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -2349,7 +2566,11 @@
               title="Select"
             />
           {/if}
-          {#if t.kind === "video"}
+          {#if !here(t)}
+            <button class="play" disabled title="{roots.find((r) => r.id === t.root_id)?.label ?? 'Its drive'} isn't plugged in"
+              >{t.kind === "video" ? "▣" : "▶"}</button
+            >
+          {:else if t.kind === "video"}
             <button class="play" onclick={() => playFromView(t)}>▣</button>
           {:else if nowId === t.id}
             <button class="play" onclick={toggle}>{isPlaying ? "‖" : "▶"}</button>
@@ -2381,7 +2602,7 @@
               >
               {#if addMenuFor === t.id}
                 <div class="menu" role="menu">
-                  {#each playlists as p (p.id)}
+                  {#each handLists as p (p.id)}
                     <button role="menuitem" onclick={() => { addTo(p.id, t.id); addMenuFor = null; }}>{p.name}</button>
                   {:else}
                     <div class="none">No playlists yet</div>
@@ -2394,7 +2615,7 @@
                 </div>
               {/if}
             </span>
-          {:else}
+          {:else if !selectedSmart}
             <button class="mini" onclick={() => removeAt(t.position!)} title="Remove from this playlist">×</button>
           {/if}
         </li>
@@ -2404,6 +2625,10 @@
             Nothing here matches{terms.length ? ` "${search.trim()}"` : ""}{kind !== "all" ? ` in ${kind}` : ""}.
             <button class="mini" onclick={clearFind}>Clear</button>
           </li>
+        {:else if whole.length}
+          <!-- Everything here is on a drive that is out (D143): the line above
+               says which, and this is not a first run. -->
+          <li class="empty">Everything here is on a drive that isn't plugged in.</li>
         {:else if selectedList == null}
           <!-- First run. An invitation, not an apology (design brief), and
                the surfer's home (#62). -->
@@ -2415,7 +2640,9 @@
             </div>
           </li>
         {:else}
-          <li class="empty">Empty playlist. Add tracks from the library.</li>
+          <li class="empty">
+            {selectedSmart ? "Nothing in the library matches its rule yet." : "Empty playlist. Add tracks from the library."}
+          </li>
         {/if}
       {/each}
     </ul>
@@ -2487,6 +2714,9 @@
          color: color-mix(in srgb, var(--text) 55%, transparent); white-space: nowrap; }
   .checkline { margin: 0; font-size: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .checkline.warn { color: var(--warn); }
+  /* Tracks on a drive that is out (D143): said quietly, above the rows it is about. */
+  .outline { margin: 0 0 6px; font-size: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    color: color-mix(in srgb, var(--text) 60%, transparent); }
   .tag.bad { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
              font-size: 10px; padding: 0 4px; text-transform: uppercase; letter-spacing: 0.5px; flex: 0 0 auto; }
   .notice { margin: 0; font-size: 12px; color: var(--accent); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -2631,6 +2861,19 @@
   .findbar .kinds { display: inline-flex; gap: 2px; flex: 0 0 auto; }
   .findbar .kinds .sel { border-color: var(--accent); color: var(--accent); }
   .findbar .sort { flex: 0 0 auto; font-size: 11px; }
+  /* A smart playlist's rule, edited above its rows (#165). */
+  .ruleedit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; padding: 8px 9px;
+              font-size: 12px; background: var(--surface);
+              border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .ruleedit label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .ruleedit label.wide { flex: 1 1 100%; }
+  .ruleedit input { font: inherit; font-size: 12px; padding: 2px 6px; background: var(--ground); color: var(--text);
+                    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .ruleedit input:focus { outline: none; border-color: var(--accent); }
+  .ruleedit label.wide input { flex: 1 1 auto; }
+  .ruleedit input.num { width: 4.5em; }
+  .ruleedit .ruleacts { display: inline-flex; gap: 6px; margin-left: auto; }
+  .ruleedit .rulewrong { flex: 1 1 100%; color: var(--warn); }
   .grip.off { opacity: 0.25; cursor: not-allowed; }
   /* The right column: the selection bar, when there is one, sits on the list. */
   .listcol { display: flex; flex-direction: column; min-width: 0; }
@@ -2644,6 +2887,7 @@
           color: color-mix(in srgb, var(--text) 30%, transparent); cursor: grab; user-select: none; touch-action: none; }
   .grip:hover { color: var(--accent); }
   .tracks li.lifted { opacity: 0.4; }
+  .tracks li.away .title, .tracks li.away .meta { opacity: 0.45; }
   .tracks li.lifted .grip { cursor: grabbing; }
   .tracks li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
   .tracks li.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
@@ -2672,6 +2916,7 @@
   .plrow .plname { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
   .plrow .plt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plrow .plname .n { flex: 0 0 auto; }
+  .plrow .smartmark { flex: 0 0 auto; color: var(--accent); font-size: 10px; }
   .plgrip { flex: 0 0 auto; display: flex; align-items: center; padding: 0 2px; font-size: 11px;
             letter-spacing: -3px; cursor: grab; touch-action: none; user-select: none;
             color: color-mix(in srgb, var(--text) 30%, transparent); opacity: 0; }

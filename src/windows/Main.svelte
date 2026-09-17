@@ -282,7 +282,17 @@
     // The library is where the click came from and where the row is; it
     // shows the same words with the way out beside them (#78).
     if (missing) {
-      emitTo("library", "player:missing", { id: track.id, title: track.title }).catch(() => {});
+      const id = track.id;
+      emitTo("library", "player:missing", { id, title: track.title }).catch(() => {});
+      // A file on a drive that is out is away, not gone (D143): say where,
+      // and take back the offer to remove it.
+      invoke<string | null>("track_drive_out", { id })
+        .then((drive) => {
+          if (!drive || track?.id !== id) return;
+          missing = false;
+          error = `On ${drive}, which isn't plugged in`;
+        })
+        .catch(() => {});
     }
   }
 

@@ -1,7 +1,8 @@
 //! Playlists and library queries.
 
 use crate::db::{self, DbError};
-use rusqlite::{params, Connection};
+use crate::smart;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -9,7 +10,16 @@ pub struct Playlist {
     pub id: i64,
     pub name: String,
     pub count: i64,
+    /// Of `count`, the tracks on a drive that is not plugged in (D143), which
+    /// the library leaves out of the list unless asked to show them.
+    pub offline: i64,
     pub created_at: i64,
+    /// A smart playlist fills itself from its rule (#165, D144): its rows
+    /// are what the rule matches now, and nobody adds, removes or orders
+    /// them by hand.
+    pub smart: bool,
+    /// The rule, when it is smart and the rule reads.
+    pub rule: Option<smart::Rule>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -21,6 +31,9 @@ pub struct MediaRow {
     pub filesize: Option<i64>,
     /// "audio" | "video" — the frontend routes video to its own window (D13).
     pub kind: String,
+    /// Which root it is under, so the library can tell a track on an
+    /// unplugged drive from one whose file has gone (D28, D143).
+    pub root_id: i64,
     /// Absolute path, rebuilt from (root_id, relpath) at read time. The DB never
     /// stores it (D28) — this is derived for the player, not persisted.
     pub path: String,
@@ -33,7 +46,7 @@ pub struct MediaRow {
 
 const MEDIA_SELECT: &str = "
     SELECT m.id, m.title, m.uploader, m.duration_s, m.filesize, m.kind,
-           r.path AS root_path, m.relpath, m.integrity";
+           m.root_id, r.path AS root_path, m.relpath, m.integrity";
 
 fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<MediaRow> {
     let root: String = r.get("root_path")?;
@@ -45,6 +58,7 @@ fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<Me
         duration_s: r.get("duration_s")?,
         filesize: r.get("filesize")?,
         kind: r.get("kind")?,
+        root_id: r.get("root_id")?,
         path: std::path::Path::new(&root)
             .join(&rel)
             .to_string_lossy()
@@ -59,28 +73,154 @@ pub fn list_media(conn: &Connection) -> Result<Vec<MediaRow>, DbError> {
     let sql = format!(
         "{MEDIA_SELECT} FROM media m
          JOIN library_roots r ON r.id = m.root_id
-         ORDER BY m.added_at DESC"
+         ORDER BY m.added_at DESC, m.id DESC"
     );
     let mut st = conn.prepare(&sql)?;
     let rows = st.query_map([], |r| row_to_media(r, None))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// The library as a smart list reads it: in the library's own order, the
+/// ties broken the same way, with when each row came in (#165).
+fn candidates(conn: &Connection) -> Result<Vec<smart::Candidate>, DbError> {
+    let sql = format!(
+        "{MEDIA_SELECT}, m.added_at FROM media m
+         JOIN library_roots r ON r.id = m.root_id
+         ORDER BY m.added_at DESC, m.id DESC"
+    );
+    let mut st = conn.prepare(&sql)?;
+    let rows = st.query_map([], |r| {
+        Ok(smart::Candidate {
+            row: row_to_media(r, None)?,
+            added_at: r.get("added_at")?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// A smart list's rule, `None` for a list made by hand. A rule that does not
+/// read is an error that says why, not an empty list pretending all is well.
+fn rule_of(conn: &Connection, id: i64) -> Result<Option<smart::Rule>, DbError> {
+    let row: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT COALESCE(is_smart, 0), rule_json FROM playlists WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match row {
+        Some((1, json)) => smart::Rule::parse(json.as_deref().unwrap_or(""))
+            .map(Some)
+            .map_err(DbError::Io),
+        _ => Ok(None),
+    }
+}
+
+/// Refuse a hand edit on a smart list (#165): the rule is what decides its
+/// rows and their order. In Rust, so no window can get round it.
+fn by_hand(conn: &Connection, id: i64) -> Result<(), DbError> {
+    let smart: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT COALESCE(is_smart, 0), name FROM playlists WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match smart {
+        Some((1, name)) => Err(DbError::Io(format!(
+            "“{name}” is a smart playlist: it fills itself from its rule, so nothing is added, removed or moved in it by hand"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// Make a smart playlist, at the bottom of the order like any new list.
+pub fn create_smart(conn: &Connection, name: &str, rule: &smart::Rule) -> Result<i64, DbError> {
+    rule.check().map_err(DbError::Io)?;
+    let id = create(conn, name)?;
+    conn.execute(
+        "UPDATE playlists SET is_smart = 1, rule_json = ?1 WHERE id = ?2",
+        params![rule.to_json(), id],
+    )?;
+    Ok(id)
+}
+
+/// Change a smart playlist's rule. A list made by hand has no rule to change.
+pub fn set_rule(conn: &Connection, id: i64, rule: &smart::Rule) -> Result<(), DbError> {
+    rule.check().map_err(DbError::Io)?;
+    let n = conn.execute(
+        "UPDATE playlists SET rule_json = ?1 WHERE id = ?2 AND is_smart = 1",
+        params![rule.to_json(), id],
+    )?;
+    if n == 0 {
+        return Err(DbError::Io(format!("no smart playlist {id}")));
+    }
+    Ok(())
+}
+
 pub fn list(conn: &Connection) -> Result<Vec<Playlist>, DbError> {
+    // Which roots are not there is a question for the disk, asked once per
+    // root rather than once per track.
+    let absent: std::collections::HashSet<i64> = crate::localimport::list_roots(conn)?
+        .into_iter()
+        .filter(|r| !r.present)
+        .map(|r| r.id)
+        .collect();
     let mut st = conn.prepare(
-        "SELECT p.id, p.name, p.created_at,
+        "SELECT i.playlist_id, m.root_id, COUNT(*) FROM playlist_items i
+         JOIN media m ON m.id = i.media_id GROUP BY i.playlist_id, m.root_id",
+    )?;
+    let mut offline: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for row in st.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })? {
+        let (pid, root, n) = row?;
+        if absent.contains(&root) {
+            *offline.entry(pid).or_default() += n;
+        }
+    }
+    let mut st = conn.prepare(
+        "SELECT p.id, p.name, p.created_at, COALESCE(p.is_smart, 0) AS smart, p.rule_json,
                 (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS count
          FROM playlists p ORDER BY COALESCE(p.position, 1e18), p.created_at, p.id",
     )?;
     let rows = st.query_map([], |r| {
+        let id: i64 = r.get("id")?;
+        let smart: i64 = r.get("smart")?;
+        let json: Option<String> = r.get("rule_json")?;
         Ok(Playlist {
-            id: r.get("id")?,
+            id,
             name: r.get("name")?,
             count: r.get("count")?,
+            offline: offline.get(&id).copied().unwrap_or(0),
             created_at: r.get("created_at")?,
+            smart: smart == 1,
+            rule: (smart == 1)
+                .then(|| smart::Rule::parse(json.as_deref().unwrap_or("")).ok())
+                .flatten(),
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let mut lists: Vec<Playlist> = rows.filter_map(|r| r.ok()).collect();
+
+    // A smart list counts what its rule matches now, read once for them all.
+    if lists.iter().any(|p| p.smart) {
+        let library = candidates(conn)?;
+        let now = db::now();
+        for p in lists.iter_mut().filter(|p| p.smart) {
+            let rows = p
+                .rule
+                .as_ref()
+                .map(|rule| smart::select(rule, &library, now))
+                .unwrap_or_default();
+            p.count = rows.len() as i64;
+            p.offline = rows.iter().filter(|t| absent.contains(&t.root_id)).count() as i64;
+        }
+    }
+    Ok(lists)
 }
 
 pub fn create(conn: &Connection, name: &str) -> Result<i64, DbError> {
@@ -165,6 +305,11 @@ fn rewrite_order(conn: &Connection, order: &[i64]) -> Result<(), DbError> {
 }
 
 pub fn items(conn: &Connection, playlist_id: i64) -> Result<Vec<MediaRow>, DbError> {
+    // A smart list's rows are what its rule matches now, positioned in its
+    // order, so every reader sees it as it sees any other list (#165).
+    if let Some(rule) = rule_of(conn, playlist_id)? {
+        return Ok(smart::select(&rule, &candidates(conn)?, db::now()));
+    }
     let sql = format!(
         "{MEDIA_SELECT}, i.position FROM playlist_items i
          JOIN media m ON m.id = i.media_id
@@ -180,6 +325,7 @@ pub fn items(conn: &Connection, playlist_id: i64) -> Result<Vec<MediaRow>, DbErr
 }
 
 pub fn add(conn: &Connection, playlist_id: i64, media_id: i64) -> Result<(), DbError> {
+    by_hand(conn, playlist_id)?;
     let next: i64 = conn.query_row(
         "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_items WHERE playlist_id = ?1",
         [playlist_id],
@@ -237,6 +383,7 @@ fn positions(conn: &Connection, playlist_id: i64) -> Result<Vec<i64>, DbError> {
 }
 
 pub fn remove(conn: &mut Connection, playlist_id: i64, position: i64) -> Result<(), DbError> {
+    by_hand(conn, playlist_id)?;
     let tx = conn.transaction()?;
     tx.execute(
         "DELETE FROM playlist_items WHERE playlist_id = ?1 AND position = ?2",
@@ -256,6 +403,7 @@ pub fn remove(conn: &mut Connection, playlist_id: i64, position: i64) -> Result<
 }
 
 pub fn reorder(conn: &mut Connection, playlist_id: i64, from: i64, to: i64) -> Result<(), DbError> {
+    by_hand(conn, playlist_id)?;
     let mut order = positions(conn, playlist_id)?;
     let Some(idx) = order.iter().position(|p| *p == from) else {
         return Ok(()); // nothing at that position; nothing to do
@@ -305,6 +453,108 @@ mod tests {
         );
         assert_eq!(names(&conn), ["Storm Prep"]);
         assert!(rename(&conn, 9999, "x").is_err());
+    }
+
+    /// #165: a smart list is what its rule matches now, counted as such,
+    /// current as the library changes, and closed to hand edits in Rust.
+    #[test]
+    fn a_smart_list_fills_itself_and_refuses_a_hand() {
+        let (mut conn, hand) = fixture(0);
+        let insert = |conn: &Connection, title: &str, kind: &str| {
+            conn.execute(
+                "INSERT INTO media (root_id, relpath, kind, title, uploader, added_at)
+                 VALUES (1, ?1, ?2, ?1, 'Ian Stocker', ?3)",
+                params![title, kind, db::now()],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let beach = insert(&conn, "Beach", "audio");
+        insert(&conn, "Storm", "video");
+        let rule = smart::Rule::parse(r#"{"v":1,"words":"stocker","kind":"audio","sort":"title"}"#)
+            .unwrap();
+        let id = create_smart(&conn, "Stocker", &rule).unwrap();
+
+        let titles = |conn: &Connection| -> Vec<String> {
+            items(conn, id)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.title)
+                .collect()
+        };
+        assert_eq!(titles(&conn), ["Beach"]);
+        let port = insert(&conn, "At Port", "audio");
+        assert_eq!(
+            titles(&conn),
+            ["At Port", "Beach"],
+            "a new download appears"
+        );
+        let lists = list(&conn).unwrap();
+        let me = lists.iter().find(|p| p.id == id).unwrap();
+        assert!(me.smart);
+        assert_eq!(me.rule.as_ref(), Some(&rule));
+        assert_eq!(me.count, 2);
+        let theirs = lists.iter().find(|p| p.id == hand).unwrap();
+        assert!(!theirs.smart && theirs.rule.is_none());
+
+        // Removing a track from the library takes it out, with nothing to cascade.
+        crate::library::remove(&mut conn, port).unwrap();
+        assert_eq!(titles(&conn), ["Beach"]);
+
+        // No hand edits, and the list is as it was.
+        let why = add(&conn, id, beach).unwrap_err().to_string();
+        assert!(why.contains("smart playlist"), "{why}");
+        assert!(remove(&mut conn, id, 0).is_err());
+        assert!(reorder(&mut conn, id, 0, 1).is_err());
+        assert_eq!(titles(&conn), ["Beach"]);
+
+        // The rule changes; a hand list has none to change; a bad rule is refused.
+        let videos = smart::Rule::parse(r#"{"v":1,"kind":"video"}"#).unwrap();
+        set_rule(&conn, id, &videos).unwrap();
+        assert_eq!(titles(&conn), ["Storm"]);
+        assert!(set_rule(&conn, hand, &videos).is_err());
+        let bad = smart::Rule {
+            limit: Some(0),
+            ..videos
+        };
+        assert!(set_rule(&conn, id, &bad).is_err());
+        // Deleting it deletes no track (D116).
+        delete(&mut conn, id).unwrap();
+        assert_eq!(list_media(&conn).unwrap().len(), 2);
+    }
+
+    /// A list with tracks on a stick that is out says how many of them are
+    /// out (D143), and still counts every one: the stick is coming back.
+    #[test]
+    fn a_list_counts_its_tracks_on_a_drive_that_is_not_plugged_in() {
+        let (conn, pid) = fixture(0);
+        let here = std::env::temp_dir().to_string_lossy().to_string();
+        conn.execute(
+            "INSERT INTO library_roots (id, label, path) VALUES (2, 'here', ?1),
+                    (3, 'stick', 'Q:\\definitely\\not\\plugged\\in')",
+            [here],
+        )
+        .unwrap();
+        for (root, rel) in [(2, "a.mp3"), (3, "b.mp3"), (3, "c.mp3")] {
+            conn.execute(
+                "INSERT INTO media (root_id, relpath, kind, title, added_at)
+                 VALUES (?1, ?2, 'audio', ?2, 0)",
+                params![root, rel],
+            )
+            .unwrap();
+            add(&conn, pid, conn.last_insert_rowid()).unwrap();
+        }
+        let other = create(&conn, "nothing out").unwrap();
+        let lists = list(&conn).unwrap();
+        let find = |id| lists.iter().find(|p| p.id == id).unwrap();
+        assert_eq!((find(pid).count, find(pid).offline), (3, 2));
+        assert_eq!((find(other).count, find(other).offline), (0, 0));
+        let roots: Vec<i64> = items(&conn, pid)
+            .unwrap()
+            .iter()
+            .map(|m| m.root_id)
+            .collect();
+        assert_eq!(roots, [2, 3, 3]);
     }
 
     #[test]

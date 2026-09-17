@@ -145,6 +145,27 @@ pub trait WindowPlatform: Send + Sync {
     /// may still write there, and the drive's size, in bytes. `None` when the
     /// folder is not there, which is an unplugged drive, not a full one.
     fn disk_space(&self, path: &std::path::Path) -> Option<DiskSpace>;
+
+    /// The drive a folder is on, and where that drive is mounted (D28,
+    /// D143). `None` when the folder is not there. The id is the volume's
+    /// serial number, which travels with a flash drive from one letter to
+    /// the next, so a root can be found again when its drive comes back
+    /// somewhere else.
+    fn volume_of(&self, path: &std::path::Path) -> Option<Volume>;
+
+    /// Where a drive with this id is mounted now: every local drive letter
+    /// whose volume carries it. Empty when it is not plugged in. Network
+    /// and optical drives are not asked, since asking a mapped drive whose
+    /// server has gone can take a long time and a disc is not a root.
+    fn mounts_of(&self, id: &str) -> Vec<std::path::PathBuf>;
+}
+
+/// A drive, by the id that follows it between letters (D143).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Volume {
+    pub id: String,
+    /// Where it is mounted: `E:\`, or the folder a volume is mounted in.
+    pub mount: std::path::PathBuf,
 }
 
 /// A drive's room, in bytes (#162).
