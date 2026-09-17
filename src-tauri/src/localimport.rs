@@ -236,9 +236,19 @@ pub fn upsert(
 /// Re-scanning an already-known root is safe and expected — it's how you pick
 /// up files added since. Rows are upserted on `(root_id, relpath)`.
 pub fn scan_root(app: &AppHandle, root: &Path, label: &str) -> Result<ScanReport, DbError> {
-    let root = root
-        .canonicalize()
-        .map_err(|e| DbError::Io(format!("can't read {}: {e}", root.display())))?;
+    let root = root.canonicalize().map_err(|e| {
+        // A folder that is not there at all is most often a drive that is
+        // out (D143), and the OS's words for it ("the system cannot find the
+        // path specified") send a person looking for the wrong thing.
+        DbError::Io(if root.exists() {
+            format!("can't read {}: {e}", root.display())
+        } else {
+            format!(
+                "{} is not there. If it is on a drive, plug the drive in and it comes back.",
+                root.display()
+            )
+        })
+    })?;
     // Plain, not verbatim (`\\?\C:\...`): the download pipeline registers the
     // same folder plain, and a root is one row per string (#78).
     let root = PathBuf::from(db::plain_path(&root.to_string_lossy()));

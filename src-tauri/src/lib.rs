@@ -1,6 +1,7 @@
 pub mod bond;
 mod control;
 mod db;
+mod drives;
 mod egress;
 mod eq_presets;
 mod integrity;
@@ -504,6 +505,16 @@ fn list_roots(app: AppHandle) -> Result<Vec<localimport::Root>, db::DbError> {
     let state = app.state::<Db>();
     let conn = state.0.lock().unwrap();
     localimport::list_roots(&conn)
+}
+
+/// The root a track is under, named, when its drive is out (D143). Main asks
+/// when a file will not open, so it says "plug it in" rather than offering to
+/// remove a track that is only away.
+#[tauri::command]
+fn track_drive_out(app: AppHandle, id: i64) -> Result<Option<String>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    drives::out_for(&conn, id)
 }
 
 // ---- taking things out (#78) -------------------------------------------------
@@ -1756,6 +1767,7 @@ pub fn run() {
             read_skin,
             add_local_folder,
             list_roots,
+            track_drive_out,
             remove_from_library,
             remove_tracks,
             prune_root,

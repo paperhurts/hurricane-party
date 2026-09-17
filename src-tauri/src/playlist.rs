@@ -9,6 +9,9 @@ pub struct Playlist {
     pub id: i64,
     pub name: String,
     pub count: i64,
+    /// Of `count`, the tracks on a drive that is not plugged in (D143), which
+    /// the library leaves out of the list unless asked to show them.
+    pub offline: i64,
     pub created_at: i64,
 }
 
@@ -21,6 +24,9 @@ pub struct MediaRow {
     pub filesize: Option<i64>,
     /// "audio" | "video" — the frontend routes video to its own window (D13).
     pub kind: String,
+    /// Which root it is under, so the library can tell a track on an
+    /// unplugged drive from one whose file has gone (D28, D143).
+    pub root_id: i64,
     /// Absolute path, rebuilt from (root_id, relpath) at read time. The DB never
     /// stores it (D28) — this is derived for the player, not persisted.
     pub path: String,
@@ -33,7 +39,7 @@ pub struct MediaRow {
 
 const MEDIA_SELECT: &str = "
     SELECT m.id, m.title, m.uploader, m.duration_s, m.filesize, m.kind,
-           r.path AS root_path, m.relpath, m.integrity";
+           m.root_id, r.path AS root_path, m.relpath, m.integrity";
 
 fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<MediaRow> {
     let root: String = r.get("root_path")?;
@@ -45,6 +51,7 @@ fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<Me
         duration_s: r.get("duration_s")?,
         filesize: r.get("filesize")?,
         kind: r.get("kind")?,
+        root_id: r.get("root_id")?,
         path: std::path::Path::new(&root)
             .join(&rel)
             .to_string_lossy()
@@ -67,16 +74,42 @@ pub fn list_media(conn: &Connection) -> Result<Vec<MediaRow>, DbError> {
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Playlist>, DbError> {
+    // Which roots are not there is a question for the disk, asked once per
+    // root rather than once per track.
+    let absent: std::collections::HashSet<i64> = crate::localimport::list_roots(conn)?
+        .into_iter()
+        .filter(|r| !r.present)
+        .map(|r| r.id)
+        .collect();
+    let mut st = conn.prepare(
+        "SELECT i.playlist_id, m.root_id, COUNT(*) FROM playlist_items i
+         JOIN media m ON m.id = i.media_id GROUP BY i.playlist_id, m.root_id",
+    )?;
+    let mut offline: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for row in st.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })? {
+        let (pid, root, n) = row?;
+        if absent.contains(&root) {
+            *offline.entry(pid).or_default() += n;
+        }
+    }
     let mut st = conn.prepare(
         "SELECT p.id, p.name, p.created_at,
                 (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) AS count
          FROM playlists p ORDER BY COALESCE(p.position, 1e18), p.created_at, p.id",
     )?;
     let rows = st.query_map([], |r| {
+        let id: i64 = r.get("id")?;
         Ok(Playlist {
-            id: r.get("id")?,
+            id,
             name: r.get("name")?,
             count: r.get("count")?,
+            offline: offline.get(&id).copied().unwrap_or(0),
             created_at: r.get("created_at")?,
         })
     })?;
@@ -305,6 +338,40 @@ mod tests {
         );
         assert_eq!(names(&conn), ["Storm Prep"]);
         assert!(rename(&conn, 9999, "x").is_err());
+    }
+
+    /// A list with tracks on a stick that is out says how many of them are
+    /// out (D143), and still counts every one: the stick is coming back.
+    #[test]
+    fn a_list_counts_its_tracks_on_a_drive_that_is_not_plugged_in() {
+        let (conn, pid) = fixture(0);
+        let here = std::env::temp_dir().to_string_lossy().to_string();
+        conn.execute(
+            "INSERT INTO library_roots (id, label, path) VALUES (2, 'here', ?1),
+                    (3, 'stick', 'Q:\\definitely\\not\\plugged\\in')",
+            [here],
+        )
+        .unwrap();
+        for (root, rel) in [(2, "a.mp3"), (3, "b.mp3"), (3, "c.mp3")] {
+            conn.execute(
+                "INSERT INTO media (root_id, relpath, kind, title, added_at)
+                 VALUES (?1, ?2, 'audio', ?2, 0)",
+                params![root, rel],
+            )
+            .unwrap();
+            add(&conn, pid, conn.last_insert_rowid()).unwrap();
+        }
+        let other = create(&conn, "nothing out").unwrap();
+        let lists = list(&conn).unwrap();
+        let find = |id| lists.iter().find(|p| p.id == id).unwrap();
+        assert_eq!((find(pid).count, find(pid).offline), (3, 2));
+        assert_eq!((find(other).count, find(other).offline), (0, 0));
+        let roots: Vec<i64> = items(&conn, pid)
+            .unwrap()
+            .iter()
+            .map(|m| m.root_id)
+            .collect();
+        assert_eq!(roots, [2, 3, 3]);
     }
 
     #[test]

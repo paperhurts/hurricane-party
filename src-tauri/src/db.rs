@@ -38,7 +38,12 @@ CREATE TABLE IF NOT EXISTS library_roots (
   label         TEXT NOT NULL,
   path          TEXT UNIQUE NOT NULL,
   is_removable  INTEGER NOT NULL DEFAULT 0,
-  last_seen_at  INTEGER
+  last_seen_at  INTEGER,
+  -- The drive it is on, by the serial that follows a flash drive from one
+  -- letter to the next, and where on that drive (D28, D143). Written while
+  -- the root is there, read when it is not.
+  volume        TEXT,
+  volume_rel    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sources (
@@ -239,6 +244,21 @@ pub fn migrate(conn: &Connection) -> Result<(), DbError> {
             conn.execute_batch(ddl)?;
         }
     }
+    // D143.
+    for (column, ddl) in [
+        (
+            "volume",
+            "ALTER TABLE library_roots ADD COLUMN volume TEXT;",
+        ),
+        (
+            "volume_rel",
+            "ALTER TABLE library_roots ADD COLUMN volume_rel TEXT;",
+        ),
+    ] {
+        if has_column(conn, "library_roots", "id")? && !has_column(conn, "library_roots", column)? {
+            conn.execute_batch(ddl)?;
+        }
+    }
     // #163, D140 and D141.
     for (column, ddl) in [
         (
@@ -367,42 +387,49 @@ pub fn normalize_roots(conn: &mut Connection) -> Result<usize, DbError> {
                     rusqlite::params![plain, id],
                 )?;
             }
-            Some(twin) => {
-                // Rows the twin does not have move over as they are; OR IGNORE
-                // leaves behind exactly the ones it does.
-                tx.execute(
-                    "UPDATE OR IGNORE media SET root_id = ?1 WHERE root_id = ?2",
-                    rusqlite::params![twin, id],
-                )?;
-                let dups: Vec<(i64, i64)> = {
-                    let mut st = tx.prepare(
-                        "SELECT d.id, s.id FROM media d
-                         JOIN media s ON s.root_id = ?1 AND s.relpath = d.relpath
-                         WHERE d.root_id = ?2",
-                    )?;
-                    let rows = st.query_map(rusqlite::params![twin, id], |r| {
-                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-                    })?;
-                    rows.filter_map(|r| r.ok()).collect()
-                };
-                for (dup, keep) in dups {
-                    tx.execute(
-                        "UPDATE playlist_items SET media_id = ?1 WHERE media_id = ?2",
-                        rusqlite::params![keep, dup],
-                    )?;
-                    tx.execute(
-                        "UPDATE play_history SET media_id = ?1 WHERE media_id = ?2",
-                        rusqlite::params![keep, dup],
-                    )?;
-                    tx.execute("DELETE FROM media WHERE id = ?1", [dup])?;
-                }
-                tx.execute("DELETE FROM library_roots WHERE id = ?1", [id])?;
-            }
+            Some(twin) => fold_root(&tx, *id, twin)?,
         }
         touched += 1;
     }
     tx.commit()?;
     Ok(touched)
+}
+
+/// Fold root `from` into root `into`, which holds the same folder: `into`
+/// gains every row it does not already have, the rest are the same file
+/// twice, so the copy's playlist entries and history move to the survivor
+/// and the copy goes, and then `from` goes too.
+pub fn fold_root(tx: &rusqlite::Transaction, from: i64, into: i64) -> Result<(), DbError> {
+    // Rows `into` does not have move over as they are; OR IGNORE leaves
+    // behind exactly the ones it does.
+    tx.execute(
+        "UPDATE OR IGNORE media SET root_id = ?1 WHERE root_id = ?2",
+        rusqlite::params![into, from],
+    )?;
+    let dups: Vec<(i64, i64)> = {
+        let mut st = tx.prepare(
+            "SELECT d.id, s.id FROM media d
+             JOIN media s ON s.root_id = ?1 AND s.relpath = d.relpath
+             WHERE d.root_id = ?2",
+        )?;
+        let rows = st.query_map(rusqlite::params![into, from], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    for (dup, keep) in dups {
+        tx.execute(
+            "UPDATE playlist_items SET media_id = ?1 WHERE media_id = ?2",
+            rusqlite::params![keep, dup],
+        )?;
+        tx.execute(
+            "UPDATE play_history SET media_id = ?1 WHERE media_id = ?2",
+            rusqlite::params![keep, dup],
+        )?;
+        tx.execute("DELETE FROM media WHERE id = ?1", [dup])?;
+    }
+    tx.execute("DELETE FROM library_roots WHERE id = ?1", [from])?;
+    Ok(())
 }
 
 pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {

@@ -89,7 +89,9 @@ CREATE TABLE library_roots (
   label         TEXT NOT NULL,        -- 'Internal SSD', 'Storm drive'
   path          TEXT UNIQUE NOT NULL, -- absolute, resolved at mount time
   is_removable  INTEGER NOT NULL DEFAULT 0,
-  last_seen_at  INTEGER
+  last_seen_at  INTEGER,
+  volume        TEXT,                 -- the drive's serial, which follows it to a new letter (D143)
+  volume_rel    TEXT                  -- where on that drive the root is
 );
 
 -- the files on disk. one source can have several (video + extracted mp3)
@@ -244,6 +246,12 @@ Three verbs, in `library.rs`, kept apart on purpose (D83, #78):
 - **Prune** a root: a rescan of a known root (a click on the root in the library's sidebar, or Add folder on the same folder; D95) counts the rows whose files are gone and the
   user is offered to drop them. Nothing drops them unasked, and a root that is not
   mounted reports nothing (D28: unplugged is not missing).
+
+A root on a drive that is out keeps its rows, and the library window leaves them out of
+what it lists and what plays, with one line to show them greyed (D143). The watcher says
+within seconds when a drive goes or comes back. A root that is there remembers its drive by
+the volume's serial number, so a flash drive back under another letter takes its root with
+it (`drives.rs`).
 
 ### Equalizer spec
 
