@@ -406,6 +406,8 @@ Ship **your own** default skin — don't bundle third-party Winamp skins, those 
 
 **Integrity check.** Hash on import, verify on launch (throttled, background). Surface a "3 files failed verification" banner. Finding out mid-outage that your download truncated is the exact failure this app exists to prevent.
 
+*As built* (#164, D142): a download is hashed as it lands and checked against the length the site gave. The library is read back quietly twenty seconds after launch, never at it, a quarter second between files, four gigabytes a launch, skipping unplugged drives. A file that changed, went short or stopped opening is marked on its row; the library says how many failed, and each row offers Accept or Download again. **Check files** in the footer reads everything now.
+
 **Zero-network guarantee.** A tested property, not an aspiration — **D29** pins the mechanism:
 
 - The **webview CSP forbids remote origins outright.** `connect-src`, `img-src`, `font-src`, and `script-src` allow only `self` and Tauri's `asset:` scheme. No CDN font, no remote thumbnail, no analytics can be added later by accident — it fails at load, loudly, in development

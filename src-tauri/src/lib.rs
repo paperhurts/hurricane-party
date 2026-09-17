@@ -3,6 +3,7 @@ mod control;
 mod db;
 mod egress;
 mod eq_presets;
+mod integrity;
 mod jobs;
 mod library;
 mod localimport;
@@ -132,6 +133,44 @@ fn set_storage_ceiling(app: AppHandle, bytes: Option<u64>) -> Result<storage::St
         storage::set_ceiling(&conn, bytes).map_err(|e| e.to_string())?;
     }
     storage::status(&app).map_err(|e| e.to_string())
+}
+
+// ---- integrity checking (#164, D142) ------------------------------------------
+
+/// The rows a check has marked, for the library's line.
+#[tauri::command]
+fn integrity_failures(app: AppHandle) -> Result<Vec<integrity::Failed>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    integrity::failures(&conn)
+}
+
+/// Take a file as it is now and hash it again: what a person presses when
+/// they changed it themselves.
+#[tauri::command]
+async fn integrity_accept(app: AppHandle, id: i64) -> Result<(), String> {
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        integrity::accept(&conn, id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    let _ = app.emit("integrity:changed", ());
+    Ok(())
+}
+
+/// Check everything now, for the day before a storm. Returns as soon as the
+/// pass has started; it says how far it has got on `integrity:progress`.
+#[tauri::command]
+fn integrity_check_now(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let report = integrity::sweep(&app, integrity::Pace::Now).await;
+        let _ = app.emit("integrity:done", report);
+        let _ = app.emit("integrity:changed", ());
+    });
 }
 
 // ---- Hurricane Party Planning: prep mode (#163, D140) -------------------------
@@ -1661,6 +1700,8 @@ pub fn run() {
             // Cone's radar timer (#85, D19): idle unless Cone is the theme and
             // a radar is picked, and never before the windows are up.
             radar::spawn(handle.clone());
+            // The library read back quietly, a while after launch (#164, D142).
+            integrity::spawn(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1758,6 +1799,9 @@ pub fn run() {
             prep_act,
             get_prep_draft,
             set_prep_draft,
+            integrity_failures,
+            integrity_accept,
+            integrity_check_now,
             dismiss_jobs,
             audio_from_video,
             radar_sites,

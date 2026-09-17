@@ -26,11 +26,14 @@ pub struct MediaRow {
     pub path: String,
     /// Present only when the row came from a playlist query.
     pub position: Option<i64>,
+    /// What the last integrity check made of it (#164, D142): `changed`,
+    /// `unreadable`, or nothing at all.
+    pub integrity: Option<String>,
 }
 
 const MEDIA_SELECT: &str = "
     SELECT m.id, m.title, m.uploader, m.duration_s, m.filesize, m.kind,
-           r.path AS root_path, m.relpath";
+           r.path AS root_path, m.relpath, m.integrity";
 
 fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<MediaRow> {
     let root: String = r.get("root_path")?;
@@ -47,6 +50,7 @@ fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<Me
             .to_string_lossy()
             .to_string(),
         position,
+        integrity: r.get("integrity")?,
     })
 }
 
