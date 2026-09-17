@@ -14,6 +14,7 @@ mod playlist;
 mod prep;
 mod radar;
 mod skins;
+mod smart;
 mod storage;
 mod tray;
 mod video;
@@ -1080,6 +1081,28 @@ fn create_playlist(app: AppHandle, name: String) -> Result<i64, db::DbError> {
     playlist::create(&conn, name.trim())
 }
 
+/// A playlist that fills itself from a rule (#165, D144). The rule arrives
+/// typed: a field this app does not know is refused by its name before it
+/// gets here.
+#[tauri::command]
+fn create_smart_playlist(
+    app: AppHandle,
+    name: String,
+    rule: smart::Rule,
+) -> Result<i64, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::create_smart(&conn, name.trim(), &rule)
+}
+
+/// Change a smart playlist's rule (#165).
+#[tauri::command]
+fn set_smart_rule(app: AppHandle, id: i64, rule: smart::Rule) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    playlist::set_rule(&conn, id, &rule)
+}
+
 /// Rename a playlist (D116).
 #[tauri::command]
 fn rename_playlist(app: AppHandle, id: i64, name: String) -> Result<(), db::DbError> {
@@ -1730,6 +1753,8 @@ pub fn run() {
             library_path,
             list_playlists,
             create_playlist,
+            create_smart_playlist,
+            set_smart_rule,
             rename_playlist,
             delete_playlist,
             move_playlist,
