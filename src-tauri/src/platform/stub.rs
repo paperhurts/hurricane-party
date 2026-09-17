@@ -5,7 +5,7 @@
 //! without `#[cfg(windows)]` leaking into the callers — it is a compile target,
 //! not a supported platform.
 
-use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, WindowPlatform};
+use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, Volume, WindowPlatform};
 
 pub struct StubPlatform;
 
@@ -60,5 +60,15 @@ impl WindowPlatform for StubPlatform {
     // Elsewhere the meter shows what the library takes and no drive.
     fn disk_space(&self, _path: &std::path::Path) -> Option<DiskSpace> {
         None
+    }
+
+    // Elsewhere a root on a drive that comes back somewhere else is added
+    // again by hand.
+    fn volume_of(&self, _path: &std::path::Path) -> Option<Volume> {
+        None
+    }
+
+    fn mounts_of(&self, _id: &str) -> Vec<std::path::PathBuf> {
+        Vec::new()
     }
 }

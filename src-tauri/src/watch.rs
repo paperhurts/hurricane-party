@@ -32,8 +32,9 @@
 //!   what D95 chose over rescanning every root at launch.
 
 use crate::db::{Db, DbError};
+use crate::drives;
 use crate::localimport::{self, Found};
-use crate::platform::{self, TreeEvent, TreeWatch};
+use crate::platform::{self, TreeEvent, TreeWatch, Volume};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
@@ -55,6 +56,9 @@ const RECONCILE: Duration = Duration::from_secs(10);
 /// and come back, or after this long if it never went: something else
 /// refused the eject.
 const RELEASE_HOLD: Duration = Duration::from_secs(60);
+/// How long after a watch ends the roots are looked at again: long enough
+/// for an eject to have finished, so the drive is seen gone (D143).
+const GONE: Duration = Duration::from_secs(2);
 
 enum Msg {
     Event {
@@ -139,10 +143,15 @@ struct Roots {
     refused: BTreeSet<i64>,
     /// Which watch an event came from, so one already let go of is ignored.
     generation: u64,
+    /// Whether each root was there when last looked, so the library window
+    /// hears when a drive goes or comes back (D143) rather than showing
+    /// yesterday's answer until something else refreshes it.
+    present: HashMap<i64, bool>,
 }
 
 impl Roots {
     fn reconcile(&mut self, app: &AppHandle, tx: &Sender<Msg>) {
+        follow_drives(app);
         let roots = {
             let db = app.state::<Db>();
             let conn = db.0.lock().unwrap();
@@ -151,6 +160,17 @@ impl Roots {
         let Ok(roots) = roots else { return };
         let listed: BTreeSet<i64> = roots.iter().map(|r| r.id).collect();
         self.active.retain(|id, _| listed.contains(id));
+        self.present.retain(|id, _| listed.contains(id));
+
+        // A root seen for the first time is not news: whoever made it has
+        // already said so.
+        let flipped = roots
+            .iter()
+            .filter(|r| self.present.insert(r.id, r.present) == Some(!r.present))
+            .count();
+        if flipped > 0 {
+            let _ = app.emit("library-changed", ());
+        }
 
         for r in roots {
             if !r.present {
@@ -204,6 +224,65 @@ impl Roots {
     }
 }
 
+/// Remember the drive every root that is there is on, and move a root that is
+/// not there to where its drive is now (D28, D143). Windows is asked with the
+/// database let go of, since a drive can be slow to answer and the library
+/// window reads the database while it waits.
+fn follow_drives(app: &AppHandle) {
+    let known = {
+        let db = app.state::<Db>();
+        let conn = db.0.lock().unwrap();
+        drives::known(&conn)
+    };
+    let Ok(known) = known else { return };
+    let p = platform::platform();
+    let marks: Vec<(&drives::Known, Volume)> = known
+        .iter()
+        .filter(|k| k.present)
+        .filter_map(|k| p.volume_of(Path::new(&k.path)).map(|v| (k, v)))
+        .collect();
+    let moves: Vec<(&drives::Known, String)> = known
+        .iter()
+        .filter(|k| !k.present)
+        .filter_map(|k| {
+            let id = k.volume.as_deref()?;
+            drives::whereabouts(k, &p.mounts_of(id)).map(|to| (k, to))
+        })
+        .collect();
+    if marks.is_empty() && moves.is_empty() {
+        return;
+    }
+    let moved: Vec<drives::Moved> = {
+        let db = app.state::<Db>();
+        let mut conn = db.0.lock().unwrap();
+        for (k, v) in &marks {
+            if let Err(e) = drives::mark(&conn, k, v) {
+                eprintln!("couldn't note the drive {} is on: {e}", k.path);
+            }
+        }
+        moves
+            .iter()
+            .filter_map(|(k, to)| match drives::follow(&mut conn, k, to) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    eprintln!("couldn't move {} to {to}: {e}", k.path);
+                    None
+                }
+            })
+            .collect()
+    };
+    if moved.is_empty() {
+        return;
+    }
+    for m in &moved {
+        // Playback reads through the asset scope, which knows paths, not
+        // roots: the new letter has to be let in before a row can play.
+        localimport::allow_root(app, Path::new(&m.to));
+    }
+    let _ = app.emit("library-changed", ());
+    let _ = app.emit("library-moved", &moved);
+}
+
 fn run(app: AppHandle, tx: Sender<Msg>, rx: Receiver<Msg>) {
     let mut roots = Roots::default();
     let mut pending: HashMap<i64, Pending> = HashMap::new();
@@ -211,6 +290,10 @@ fn run(app: AppHandle, tx: Sender<Msg>, rx: Receiver<Msg>) {
     // have gone, not every time the root is looked at.
     let mut told: HashMap<i64, usize> = HashMap::new();
     let mut reconciled: Option<Instant> = None;
+    // A watch that ended or let go of its drive is a drive that is probably
+    // leaving, so the roots are looked at again shortly rather than at the
+    // next ten seconds, and the library stops listing what is on it.
+    let mut soon: Option<Instant> = None;
 
     loop {
         match rx.recv_timeout(TICK) {
@@ -232,9 +315,11 @@ fn run(app: AppHandle, tx: Sender<Msg>, rx: Receiver<Msg>) {
                         TreeEvent::Released => {
                             roots.active.remove(&root);
                             roots.released.insert(root, Instant::now());
+                            soon = Some(Instant::now() + GONE);
                         }
                         TreeEvent::Ended => {
                             roots.active.remove(&root);
+                            soon = Some(Instant::now() + GONE);
                         }
                     }
                 }
@@ -244,6 +329,10 @@ fn run(app: AppHandle, tx: Sender<Msg>, rx: Receiver<Msg>) {
             Err(RecvTimeoutError::Disconnected) => return,
         }
 
+        if soon.is_some_and(|t| Instant::now() >= t) {
+            soon = None;
+            reconciled = None;
+        }
         if reconciled.is_none_or(|t| t.elapsed() >= RECONCILE) {
             reconciled = Some(Instant::now());
             roots.reconcile(&app, &tx);
