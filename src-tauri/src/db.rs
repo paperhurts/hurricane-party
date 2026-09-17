@@ -79,6 +79,11 @@ CREATE TABLE IF NOT EXISTS media (
   filesize      INTEGER,
   sha256        TEXT,
   verified_at   INTEGER,
+  -- What the last check made of it (#164, D142): NULL is fine, 'changed' is
+  -- bytes that are not the ones hashed, 'unreadable' will not open or has
+  -- gone short. The note says which, in words.
+  integrity     TEXT,
+  integrity_note TEXT,
   eq_preset_id  INTEGER REFERENCES eq_presets(id),
   added_at      INTEGER NOT NULL,
   UNIQUE (root_id, relpath)
@@ -221,6 +226,18 @@ pub fn migrate(conn: &Connection) -> Result<(), DbError> {
     }
     if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", "dismissed")? {
         conn.execute_batch("ALTER TABLE jobs ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    // #164, D142.
+    for (column, ddl) in [
+        ("integrity", "ALTER TABLE media ADD COLUMN integrity TEXT;"),
+        (
+            "integrity_note",
+            "ALTER TABLE media ADD COLUMN integrity_note TEXT;",
+        ),
+    ] {
+        if has_column(conn, "media", "id")? && !has_column(conn, "media", column)? {
+            conn.execute_batch(ddl)?;
+        }
     }
     // #163, D140 and D141.
     for (column, ddl) in [
@@ -681,6 +698,24 @@ mod tests {
         assert!(has_column(&conn, "jobs", "estimate_bytes").unwrap());
         assert!(has_column(&conn, "jobs", "not_before").unwrap());
         // Twice is a no-op.
+        migrate(&conn).unwrap();
+    }
+
+    /// #164: a library made before the check existed gains the two columns a
+    /// failure is kept on, and running the migration again changes nothing.
+    #[test]
+    fn an_old_media_table_gains_what_a_check_writes_on_it() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlists (id INTEGER PRIMARY KEY, position INTEGER);
+             CREATE TABLE media (id INTEGER PRIMARY KEY, relpath TEXT NOT NULL);
+             CREATE TABLE jobs (id INTEGER PRIMARY KEY, url TEXT NOT NULL);",
+        )
+        .unwrap();
+        assert!(!has_column(&conn, "media", "integrity").unwrap());
+        migrate(&conn).unwrap();
+        assert!(has_column(&conn, "media", "integrity").unwrap());
+        assert!(has_column(&conn, "media", "integrity_note").unwrap());
         migrate(&conn).unwrap();
     }
 
