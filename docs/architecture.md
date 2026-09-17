@@ -122,8 +122,8 @@ CREATE TABLE media (
 CREATE TABLE playlists (
   id            INTEGER PRIMARY KEY,
   name          TEXT NOT NULL,
-  is_smart      INTEGER DEFAULT 0,
-  rule_json     TEXT,                 -- for smart playlists
+  is_smart      INTEGER DEFAULT 0,    -- fills itself from its rule, no playlist_items (D144)
+  rule_json     TEXT,                 -- the rule, versioned; read by smart.rs, never turned into SQL
   profile_id    INTEGER NOT NULL DEFAULT 1,   -- O9. free now, a migration later
   created_at    INTEGER NOT NULL,
   position      INTEGER               -- the order a person arranged the lists in (D116)
@@ -252,6 +252,16 @@ what it lists and what plays, with one line to show them greyed (D143). The watc
 within seconds when a drive goes or comes back. A root that is there remembers its drive by
 the volume's serial number, so a flash drive back under another letter takes its root with
 it (`drives.rs`).
+
+### Smart playlists
+
+A smart playlist has a rule and no `playlist_items` (#165, D144). The rule is versioned JSON
+in `playlists.rule_json`, read into a typed `smart::Rule` that refuses a field it does not
+know: words in title and artist, kind, added within N days, longer or shorter than, root,
+one of the library's four orders, and a limit. Every condition must hold. `playlist::items`
+reads the library and applies the rule in Rust, so the queue, SEL and the playlist window
+see a smart list as they see any other, and `add`, `remove` and `reorder` refuse one. The
+words fold exactly as the search box does; both sides are tested on `src/lib/fold.cases.json`.
 
 ### Equalizer spec
 
