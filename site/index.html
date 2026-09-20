@@ -100,6 +100,11 @@
   .smart-steps .run { font-size: 14px; color: var(--surface); background: var(--warn); padding: 8px 16px; font-weight: 600; box-shadow: 0 0 14px color-mix(in srgb, var(--warn) 40%, transparent); }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
 
+  /* A window shown whole, with a line under it saying what it is. */
+  .figure { display: flex; flex-direction: column; gap: 10px; }
+  .figure .frame { background: var(--surface); padding: 10px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 28%, transparent), 0 0 30px color-mix(in srgb, var(--warn) 10%, transparent); }
+  .figure .cap { font: 400 11px/1.6 var(--mono); letter-spacing: 1.2px; color: var(--dim); }
+
   .windows { display: grid; grid-template-columns: minmax(0, auto) minmax(240px, 1fr); gap: 40px; align-items: start; }
   .windows .shots { overflow-x: auto; max-width: 100%; }
   .windows .shots img { width: 550px; max-width: none; image-rendering: pixelated; }
@@ -157,6 +162,7 @@
   <div class="brand"><i></i><span>HURRICANE-PARTY</span></div>
   <div class="links">
     <a href="#first-minute">FIRST MINUTE</a>
+    <a href="#storm">BEFORE THE STORM</a>
     <a href="#windows">THE WINDOWS</a>
     <a href="#purricane">PURRICANE</a>
     <a href="#faq">FAQ</a>
@@ -245,6 +251,61 @@
   <p class="small" style="max-width:720px">The zip is {{size}} for a 10 MB app because yt-dlp, ffmpeg and a JavaScript runtime ride along inside it. They do the downloading and the MP3 conversion; hurricane-party is what you look at.</p>
 </section>
 
+<section id="storm" class="wrap rule" style="display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow ember">BEFORE THE STORM</div>
+    <h2>Hurricane Party Planning: paste it all, press once.</h2>
+  </div>
+  <div class="two">
+    <div class="stack">
+      <p class="lead">A window of its own, opened from the library. Paste everything you want before the weather turns — videos, whole playlists, one link per line. It reads each line, says what your library already has, and adds up what the rest comes to in video and in audio side by side, against the room left on your drive.</p>
+      <p class="lead">One press queues all of it. A download that fails because the connection went waits a minute and tries again instead of giving up, so a batch started while the power is flickering finishes on its own. Closing the window stops nothing.</p>
+      <p class="lead" style="color:var(--dim);font-size:15px">A line that isn't a link, a video that has gone private, a list that won't read: each says so on its own line and holds nothing else up.</p>
+    </div>
+    <div class="card ember">
+      <div class="label ember">WHAT ONE PRESS SAVES</div>
+      <div class="smart-steps">
+        <div><b>01</b><u>a playlist, nine videos</u></div>
+        <div><b>02</b><u>a video</u></div>
+        <div><b>03</b><u>one you already have</u></div>
+      </div>
+      <div class="smart-body">About 242 MB as audio, or 3.0 GB with the video. 160 GB free on the drive.</div>
+      <div class="smart-steps"><div><span class="run">Save all 8</span></div></div>
+    </div>
+  </div>
+  <div class="figure">
+    <div class="frame"><img src="shots/prep.png" alt="The Hurricane Party Planning window: three pasted links, the first a playlist opened to its nine videos with two of them already in the library, a size for the batch in audio and in video, and a Save all 8 button"></div>
+    <div class="cap">HURRICANE PARTY PLANNING · ONE BOX, ONE PRESS</div>
+  </div>
+  <div class="cards">
+    <div class="card arc">
+      <div class="label arc">THE RADAR</div>
+      <div class="lines"><div>Cone is a second theme: the weather radar for a station you pick, redrawn in the analyser's colours, sitting behind the windows with the warnings for that area. It fetches on a timer, never while a track is playing, and always says how old the picture is.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">THE BUDGET</div>
+      <div class="lines"><div>The library footer shows what it all takes and what is left on the drive, and every folder shows its own size. Set a ceiling if you want one: crossing it warns you and queues anyway. Nothing is ever held back without saying so.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">AUDIO ONLY</div>
+      <div class="lines"><div>Any video can be audio instead, before it starts or halfway through: it pauses, switches and carries on. A video already on disk gives up its MP3 without downloading again.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">THE CHECKS</div>
+      <div class="lines"><div>Every download is fingerprinted as it lands, and after launch the library is read back quietly in the background, slowly enough that it never fights the music. A file that changed, went short or stopped opening is marked on its row, with <em>Accept</em> or <em>Download again</em> beside it. Better to find out the day before.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">A FLASH DRIVE</div>
+      <div class="lines"><div>Keep some of the library on a stick. While it is unplugged its tracks are hidden from the list and from what plays, and one line offers to show them. Plug it back in and they return, even if Windows gave the drive a different letter.</div></div>
+    </div>
+    <div class="card arc">
+      <div class="label arc">LISTS THAT FILL THEMSELVES</div>
+      <div class="lines"><div>Search the library, then save the search as a smart playlist: everything by one artist, every video, everything added this week. A download that matches joins it on its own; a track you remove leaves it.</div></div>
+    </div>
+  </div>
+  <p class="small" style="max-width:760px">Files dropped into a library folder by hand show up about two seconds later, with no rescan. Downloads go wherever you point them, and a download whose folder is missing waits for it rather than landing somewhere else.</p>
+</section>
+
 <section id="windows" class="wrap rule" style="display:flex;flex-direction:column;gap:40px">
   <div style="display:flex;flex-direction:column;gap:8px">
     <div class="eyebrow">THE WINDOWS</div>
@@ -326,6 +387,9 @@
   <dl class="qa">
     <div><dt>Where did my files go?</dt><dd>Into the library folder, whose path is shown at the bottom of the library window. They are plain MP3 and MP4 files; any other player can open them.</dd></div>
     <div><dt>Does it need the internet?</dt><dd>Only to download. Playback never touches the network, by design and by enforcement. Unplug and it keeps going.</dd></div>
+    <div><dt>Doesn't the radar need the internet?</dt><dd>The radar does, and only if you pick the Cone theme. It fetches on a timer, never while a track is playing, and it always tells you how old the picture is. Everything else stays off the network, playback included.</dd></div>
+    <div><dt>Can I keep music on a flash drive?</dt><dd>Yes: add the drive's folder as a library folder. While the drive is out, its tracks are hidden from the library and from what plays, with one line offering to show them. Plug it back in and they come back, even under a different drive letter.</dd></div>
+    <div><dt>How would I know a file had gone bad?</dt><dd>It tells you. Every download is fingerprinted when it lands, and the library is checked over quietly after launch. Anything that changed, went short, or stopped opening is marked on its row, with the choice to accept it as it is or download it again.</dd></div>
     <div><dt>Why is it Windows only?</dt><dd>It was built for one Windows machine in hurricane country. Nothing in it is Windows-specific on purpose, but nothing has been tested anywhere else either.</dd></div>
     <div><dt>Can I use my old Winamp skins?</dt><dd>Yes. Import skin… in the library reads a classic .wsz. Most skins work, and one that uses something this player doesn't have tells you what it left out.</dd></div>
     <div><dt>Is there a light mode?</dt><dd>No, and there won't be. There is a bright theme, Purricane, pastel pink with a kaleidoscope, and Eyewall, the dark one it ships in.</dd></div>
