@@ -148,7 +148,7 @@ function Build-Social([string]$Out) {
         $g.DrawString("hurricane-", $title, $ink, 60, 185)
         $g.DrawString("party", $title, $ink, 60, 280)
         $g.DrawString("Save YouTube videos and MP3s to disk." + [Environment]::NewLine + "Play them when the internet is down.", $tag, $dim, 72, 400)
-        $g.DrawString("paperhurts.github.io/hurricane-party", $url, $arc, 72, 520)
+        $g.DrawString("hurricane-party.paperhurts.dev", $url, $arc, 72, 520)
     } finally {
         $g.Dispose()
     }
