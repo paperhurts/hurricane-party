@@ -48,7 +48,7 @@ storm is the wrong failure. Bump them on purpose, test, then commit the new pin.
 
 ### Getting a build without the toolchain
 
-**To use it:** the download page, [paperhurts.github.io/hurricane-party](https://paperhurts.github.io/hurricane-party/),
+**To use it:** the download page, [hurricane-party.paperhurts.dev](https://hurricane-party.paperhurts.dev/),
 or straight to the [latest release](https://github.com/paperhurts/hurricane-party/releases/latest).
 The zip is the exe and its three sidecars; unzip anywhere and run `hurricane-party.exe`.
 Windows 11 already has the WebView2 runtime. The first run trips SmartScreen because the
