@@ -106,11 +106,18 @@ if ($missing) { Write-Warning ("screenshots missing from site/shots: " + ($missi
 # hand in the repo's Settings, the GitHub social preview. The Florida truck
 # with the whole crew (#62) on the void, the name beside it. Text is drawn
 # with Iosevka where it is installed and Consolas where it is not (the CI
-# runner), so the file is honest either way.
+# runner), the tagline with Iosevka Aile or else Segoe UI, so the file is
+# honest either way.
 
+# GDI+ does not refuse a family it lacks: a Font asked for Iosevka on a
+# machine without it comes back as Microsoft Sans Serif, and nothing throws.
+# So a name is taken only when the font that comes back is that family. The
+# catch is for a family that is there but has no face in the style asked for.
 function Find-Font([string[]]$Names, [single]$Size, [System.Drawing.FontStyle]$Style) {
     foreach ($n in $Names) {
-        try { return New-Object System.Drawing.Font $n, $Size, $Style, ([System.Drawing.GraphicsUnit]::Pixel) } catch {}
+        try { $font = New-Object System.Drawing.Font $n, $Size, $Style, ([System.Drawing.GraphicsUnit]::Pixel) } catch { continue }
+        if ($font.FontFamily.Name -eq $n) { return $font }
+        $font.Dispose()
     }
     New-Object System.Drawing.Font ([System.Drawing.FontFamily]::GenericMonospace), $Size, $Style, ([System.Drawing.GraphicsUnit]::Pixel)
 }
@@ -150,6 +157,9 @@ function Build-Social([string]$Out) {
         $title = Find-Font $mono 92 ([System.Drawing.FontStyle]::Bold)
         $tag = Find-Font @("Iosevka Aile", "Segoe UI", "Consolas") 26 ([System.Drawing.FontStyle]::Regular)
         $url = Find-Font $mono 20 ([System.Drawing.FontStyle]::Regular)
+        # The faces found, in the log: the image that ships is drawn on the
+        # CI runner, where nobody sees it drawn.
+        Write-Host ("social.png: {0}, tagline {1}" -f $title.FontFamily.Name, $tag.FontFamily.Name)
 
         # The dot as a code point: PowerShell 5.1 reads this file as ANSI, and
         # a literal middle dot comes out as two characters.
