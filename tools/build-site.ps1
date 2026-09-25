@@ -115,6 +115,15 @@ function Find-Font([string[]]$Names, [single]$Size, [System.Drawing.FontStyle]$S
     New-Object System.Drawing.Font ([System.Drawing.FontFamily]::GenericMonospace), $Size, $Style, ([System.Drawing.GraphicsUnit]::Pixel)
 }
 
+# A role the tokens do not have fails the build. FromHtml of a missing key is
+# Color.Empty, fully transparent: after D108's rename the eyebrow and the
+# address drew in it, and nothing complained.
+function Get-TokenColor([string]$Role) {
+    $hex = $colors.$Role
+    if (-not $hex) { throw "design/tokens.json has no eyewall colour '$Role'" }
+    [System.Drawing.ColorTranslator]::FromHtml($hex)
+}
+
 function Build-Social([string]$Out) {
     $W = 1280; $H = 640
     $bmp = New-Object System.Drawing.Bitmap $W, $H, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -123,7 +132,7 @@ function Build-Social([string]$Out) {
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-        $g.Clear([System.Drawing.ColorTranslator]::FromHtml($colors.ground))
+        $g.Clear((Get-TokenColor "ground"))
 
         # The art takes the right 600 px; the words keep the left 640 clear.
         $art = [System.Drawing.Bitmap]::FromFile((Join-Path $root "design\icon\capybara-florida-1254.png"))
@@ -132,10 +141,10 @@ function Build-Social([string]$Out) {
             $g.DrawImage($art, $W - $aw, 20, $aw, $ah)
         } finally { $art.Dispose() }
 
-        $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.text))
-        $arc = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.arc))
-        $strike = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($colors.strike))
-        $dim = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, [System.Drawing.ColorTranslator]::FromHtml($colors.text)))
+        $ink = New-Object System.Drawing.SolidBrush (Get-TokenColor "text")
+        $accent = New-Object System.Drawing.SolidBrush (Get-TokenColor "accent")
+        $alert = New-Object System.Drawing.SolidBrush (Get-TokenColor "alert")
+        $dim = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, (Get-TokenColor "text")))
         $mono = @("Iosevka", "Consolas", "Cascadia Mono")
         $eyebrow = Find-Font $mono 18 ([System.Drawing.FontStyle]::Regular)
         $title = Find-Font $mono 92 ([System.Drawing.FontStyle]::Bold)
@@ -144,11 +153,11 @@ function Build-Social([string]$Out) {
 
         # The dot as a code point: PowerShell 5.1 reads this file as ANSI, and
         # a literal middle dot comes out as two characters.
-        $g.DrawString(("OFFLINE MEDIA PLAYER  {0}  WINDOWS" -f [char]0xB7), $eyebrow, $strike, 72, 150)
+        $g.DrawString(("OFFLINE MEDIA PLAYER  {0}  WINDOWS" -f [char]0xB7), $eyebrow, $alert, 72, 150)
         $g.DrawString("hurricane-", $title, $ink, 60, 185)
         $g.DrawString("party", $title, $ink, 60, 280)
         $g.DrawString("Save YouTube videos and MP3s to disk." + [Environment]::NewLine + "Play them when the internet is down.", $tag, $dim, 72, 400)
-        $g.DrawString("hurricane-party.paperhurts.dev", $url, $arc, 72, 520)
+        $g.DrawString("hurricane-party.paperhurts.dev", $url, $accent, 72, 520)
     } finally {
         $g.Dispose()
     }
