@@ -1141,6 +1141,18 @@ fn add_to_playlist(app: AppHandle, playlist_id: i64, media_id: i64) -> Result<()
     playlist::add(&conn, playlist_id, media_id)
 }
 
+/// A checked selection into a playlist, in one go (#114, D84).
+#[tauri::command]
+fn add_tracks_to_playlist(
+    app: AppHandle,
+    playlist_id: i64,
+    media_ids: Vec<i64>,
+) -> Result<usize, db::DbError> {
+    let state = app.state::<Db>();
+    let mut conn = state.0.lock().unwrap();
+    playlist::add_many(&mut conn, playlist_id, &media_ids)
+}
+
 #[tauri::command]
 fn remove_from_playlist(
     app: AppHandle,
@@ -1760,6 +1772,7 @@ pub fn run() {
             move_playlist,
             playlist_items,
             add_to_playlist,
+            add_tracks_to_playlist,
             remove_from_playlist,
             reorder_playlist,
             get_concurrency,
