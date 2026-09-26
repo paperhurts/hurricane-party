@@ -239,6 +239,6 @@ Split it:
 | | Ships in | Where it lives |
 |---|---|---|
 | Kaleidoscope visualizer + Purricane palette | **v0.5**, with the skin system. *Built* (#147, D130, D132): picked in the library, in the designer's colours, wearing its own skin with the kaleidoscope in Main's round badge, and calm both beside the picker and on Main | In the player |
-| Kittens | **v0.7**, after protocol freeze | External process |
+| Kittens | After **v0.7**: the companion ships at v0.7 with **Cap'n Capy** as its first pack, whose art was drawn first (D145), and the kittens are a second pack once their frames are made | External process |
 
 The theme is usable and complete without the cats. The cats are the encore.
