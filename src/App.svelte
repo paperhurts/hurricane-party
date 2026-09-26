@@ -2509,7 +2509,11 @@
       </div>
       <!-- The selection bar (D84): only while something is checked, so the
            list is quiet until it is asked for something. Removal here keeps
-           the files; the delete offer follows on the notice, as before. -->
+           the files; the delete offer follows on the notice, as before. It is
+           the library's alone: a playlist view has no checks and no bar, the
+           owner's call on #114 (2026-09-26), so copying between lists is not
+           a feature waiting to be wired up. -->
+
       {#if selectedList == null && selected.length}
         <div class="selbar">
           <span class="count">{selected.length} selected</span>
