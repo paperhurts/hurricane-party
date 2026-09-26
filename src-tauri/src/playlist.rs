@@ -338,6 +338,43 @@ pub fn add(conn: &Connection, playlist_id: i64, media_id: i64) -> Result<(), DbE
     Ok(())
 }
 
+/// Append a checked selection to a playlist, in the order given, all or
+/// nothing (#114): the add counterpart of `library::remove_many` (D84). A
+/// track already in the list goes in again, as one **+** puts it in again.
+/// Returns how many went in.
+pub fn add_many(
+    conn: &mut Connection,
+    playlist_id: i64,
+    media_ids: &[i64],
+) -> Result<usize, DbError> {
+    let tx = conn.transaction()?;
+    let exists: bool = tx
+        .query_row(
+            "SELECT 1 FROM playlists WHERE id = ?1",
+            [playlist_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !exists {
+        return Err(DbError::Io(format!("no playlist {playlist_id}")));
+    }
+    for id in media_ids {
+        // Checked here, not left to the foreign key: the refusal should say
+        // which track, and nothing should go in when one is not there.
+        let known: bool = tx
+            .query_row("SELECT 1 FROM media WHERE id = ?1", [id], |_| Ok(()))
+            .optional()?
+            .is_some();
+        if !known {
+            return Err(DbError::Io(format!("track {id} is not in the library")));
+        }
+        add(&tx, playlist_id, *id)?;
+    }
+    tx.commit()?;
+    Ok(media_ids.len())
+}
+
 /// Rewrite the whole playlist's positions from an explicit old-order list.
 ///
 /// **This is the two-phase form the schema comment warns about.** The
@@ -634,6 +671,44 @@ mod tests {
         let (conn, pid) = fixture(3);
         assert_eq!(titles(&conn, pid), ["track 0", "track 1", "track 2"]);
         assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2]);
+    }
+
+    /// #114: a checked selection goes in at the end, in the order given, a
+    /// track already there goes in again as one + would put it, and a
+    /// selection with a stranger in it puts nothing in at all.
+    #[test]
+    fn a_selection_is_added_in_order_and_all_or_nothing() {
+        let (mut conn, pid) = fixture(3);
+        let ids: Vec<i64> = list_media(&conn).unwrap().iter().map(|m| m.id).collect();
+        let other = create(&conn, "other").unwrap();
+        add(&conn, other, ids[1]).unwrap();
+
+        // Newest first is the library's order; the caller decides the order.
+        let (t0, t2) = (
+            ids.iter().copied().min().unwrap(),
+            ids.iter().copied().max().unwrap(),
+        );
+        assert_eq!(add_many(&mut conn, other, &[t2, t0]).unwrap(), 2);
+        assert_eq!(titles(&conn, other), ["track 1", "track 2", "track 0"]);
+        assert_eq!(positions(&conn, other).unwrap(), [0, 1, 2]);
+
+        // Again, with a duplicate: it goes in again, as a single add does.
+        add_many(&mut conn, other, &[t0]).unwrap();
+        assert_eq!(titles(&conn, other).len(), 4);
+
+        assert!(add_many(&mut conn, other, &[t0, 999]).is_err());
+        assert_eq!(
+            titles(&conn, other).len(),
+            4,
+            "nothing went in with the stranger"
+        );
+        assert!(add_many(&mut conn, 999, &[t0]).is_err());
+
+        // A smart list takes no hand, however many tracks come at once (D144).
+        let rule = smart::Rule::parse(r#"{"v":1}"#).unwrap();
+        let s = create_smart(&conn, "all", &rule).unwrap();
+        assert!(add_many(&mut conn, s, &[t0]).is_err());
+        assert_eq!(titles(&conn, pid).len(), 3);
     }
 
     /// The collision case: moving an item downward makes every intervening row

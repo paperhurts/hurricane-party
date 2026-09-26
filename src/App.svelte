@@ -1387,6 +1387,49 @@
     selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
   }
 
+  // ---- adding a checked selection to a playlist (#114) ----
+  //
+  // The same checks that drive Remove (D84) drive this, and the same menu a
+  // row's + opens: every playlist made by hand, then a new one named on the
+  // spot. The tracks go in the order the list shows them, so a sort or a
+  // search the person chose is the order they land in.
+  let selMenu = $state(false);
+
+  /** The checked ids in the order the list shows them; a check out of sight comes after, in library order. */
+  function selectionInOrder(): number[] {
+    const shownIds = visible.map((t) => t.id).filter((id) => selected.includes(id));
+    const rest = tracks.map((t) => t.id).filter((id) => selected.includes(id) && !shownIds.includes(id));
+    return [...shownIds, ...rest];
+  }
+
+  async function addSelectionTo(listId: number, name: string) {
+    selMenu = false;
+    const ids = selectionInOrder();
+    if (!ids.length) return;
+    clearNotice();
+    try {
+      const n = await invoke<number>("add_tracks_to_playlist", { playlistId: listId, mediaIds: ids });
+      selected = [];
+      notice = n === 1 ? `Added 1 track to “${name}”.` : `Added ${n} tracks to “${name}”.`;
+      await refreshLibrary();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /** New playlist… from the bar: named, then filled, in one step. */
+  async function newListWithSelection() {
+    selMenu = false;
+    const name = prompt("Playlist name")?.trim();
+    if (!name) return;
+    try {
+      const id = await invoke<number>("create_playlist", { name });
+      await addSelectionTo(id, name);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   /**
    * The one destructive action in the app, and it reads like one: a warning
    * dialog that prints the path, with Keep as the safe answer. Rust refuses
@@ -1961,11 +2004,13 @@
   onpointerdown={() => {
     addMenuFor = null;
     listMenuFor = null;
+    selMenu = false;
   }}
   onkeydown={(e) => {
     if (e.key === "Escape") {
       addMenuFor = null;
       listMenuFor = null;
+      selMenu = false;
       selected = [];
     }
     // Ctrl+F is where anyone looks for find (D121).
@@ -2464,10 +2509,35 @@
       </div>
       <!-- The selection bar (D84): only while something is checked, so the
            list is quiet until it is asked for something. Removal here keeps
-           the files; the delete offer follows on the notice, as before. -->
+           the files; the delete offer follows on the notice, as before. It is
+           the library's alone: a playlist view has no checks and no bar, the
+           owner's call on #114 (2026-09-26), so copying between lists is not
+           a feature waiting to be wired up. -->
+
       {#if selectedList == null && selected.length}
         <div class="selbar">
           <span class="count">{selected.length} selected</span>
+          <!-- The row's + menu, for the whole selection (#114). Pointerdowns
+               inside stay inside, as they do for the row's. -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <span class="addwrap" onpointerdown={(e) => e.stopPropagation()}>
+            <button
+              class="mini"
+              class:open={selMenu}
+              onclick={() => (selMenu = !selMenu)}
+              title="Add the checked tracks to a playlist">Add to playlist ▸</button
+            >
+            {#if selMenu}
+              <div class="menu" role="menu">
+                {#each handLists as p (p.id)}
+                  <button role="menuitem" onclick={() => addSelectionTo(p.id, p.name)}>{p.name}</button>
+                {:else}
+                  <div class="none">No playlists yet</div>
+                {/each}
+                <button role="menuitem" class="new" onclick={newListWithSelection}>+ New playlist…</button>
+              </div>
+            {/if}
+          </span>
           <button class="mini" onclick={() => removeTracks(selected)} title="The files stay on disk">Remove from library</button>
           <button class="mini ghost" onclick={() => (selected = [])} title="Esc">Clear</button>
         </div>
@@ -2817,6 +2887,7 @@
   .play { padding: 1px 7px; font-size: 10px; }
   .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
   .mini.ghost { border-color: transparent; color: color-mix(in srgb, var(--text) 55%, transparent); }
+  .mini.open { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
   /* The cookie export sits beside its button and reads as one control. */
   select.frombrowser { font-size: 10px; padding: 1px 4px; }
   /* Kept on one line: the button and the picker are one setting. */
