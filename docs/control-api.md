@@ -1,44 +1,79 @@
-# hurricane-party — Control API
+# hurricane-party — Control API, protocol 1
 
-**Status:** back in scope, and for a much better reason than the one I deferred it for.
+**Stable.** Protocol 1 was frozen with v1.0 (#184, D151). From here it changes only by adding: new commands, new optional fields, new events, new capabilities. Anything that would break a client written against this page is protocol 2 (see [Versioning](#versioning)).
 
-Transport control from doc-md was a convenience the windowshade mini-bar already solved. **A visualization data stream so someone can drive an LED wall off the spectrum analyzer is a different thing entirely** — nothing else in the app provides it, and there's no workaround.
+A program on the same machine as the player can control it, ask what is in the library, know where its windows are, and read its analyser as a stream of frames. That last one is enough to drive an LED wall from the bass. The player never reaches out: everything here is a program the person runs, connecting in.
 
-This changes the API's nature. It's no longer a private convenience between two of your own apps. It's a **public contract that strangers will write against**, which means versioning, documentation, and the discipline of not breaking it. That's a real ongoing cost and you should sign up for it deliberately.
-
----
-
-## Two channels, one entry point
-
-| Channel | Transport | Shape | Rate |
+| Channel | Where | Shape | Rate |
 |---|---|---|---|
-| **Control** | named pipe, NDJSON | request/response + unsolicited events | on demand |
-| **Viz** | separate named pipe, **binary frames** | push only | 15–60 Hz |
+| **Control** | a named pipe | one JSON object per line, requests and replies, plus events | on demand |
+| **Viz** | a second pipe per subscriber | binary frames, push only | 15, 30 or 60 Hz |
 
-Why binary for viz: 32 spectrum bands as JSON floats at 60 Hz is ~240 KB/s of number formatting and parsing, for data that is natively 32 bytes. Binary frames are ~50 bytes. When someone's driving LEDs, latency and jitter are the product.
-
-Why a separate pipe rather than interleaving on one: mixing framed binary with newline-delimited JSON on a single stream is a parsing hazard for every client that will ever be written. Keep them apart.
+The fastest way in is the example: [`examples/viz_bars.py`](../examples/viz_bars.py), Python's standard library only, bars in a terminal.
 
 ---
 
-## Control channel
+## Connecting
 
-**Path:** `\\.\pipe\hurricane-party` (Windows) · `$XDG_RUNTIME_DIR/hurricane-party.sock` · `~/Library/Caches/hurricane-party.sock`
+| Platform | Control channel |
+|---|---|
+| Windows | `\\.\pipe\hurricane-party` |
+| macOS | `~/Library/Caches/hurricane-party.sock` (a Unix domain socket, when the player runs there, #187) |
+| Linux | `$XDG_RUNTIME_DIR/hurricane-party.sock` (likewise) |
 
-### Handshake — required first message
+**Local only, by design** (D9, D11, D29). The pipe is not a network port, and the player opens no connection for any of this. A rig on another machine (a Raspberry Pi behind an LED strip, say) is fed by a program the person runs on the player's machine, which reads the viz stream and forwards it however it likes. That relay is theirs; the player stays offline.
+
+Any local process may connect. There is no authentication: an attacker who can open the pipe already runs code as the person. A client can limit *itself* to part of the protocol at the handshake (`want`, below), which is what a bars-only client should do.
+
+**Messages** are UTF-8 JSON, one object per line. A request has a `cmd` and an `id` of the client's choosing; the reply echoes the `id`:
 
 ```jsonc
-→ {"id":0, "cmd":"hello", "client":"led-bridge", "protocol_version":1}
+→ {"id":6, "cmd":"status"}
+← {"id":6, "ok":true, "result":{…}}
+← {"id":7, "ok":false, "error":"\"search\" needs q"}
+```
+
+An **event** is a line with an `event` field and no `id`, sent when something changes. A client reading replies and events off the same stream tells them apart by `id`.
+
+---
+
+## Handshake
+
+`hello` comes first. Anything else before it is refused, and no event is sent until it is answered.
+
+```jsonc
+→ {"id":0, "cmd":"hello", "client":"led-bridge", "protocol_version":1, "want":["viz","palette"]}
 ← {"id":0, "ok":true, "result":{
      "protocol_version": 1,
-     "app_version": "0.6.0",
-     "capabilities": ["transport","library","viz","palette"]
+     "app_version": "1.0.0",
+     "capabilities": ["transport","viz","layout","library","palette"],
+     "granted": ["viz","palette"],
+     "stable": true
    }}
 ```
 
-Clients check `protocol_version` and refuse to proceed on mismatch. Server rejects unknown major versions rather than guessing.
+- `protocol_version` must be `1`. Another number is refused rather than guessed at.
+- `client` is a name for the player's log. Optional.
+- `want` lists the capabilities this connection will use. **Optional; absent means all of them.** A word that is not a capability, or an empty list, is refused with the list of real ones.
+- `capabilities` is everything this build does. Look for the word you need, not for a version number.
+- `granted` is what this connection may use. A command outside it is refused with the capability it needs; an event outside it is never sent to it.
+- `hello` may be sent again to change `want`.
 
-**As built**, `capabilities` is `["transport", "viz", "layout", "library", "palette"]`. A client should look for the capability, not the version, before it relies on one.
+---
+
+## Capabilities
+
+| Capability | Commands | Events |
+|---|---|---|
+| `transport` | `status` `play` `pause` `toggle` `stop` `next` `prev` `seek` `volume` | `now_playing_changed` `state_changed` |
+| `viz` | `subscribe_viz` | *(the viz channel)* |
+| `layout` | `layout` | `layout_changed` |
+| `library` | `playlists` `search` `queue_playlist` `play` with a `media_id` | |
+| `palette` | `palette` | `palette_changed` |
+
+---
+
+## Commands
 
 ### Transport
 
@@ -46,21 +81,71 @@ Clients check `protocol_version` and refuse to proceed on mismatch. Server rejec
 {"id":1, "cmd":"toggle"}
 {"id":2, "cmd":"seek", "pos_s":42.5}
 {"id":3, "cmd":"volume", "level":0.7}
-{"id":4, "cmd":"queue_playlist", "playlist_id":12}
-{"id":5, "cmd":"search", "q":"cure"}
-{"id":6, "cmd":"status"}
+{"id":4, "cmd":"status"}
 ```
 
-Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `layout` `playlists` `search` `queue_playlist`. **All built** (`Command` in `crates/hp-control/src/lib.rs`), with `hello` and `subscribe_viz`.
+`play` `pause` `toggle` `stop` `next` `prev` take nothing. `seek` takes `pos_s`, seconds. `volume` takes `level`, 0 to 1; a value outside is clamped. A transport command's reply says it was accepted (`{"accepted":"toggle"}`), not that it has happened: the change arrives as `state_changed`.
 
-**The library (#182, D149).** Four commands find something and play it; `hello` advertises them as `library`.
+`status` answers with where the transport stands:
 
 ```jsonc
-→ {"id":8, "cmd":"playlists"}
-← {"id":8, "ok":true, "result":{"playlists":[{"id":12, "name":"Road Tripping", "count":22, "smart":false}]}}
+{"id":4, "ok":true, "result":{"state":"playing", "kind":"audio", "media_id":89, "title":"…", "duration_s":240, "pos_s":61.5, "volume":0.8, "shuffle":false, "repeat":"all"}}
+```
 
-→ {"id":9, "cmd":"search", "q":"cure"}
-← {"id":9, "ok":true, "result":{"total":212, "tracks":[{"id":89, "title":"Pictures of You", "uploader":"The Cure", "kind":"audio", "duration_s":288.0}]}}
+- `state` is `playing`, `paused` or `stopped`.
+- **One thing plays at a time** (D69, D70). Starting a video pauses the track, starting a track pauses the video, and nothing resumes by itself. `kind` says which, `audio` or `video`, and describes whichever last started. `play` `pause` `toggle` `stop` `seek` `volume` act on it; `stop` on a video is pause-and-rewind. Closing the video window hands the transport back to the track.
+- `next` and `prev` step through the list that is playing, videos and tracks alike. `play` with nothing loaded starts that list, at the playlist window's selected row or the top. Only a track *ending* honours repeat one: `next` always moves on.
+- `shuffle` and `repeat` (`off`, `one`, `all`) are the library's play order (D97).
+- The Main window's own buttons go through the same router as these commands (D81), so a client and the person see the same thing.
+
+### Viz
+
+```jsonc
+→ {"id":5, "cmd":"subscribe_viz", "bands":32, "rate_hz":30, "depth":"u8", "include":["spectrum","level","beat"]}
+← {"id":5, "ok":true, "result":{"stream":"\\\\.\\pipe\\hurricane-party-viz-7f3a"}}
+```
+
+| Field | Values | Default |
+|---|---|---|
+| `bands` | 8 to 128 | 32 |
+| `rate_hz` | 15, 30 or 60 | 30 |
+| `depth` | `"u8"` (LED-friendly) or `"f32"` | `"u8"` |
+| `include` | any of `"spectrum"`, `"level"`, `"beat"` | all three |
+
+Every field is optional. A value out of range is refused by name, never clamped: a frame shaped differently from what a rig asked for is worse than an error it can read.
+
+`stream` is a pipe of this subscriber's own, `\\.\pipe\hurricane-party-viz-` and four hex digits. It exists before the reply is sent, and the client has ten seconds to open it. **The subscription belongs to that pipe, not to the control connection:** close the control connection and the frames keep coming; close the viz pipe and the subscription ends. Several subscribers at different sizes and rates are fine. What the frames hold is under [Viz channel](#viz-channel).
+
+### Layout
+
+Where the windows are, for anything that wants to put something on them.
+
+```jsonc
+→ {"id":7, "cmd":"layout"}
+← {"id":7, "ok":true, "result":{
+     "windows":[
+       {"id":"main",     "x":420,  "y":300, "w":550, "h":232, "group":true,  "shaded":false, "visible":true},
+       {"id":"playlist", "x":420,  "y":532, "w":550, "h":232, "group":true,  "shaded":false, "visible":true},
+       {"id":"library",  "x":-1200,"y":80,  "w":916, "h":659, "group":false, "shaded":false, "visible":false}
+     ],
+     "bonds":[{"a":"main", "b":"playlist", "edge":"bottom", "span":[420, 970]}]
+   }}
+```
+
+- Coordinates are **physical pixels** on the virtual desktop, the player's own convention, so nothing has to guess a scale factor. They can be negative on a display left of or above the primary.
+- `main`, `eq` and `playlist` are the classic windows, `group: true`. `library`, `video` and `prep` are the decorated windows, listed while they exist, always `group: false`, and never in `bonds`.
+- `shaded`: collapsed to the windowshade strip; `h` is the strip's.
+- `visible`: shown and not minimised, as the operating system reports it. A window that is not visible keeps its last rectangle, which is where it will come back.
+- A bond's `edge` is the side of `a` that `b` sits against, always `right` or `bottom`; `span` is the shared stretch along it.
+
+### Library
+
+```jsonc
+→ {"id":8,  "cmd":"playlists"}
+← {"id":8,  "ok":true, "result":{"playlists":[{"id":12, "name":"Road Tripping", "count":22, "smart":false}]}}
+
+→ {"id":9,  "cmd":"search", "q":"cure"}
+← {"id":9,  "ok":true, "result":{"total":212, "tracks":[{"id":89, "title":"Pictures of You", "uploader":"The Cure", "kind":"audio", "duration_s":288.0}]}}
 
 → {"id":10, "cmd":"queue_playlist", "playlist_id":12}
 ← {"id":10, "ok":true, "result":{"playlist_id":12, "name":"Road Tripping", "count":22}}
@@ -69,94 +154,44 @@ Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` 
 ← {"id":11, "ok":true, "result":{"media_id":89, "title":"Pictures of You"}}
 ```
 
-- `playlists` lists every playlist, smart ones too (`smart: true`). `count` is what can play now: a track on a drive that is not plugged in is not counted.
-- `search` matches every word of `q` against title and artist, blind to case and accents, exactly as the library's search box does. It returns at most 50 tracks, newest first, with `total` for how many matched. An empty `q` is refused, and so is no `q`.
-- `queue_playlist` makes that list what plays, as playing a row from it in the library would, and starts it: from the top, or a fresh shuffle when shuffle is on.
-- `play` with a `media_id` plays that track, in the list that is playing if it is there, and otherwise in the whole library. A bare `play` is the transport's, as before.
-- A playlist that does not exist, one with nothing that can play now, a track that is not in the library, and a track on a drive that is out (D143) are all errors with a reason, never a silent nothing.
+- `playlists`: every playlist. `smart` marks one that fills itself from a rule. `count` is what can play now; a track on a drive that is not plugged in is not counted.
+- `search`: every word of `q` must appear in the title or the artist, blind to case and accents, as the library's search box matches. At most 50 tracks, newest first, and `total` for how many matched. An empty or missing `q` is refused.
+- `queue_playlist`: that list becomes what plays, and it starts, from the top or on a fresh shuffle.
+- `play` with a `media_id` plays that track: in the list that is playing if it is there, otherwise in the whole library. `play` without one is the transport's.
+- A playlist that does not exist, one with nothing that can play now, a track that is not in the library, and a track on a drive that is not plugged in are each refused with the reason.
 
-**Video (D69, D70).** One thing plays at a time: starting a video pauses the track, starting a track pauses the video, and nothing resumes. `status` and `now_playing_changed` carry **`kind`**, `"audio"` or `"video"`, and describe whichever last started playing; a pause from the other side does not take the channel back. `play` `pause` `toggle` `stop` `seek` `volume` act on whatever is playing (`stop` on a video is pause-and-rewind; the window stays open on its first frame). `next` and `prev` step the library's list, which walks over videos and tracks alike. Closing the video window hands the channel back to the track: `status` describes the audio side again, paused or stopped, which is what a `play` would resume. `kind` is additive; absent means audio. The Main window's own buttons, seek bar and volume go through the same router as these commands (D81), so what a client sees and what the user sees never disagree.
-
-**The play order (D97).** `status` also carries the library's two switches, flat beside the transport's state: `"shuffle": true|false` and `"repeat": "off"|"one"|"all"`. A client written before they existed reads the same keys in the same places. `play` with nothing loaded starts the list the library is showing, on the playlist window's selected row or at the top; `next` and `prev` from a standing start begin at the first and the last row. Only a track *ending* honours repeat one: `next` always moves on, because someone asked it to. A reply looks like:
+### Palette
 
 ```jsonc
-{"id":6, "ok":true, "result":{"state":"playing", "kind":"audio", "media_id":89, "title":"…", "duration_s":240, "pos_s":61.5, "volume":0.8, "shuffle":false, "repeat":"all"}}
+→ {"id":12, "cmd":"palette"}
+← {"id":12, "ok":true, "result":{"viscolor":["#04160b", "#06280f", "…24 in all"]}}
 ```
 
-### Events (unsolicited, no `id`)
+The 24 colours the analyser draws with right now, darkest first, each `#rrggbb` in lower case: the theme's, or a skin's own when it brings one. For Purricane it is the base ramp, not the kaleidoscope's drifting hue. Empty only in the moment before the Main window has opened.
+
+---
+
+## Events
 
 ```jsonc
 {"event":"now_playing_changed", "kind":"audio", "media_id":89, "title":"…", "uploader":"…", "duration_s":240}
 {"event":"state_changed", "state":"paused"}
-{"event":"palette_changed", "viscolor":["#000000","#0f0f0f", "…24 entries…"]}
+{"event":"layout_changed", "windows":[…], "bonds":[…]}
+{"event":"palette_changed", "viscolor":["#04160b", …]}
 ```
 
-**Built:** all four: `now_playing_changed`, `state_changed`, `layout_changed` (#181) and `palette_changed` (#183). The last was placed at v0.5 below, and v0.5 shipped without it; it landed with v1.0.
-
-`palette_changed` is the one worth calling out. When you switch skins, the LED wall changes color scheme to match. That's a genuinely nice thing that costs almost nothing to ship, and it's the kind of detail that makes people want to build against your API. The payload is the same 24-entry `viscolor` array the skin manifest defines (`skin-manifest.md`) — one definition, three consumers: analyser, Cone backdrop, and this event.
-
-**As built (#183, D150).** `viscolor` is the ramp Main's analyser draws with at that moment: the theme's, or an imported or made skin's own when it brings one (D101). Purricane reports its base ramp, not the kaleidoscope's drifting hue. Always exactly 24 colours, each `#rrggbb` in lower case, darkest first. It is sent when the skin or the theme changes it, and not again while it stays the same. A client that connects later asks:
-
-```jsonc
-→ {"id":12, "cmd":"palette"}
-← {"id":12, "ok":true, "result":{"viscolor":["#04160b", "#06280f", …]}}
-```
-
-`viscolor` is empty only in the moment before Main has opened.
-
-### `layout_changed` — required by the kittens, useful to everyone
-
-```jsonc
-{"event":"layout_changed", "windows":[
-  {"id":"main",     "x":420, "y":300, "w":550, "h":232},
-  {"id":"playlist", "x":420, "y":532, "w":550, "h":232}
-], "bonds":[
-  {"a":"main", "b":"playlist", "edge":"bottom", "span":[420, 970]}
-]}
-```
-
-The viz stream carries no geometry, but the kittens treat the bonded window group as **terrain** — they perch on top edges, walk the glowing seam, and have to jump off when a bond breaks under them (`purricane.md`). That needs window rectangles and the bond graph, which is this event.
-
-It generalizes past cats: any external overlay, LED positioning rig, or second-screen tool wants to know where the windows are. Coordinates are **physical pixels**, matching the internal convention (`CLAUDE.md`) — a client compositing against these must not have to guess a scale factor.
-
-Lands at v1.0 with the protocol freeze, since it's part of the public commitment rather than an early convenience.
-
-**As built (#181, D148).** Each window carries `id`, `x`, `y`, `w`, `h`, and three flags: `group` (one of the three classic windows, which bond), `shaded` (collapsed to the windowshade strip; `h` is the strip's) and `visible` (shown and not minimised, as the OS reports it, not as the app remembers it, D58). The decorated windows are listed too while they exist, so a companion can stand on them: `library`, `video` and `prep`, always `group: false`, never in `bonds`. A window that is not visible keeps its last rectangle. `edge` is the side of `a` that `b` sits against, and the pair is stored so `edge` is always `right` or `bottom`.
-
-A client that connects after the last change asks once:
-
-```jsonc
-→ {"id":7, "cmd":"layout"}
-← {"id":7, "ok":true, "result":{"windows":[…], "bonds":[…]}}
-```
-
-`layout_changed` is sent when anything in that picture changes, a move, a resize, a bond made or broken, a shade, a window shown or hidden, a display coming or going: at most every 50 ms while a drag runs, and always once after the last change, so a client ends on the true layout. Nothing is sent while no client is connected, and an event identical to the last one is not sent again.
+| Event | Capability | Sent |
+|---|---|---|
+| `now_playing_changed` | `transport` | when a different track or video starts |
+| `state_changed` | `transport` | playing, paused or stopped changed; not on every position tick |
+| `layout_changed` | `layout` | a window moved, resized, shaded, shown or hidden, a bond was made or broken, a display came or went. At most every 50 ms during a drag, always once after the last change, never twice the same. Same shape as `layout`'s result |
+| `palette_changed` | `palette` | the skin or the theme changed the ramp. Same shape as `palette`'s result |
 
 ---
 
 ## Viz channel
 
-### Subscribing
-
-```jsonc
-→ {"id":7, "cmd":"subscribe_viz",
-   "bands": 32,          // 8–128
-   "rate_hz": 30,        // 15 | 30 | 60
-   "depth": "u8",        // "u8" (LED-friendly) | "f32" (precise)
-   "include": ["spectrum","level","beat"]}
-
-← {"id":7, "ok":true, "result":{
-     "stream": "\\\\.\\pipe\\hurricane-party-viz-7f3a"
-   }}
-```
-
-Server allocates a per-subscriber pipe and starts pushing. Multiple subscribers at different band counts and rates is explicitly supported — the LED wall wants 32 bands at 30 Hz, someone's desktop toy wants 128 at 60.
-
-**As built (v0.4b).** Every field is optional and the values above are the defaults. Out-of-range values are refused by field name (`"subscribe_viz": bands must be 8..=128, not 4`), never clamped: a frame shaped differently from what a rig asked for is worse than an error it can read. The pipe is `\\.\pipe\hurricane-party-viz-<id>` with a four-hex-digit id, it exists before the reply goes out, and the client has ten seconds to open it. **The subscription belongs to the viz pipe, not to the control connection:** close the control pipe and the frames keep coming; close the viz pipe and the subscription ends. The player captures only while someone is subscribed, at the highest rate any subscriber asked for; the others take every second or fourth frame, which is why the rates are 15, 30, 60 and nothing between. `include` leaves the frame's shape alone — a part left out is zeroed (`n_bands = 0` for the spectrum) rather than removed.
-
-A harness that does all of this from a second process and prints what it measured: `tools\viz-client.ps1` (`-Bands`, `-Rate`, `-Depth`, `-Seconds`, `-Show` for live bars, `-StallSeconds` to test the drop policy).
-
-### Frame format (little-endian)
+Each frame is a fixed 18-byte header and the spectrum. Little-endian.
 
 ```
 offset  size  field
@@ -171,34 +206,77 @@ offset  size  field
 18      n     spectrum       n_bands × (1 or 4 bytes), 0..1 full scale
 ```
 
-Fixed header, self-describing length. A client can resync on the magic after a dropped connection.
+The length is in the header, so a client that loses its place resyncs on the magic.
 
-**What the fields carry (v0.4b).** The timestamp is wall-clock, not an arbitrary monotonic origin, so a client on the same machine subtracts it from its own clock and has the latency without a handshake; it is taken in the webview the instant the analyser is read. The spectrum is the same log-spaced 50 Hz–16 kHz bands the Main window draws, loudest bin per band, from an analyser tap with **no smoothing** (the on-screen bars decay at 0.72; smoothing is latency, and a rig can add its own but cannot remove ours). `f32` today carries the analyser's 8-bit resolution scaled to 0..1; finer resolution would be additive. `level_peak` and `level_rms` are the last FFT window's time-domain peak and RMS, 1.0 = 255. `beat` is an onset heuristic on 40–160 Hz energy against the last second's average with a 200 ms hold — good enough to blink to, not a tempo tracker; a client that wants better runs its own on the spectrum.
+- **`timestamp_us`** is wall-clock, taken the instant the analyser is read, so a client on the same machine subtracts it from its own clock and has the latency.
+- **`spectrum`** is the log-spaced 50 Hz to 16 kHz bands the Main window draws, the loudest bin per band, with **no smoothing** (the on-screen bars decay; a rig can add smoothing but could not remove ours). `f32` carries the analyser's 8-bit resolution scaled to 0..1 today; finer resolution would be additive.
+- **`level_peak`** and **`level_rms`**: the last FFT window's time-domain peak and RMS, 255 = full scale.
+- **`beat`** (flags bit 0): an onset heuristic on 40 to 160 Hz against the last second's average, held 200 ms. Good enough to blink to; not a tempo tracker.
+- A part left out by `include` is zeroed, not removed (`n_bands = 0` for the spectrum), so the header never changes shape.
+- The player captures only while someone is subscribed, at the highest rate asked; a slower subscriber gets every second or fourth frame.
 
-### Backpressure
+**Backpressure: frames are dropped, never queued.** Stale visualisation is worse than missing visualisation, and an LED wall that lags reads as broken. A subscriber that stops reading gets the newest frame when it resumes, not a backlog.
 
-**If a subscriber can't keep up, drop frames — never buffer.** Stale visualization data is worse than missing data; a laggy LED wall reads as broken. Non-blocking writes, drop on `WouldBlock`, done.
-
-As built: each subscriber's writer reads from a slot that holds only the newest frame, its pipe's outbound buffer is two frames deep rather than the 64 KB default (which would bank a thousand stale frames in the kernel), and the source drops a tick rather than queueing it while the previous frame's IPC is still out. `tools\viz-client.ps1 -StallSeconds 2` stops reading for two seconds and counts the stale frames that arrive when it resumes.
+**Where the frame sits against the sound.** The analyser is at the output end of the audio graph, and on the development machine the output latency is about 50 ms. So a frame reaches a client about 50 ms *before* the speaker plays what it describes. A rig that wants its lights exactly on the beat delays frames by about that much.
 
 ---
 
-## Architectural consequence worth flagging
+## Errors
 
-Your audio lives in the webview (Web Audio `AnalyserNode`), not in Rust. So the spectrum path is:
+Every refusal is a reply with `"ok": false` and an `error` in words:
+
+- `unknown command "set_eq"`
+- `"search" needs q`: a field is missing
+- `"subscribe_viz": bands must be 8..=128, not 4`: a field is out of range
+- `protocol version 2 is not supported (this server speaks 1)`
+- `malformed request: …`: the line is not a request
+- `say hello first: …`
+- `"next" needs "transport", and this connection asked for ["viz"] at hello`
+- and the domain's own: `no playlist 99`, `"At Port" is on hp, which isn't plugged in`
+
+A client should show the text; it is written for a person.
+
+---
+
+## Versioning
+
+- **Protocol 1 is frozen.** It grows only by adding: a new command, a new optional field in a request or a reply, a new event, a new capability. The viz frame's layout does not change.
+- **A client ignores what it does not know**: fields it did not expect, events it did not ask about.
+- **A breaking change is protocol 2.** `hello` names the version, the player refuses one it does not speak, and the previous major is supported for one release cycle after a new one ships.
+- **Look for capabilities, not versions.** A command's capability is in `hello`'s `capabilities` from the build that has it.
+
+---
+
+## Examples
+
+- [`examples/viz_bars.py`](../examples/viz_bars.py): Python, standard library only. Hello asking for `viz` alone, subscribe, and bars in a terminal. Driving LEDs is the same loop with the `print` swapped for your strip's library.
+- `tools/control-client.ps1`: every command from PowerShell (`status`, `layout`, `playlists`, `search "…"`, `queue_playlist 12`, `play 89`, `palette`), and `listen` to watch events.
+- `tools/viz-client.ps1`: a viz subscriber that measures latency, cadence and the drop policy (`-Bands`, `-Rate`, `-Depth`, `-Seconds`, `-Show`, `-StallSeconds`).
+
+---
+
+## Design notes
+
+Why it is shaped this way. Not part of the contract.
+
+### Why this exists
+
+Transport control alone was a convenience the windowshade mini-player already solves. **A visualisation stream so someone can drive an LED wall from the analyser** is a different thing: nothing else in the app provides it (D15). That made the API a public contract strangers write against, which is why it is versioned and documented and why protocol 1 is frozen (D8, D24).
+
+### Two channels, binary for viz
+
+32 spectrum bands as JSON floats at 60 Hz is about 240 KB/s of number formatting and parsing, for data that is natively 32 bytes; a binary frame is about 50. Latency and jitter are the product for an LED rig. And mixing framed binary with newline-delimited JSON on one stream is a parsing hazard for every client ever written, so the two channels are kept apart.
+
+### The webview hop, measured
+
+The audio graph lives in the webview (Web Audio's `AnalyserNode`, D5), not in Rust, so the spectrum path is:
 
 ```
 <audio> → AnalyserNode → JS getByteFrequencyData()
-        → Tauri IPC → Rust → downsample to N bands → socket
+        → Tauri IPC → Rust → per-subscriber pipe
 ```
 
-That's an extra hop compared to tapping audio natively in Rust. At 60 Hz with ~40-byte payloads it's fine — Tauri IPC handles that comfortably — but **measure the end-to-end latency before you publish the API**, because once someone's LED rig is calibrated against it you can't quietly change the timing.
-
-Target: under 20 ms from speaker to socket. If it comes in worse, the fix is moving the analysis into Rust with `symphonia` decoding in parallel, which is a bigger change and better to know about early.
-
-### Measured (v0.4b, dev machine, Windows 11, WebView2)
-
-Ten-second runs of `tools\viz-client.ps1` with music playing, the client in a second process reading the frame's wall-clock timestamp against its own clock (D77). `HP_VIZ_TRACE=1` on the app prints the same path as seen from Rust, once a second.
+Measured at v0.4b on the development machine (Windows 11, WebView2), ten-second runs of `tools\viz-client.ps1` with music playing, the client in a second process reading each frame's wall-clock timestamp against its own clock (D77). `HP_VIZ_TRACE=1` on the app prints the same path from Rust once a second.
 
 | | 15 Hz, 128 bands, f32 | 30 Hz, 32 bands, u8 | 60 Hz, 19 bands, u8 |
 |---|---|---|---|
@@ -208,45 +286,20 @@ Ten-second runs of `tools\viz-client.ps1` with music playing, the client in a se
 | Cadence, p50 / p95 / max | 67.4 / 68.9 / 69.4 ms | 32.7 / 36.6 / 37.7 ms | 16.2 / 20.2 / 21.6 ms |
 | Frames delivered | 15.0 Hz | 30.0 Hz | 60.0 Hz |
 
-Of that, the webview-to-Rust IPC hop is about 1.0 ms median and under 2 ms at p95; the rest is the pipe. Two subscribers at once (30 and 60 Hz) each got their own rate from one capture loop. Three quarters of the Main window under another window changed nothing. After a client stopped reading for two seconds, four stale frames arrived before live ones, not sixty.
+The webview-to-Rust hop is about 1.0 ms median and under 2 ms at p95; the rest is the pipe. Two subscribers at once (30 and 60 Hz) each got their own rate from one capture loop. After a client stopped reading for two seconds, four stale frames arrived before live ones, not sixty: each subscriber's writer reads from a slot holding only the newest frame, its pipe's outbound buffer is two frames deep rather than the 64 KB default, and the source drops a tick rather than queueing one while the last frame's IPC is still out.
 
-**The speaker is the other way round.** `AudioContext.outputLatency + baseLatency` is **50 ms** on this machine, and the analyser sits at the render end of the graph, so a frame describes audio the speaker will play about 50 ms *after* the frame reached the client. The socket does not lag the speaker; it leads it by roughly 49 ms, plus the analyser's own window (2048 samples, 43 ms at 48 kHz, so a transient is fully in the FFT some 20 ms after it starts). A rig that wants its lights on the beat delays frames by about the output latency; one that wants them a hair early does nothing. The value is not on the wire yet; if a client needs it, it is an additive field on `subscribe_viz`'s reply.
+`AudioContext.outputLatency + baseLatency` is 50 ms on that machine, which is why a frame leads the speaker (above). The socket does not lag the sound; the analyser's own window (2048 samples, 43 ms at 48 kHz) is the bigger delay, and moving analysis into Rust with `symphonia` would not change it. The latency is not on the wire; if a client needs it, it is an additive field on `subscribe_viz`'s reply.
 
-So the design stands, and the `symphonia` path is not needed for latency. What would move the number is not the hop but the source: the 4 ms timer's ±4 ms phase, and the FFT window.
+### Security
 
-This is the one place my earlier "use HTML5 audio" recommendation costs you something. I still think it's right — the in-app EQ and analyser are worth far more than the hop — but I don't want to pretend the tradeoff isn't there.
+Any local process can connect. The alternative is a token dance that makes integration annoying, to protect against an attacker who already has code execution. `want` at the handshake is a limit a client puts on itself, so a bars-only client cannot also skip tracks or search the library through a bug; it is not security, and it was built for the freeze because narrowing what a connection may do after the fact would have been a breaking change (D151).
 
----
+### How it arrived
 
-## Security posture
-
-Any local process can connect to the named pipe. For a personal offline media player that's the correct tradeoff — the alternative is a token dance that makes third-party integration annoying, to protect against an attacker who already has code execution on your machine.
-
-But be aware the surface will include `queue_playlist` and `search` once they are built, not just transport and viz. If that ever bothers you, the fix is capability scoping at handshake (`{"cmd":"hello", "want":["viz"]}`) rather than authentication. Don't build it now.
-
----
-
-## Versioning discipline
-
-Once this is public:
-
-- **Freeze the frame format at 1.0.** Additive changes go in new optional fields on the control channel, not by reshaping frames.
-- **Bump `protocol_version` only for breaking changes**, and support the previous major for one release cycle.
-- **Write the doc before the second client exists.** A README section with the frame layout and a 40-line Python example client is enough, and it's the difference between people building things and people giving up.
-
-Ship the example client. Someone with an LED strip and a Raspberry Pi should be able to get bars moving in ten minutes.
-
----
-
-## Milestone placement
-
-| Milestone | Scope |
+| Milestone | What landed |
 |---|---|
-| v0.3 | Control channel only: handshake, transport, events. Proves the pipe, no public commitment yet |
-| v0.4 | Viz channel — lands with the analyser, since it's the same data |
-| v0.5 | `palette_changed` — lands with the skin loader, since that's when palettes become dynamic. *v0.5 shipped the loader without the event, which has no milestone now* |
-| v1.0 | `layout_changed`. Freeze protocol v1. Publish docs + example client |
+| v0.3 | The control channel: handshake, transport, events. Unstable, on purpose |
+| v0.4b | The viz channel, with the analyser; latency measured |
+| v1.0 | `layout` and `layout_changed` (#181, D148); the library commands (#182, D149); `palette` and `palette_changed`, placed at v0.5 and missed there (#183, D150); `want`, hello first, `"stable": true`, this reference and the Python example (#184, D151) |
 
-This table is the control API's internal phasing and is consistent with the canonical milestone table in `decisions.md` (D27). If they ever disagree, `decisions.md` wins.
-
-Keep it undocumented and explicitly unstable until v1.0. That's your window to change your mind.
+This is the protocol's own history; the canonical milestone table is in `decisions.md` (D27).

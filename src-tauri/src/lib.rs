@@ -1749,8 +1749,8 @@ pub fn run() {
             // Where the windows are, told to the pipe (#181).
             layout::spawn(&handle);
 
-            // Undocumented and unstable until v1.0 (control-api.md). Shipping
-            // it now proves the pipe while nothing external depends on it.
+            // The public control pipe, protocol 1 (docs/control-api.md,
+            // frozen with v1.0, #184).
             let bc = app.state::<control::Broadcaster>().inner().clone();
             control::spawn_server(handle.clone(), bc);
 

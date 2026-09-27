@@ -1,12 +1,9 @@
 <#
-    A throwaway client for the hp-control pipe, so v0.3 can actually be tested.
+    A harness for the hp-control pipe: every command, and `listen` for events.
 
-    NOT the example client control-api.md asks for — that ships at v1.0 with the
-    frozen protocol, in Python, alongside the docs. This is a harness.
-
-    The protocol is UNDOCUMENTED AND UNSTABLE until v1.0. Do not build anything
-    real against it yet; that instability is the whole point of shipping the
-    channel early.
+    The protocol is version 1, frozen with v1.0; docs/control-api.md is the
+    reference. The example client for people building against it is
+    examples/viz_bars.py. This one is for testing the player.
 
     Usage:
       tools\control-client.ps1                 # handshake + status
