@@ -163,6 +163,11 @@ pub enum Event {
     /// the last change; the `layout` command answers with the same shape.
     #[serde(rename = "layout_changed")]
     LayoutChanged(LayoutInfo),
+    /// The analyser's colours, when the skin or the theme changes them (#183):
+    /// the 24-entry ramp the skin manifest defines, `#rrggbb`, darkest first,
+    /// so an LED wall can change colour scheme with the windows.
+    #[serde(rename = "palette_changed")]
+    PaletteChanged { viscolor: Vec<String> },
 }
 
 /// Every window a client could put something on, and the bond graph between
@@ -227,6 +232,34 @@ pub struct SearchResult {
 /// The most tracks one `search` returns (#182, the owner's call).
 pub const SEARCH_LIMIT: usize = 50;
 
+/// How many colours an analyser ramp has: the classic `VISCOLOR.TXT`'s 24,
+/// which the skin manifest keeps (#183).
+pub const RAMP_LEN: usize = 24;
+
+/// A ramp as the pipe promises it (#183): exactly 24 colours, each `#rrggbb`
+/// in lower case. Anything else is refused with the reason, so a malformed
+/// ramp never reaches a client.
+pub fn ramp(colours: &[String]) -> Result<Vec<String>, String> {
+    if colours.len() != RAMP_LEN {
+        return Err(format!(
+            "a ramp has {RAMP_LEN} colours, not {}",
+            colours.len()
+        ));
+    }
+    colours
+        .iter()
+        .map(|c| {
+            let ok =
+                c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|d| d.is_ascii_hexdigit());
+            if ok {
+                Ok(c.to_ascii_lowercase())
+            } else {
+                Err(format!("{c:?} is not a #rrggbb colour"))
+            }
+        })
+        .collect()
+}
+
 /// Two classic windows sharing an edge (D16). `edge` is the side of `a` that
 /// `b` sits against; `span` is the shared stretch along it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,6 +290,9 @@ pub enum Command {
     QueuePlaylist(i64),
     /// `play` with a `media_id`: play that one track (#182).
     PlayMedia(i64),
+    /// The analyser's colours now (#183): the `palette_changed` shape, for a
+    /// client that connects after the last change.
+    Palette,
     Play,
     Pause,
     Toggle,
@@ -313,6 +349,7 @@ impl Request {
                 None => Command::Play,
             },
             "playlists" => Command::Playlists,
+            "palette" => Command::Palette,
             // An empty search is refused rather than answered with the whole
             // library: a remote that sends nothing has a bug, not a question.
             "search" => match self.q.as_deref().map(str::trim) {
@@ -400,9 +437,9 @@ pub fn hello_result(app_version: &str) -> serde_json::Value {
     serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
         "app_version": app_version,
-        // "layout" is #181 and "library" #182; "palette" (#183) joins
-        // as they land, so a client looks for the word, not the version.
-        "capabilities": ["transport", "viz", "layout", "library"],
+        // Each joined as it was built: "layout" #181, "library" #182,
+        // "palette" #183. A client looks for the word, not the version.
+        "capabilities": ["transport", "viz", "layout", "library", "palette"],
         "stable": false,
     })
 }
@@ -550,6 +587,34 @@ mod tests {
         assert!(err.contains("\"ok\":false") && !err.contains("result"));
     }
 
+    /// #183: the palette event is the documented shape, `palette` parses, and
+    /// a ramp is 24 lower-case `#rrggbb` or nothing.
+    #[test]
+    fn the_palette_is_24_colours_or_refused() {
+        let theme: Vec<String> = (0..24).map(|i| format!("#0A{i:02X}FF")).collect();
+        let r = ramp(&theme).unwrap();
+        assert_eq!(r[0], "#0a00ff");
+        assert_eq!(r[23], "#0a17ff");
+        let e = Event::PaletteChanged {
+            viscolor: r.clone(),
+        };
+        let j = serde_json::to_value(&e).unwrap();
+        assert_eq!(j["event"], "palette_changed");
+        assert_eq!(j["viscolor"].as_array().unwrap().len(), 24);
+        assert!(j.get("id").is_none());
+        assert_eq!(
+            req(r#"{"id":1,"cmd":"palette"}"#).parse().unwrap(),
+            Command::Palette
+        );
+
+        assert!(ramp(&theme[..23]).unwrap_err().contains("not 23"));
+        let mut bad = theme.clone();
+        bad[5] = "rgb(1,2,3)".into();
+        assert!(ramp(&bad).unwrap_err().contains("rgb(1,2,3)"));
+        bad[5] = "#12345".into();
+        assert!(ramp(&bad).is_err());
+    }
+
     /// #182: the library commands parse, a bare `play` is still the
     /// transport's, and what they need is asked for by name.
     #[test]
@@ -660,7 +725,7 @@ mod tests {
         let h = hello_result("0.4.0");
         assert_eq!(
             h["capabilities"],
-            serde_json::json!(["transport", "viz", "layout", "library"])
+            serde_json::json!(["transport", "viz", "layout", "library", "palette"])
         );
         assert_eq!(h["stable"], false);
     }

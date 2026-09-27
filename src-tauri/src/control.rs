@@ -37,6 +37,9 @@ pub struct Mirror {
     pub active_video: bool,
     /// What clients last heard, for deriving events by diff.
     told: PlayerState,
+    /// The analyser's ramp as Main last reported it (#183): 24 `#rrggbb`,
+    /// empty until Main has mounted.
+    pub palette: Vec<String>,
 }
 
 impl Mirror {
@@ -114,6 +117,11 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
                 repeat,
             };
             Response::ok(req.id, serde_json::to_value(s).unwrap_or_default())
+        }
+        // The ramp Main last reported (#183); empty until Main has mounted.
+        Command::Palette => {
+            let viscolor = state.0.lock().unwrap().palette.clone();
+            Response::ok(req.id, serde_json::json!({ "viscolor": viscolor }))
         }
         // The library on the pipe (#182). Asking is answered here from the
         // database; playing goes to the library window, which holds the
@@ -375,6 +383,24 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
 /// The webview reporting what it's actually doing. Also the point where
 /// unsolicited events are derived — by diffing against the previous mirror,
 /// so a client isn't spammed with a state_changed on every position tick.
+/// Main's ramp, checked against what the pipe promises (`hp_control::ramp`)
+/// and told to clients only when it changed (#183). The lock is let go
+/// before anything is sent.
+pub fn update_palette(app: &AppHandle, viscolor: &[String]) -> Result<(), String> {
+    let ramp = hp_control::ramp(viscolor)?;
+    {
+        let st = app.state::<ControlState>();
+        let mut m = st.0.lock().unwrap();
+        if m.palette == ramp {
+            return Ok(());
+        }
+        m.palette = ramp.clone();
+    }
+    app.state::<Broadcaster>()
+        .send(&Event::PaletteChanged { viscolor: ramp });
+    Ok(())
+}
+
 pub fn update_state(app: &AppHandle, incoming: PlayerState) {
     let video = incoming.kind == "video";
     apply(app, |m| {

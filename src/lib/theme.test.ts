@@ -119,6 +119,16 @@ describe("wearing a theme", () => {
     expect(colorsWorn({ art: "mask", palette: {} }, "purricane")).toEqual(colorsShown("purricane"));
   });
 
+  // #183: Main reports this ramp to the pipe, and Rust refuses anything that
+  // is not 24 `#rrggbb` (`hp_control::ramp`), so every theme's must be.
+  it("gives every theme a ramp the pipe will take: 24 #rrggbb colours", () => {
+    for (const name of Object.keys(tokens.themes) as (keyof typeof tokens.themes)[]) {
+      const ramp = rampWorn(mask, name);
+      expect(ramp, name).toHaveLength(24);
+      for (const c of ramp) expect(c, `${name} ${c}`).toMatch(/^#[0-9a-fA-F]{6}$/);
+    }
+  });
+
   it("caps the kaleidoscope where the tokens could ask for more", () => {
     const k = kaleidoscopeFor("purricane");
     expect([6, 8]).toContain(k.segments);
