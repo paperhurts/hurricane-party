@@ -59,6 +59,12 @@ impl Broadcaster {
         self.0.lock().unwrap().push(tx);
         rx
     }
+    /// Whether anyone has connected and not yet been found gone. A client that
+    /// left is only noticed on the next send, so this can say yes for a
+    /// moment too long, never no too early.
+    pub fn has_clients(&self) -> bool {
+        !self.0.lock().unwrap().is_empty()
+    }
     pub fn send(&self, ev: &Event) {
         let Ok(line) = serde_json::to_string(ev) else {
             return;
@@ -106,6 +112,12 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
             };
             Response::ok(req.id, serde_json::to_value(s).unwrap_or_default())
         }
+        // Answered here, off the UI thread, which is where the window getters
+        // behind it have to be asked from (#181).
+        Command::Layout => Response::ok(
+            req.id,
+            serde_json::to_value(crate::layout::current(app)).unwrap_or_default(),
+        ),
         // The one command answered here rather than relayed: the pipe is
         // created before the reply, so the client never finds it missing.
         Command::SubscribeViz(params) => match crate::viz::subscribe(app, params) {
@@ -179,6 +191,7 @@ pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>) -> Result<(), String>
             let _ = w.show();
             let _ = w.set_focus();
         }
+        crate::layout::ping(app);
     }
     Ok(())
 }

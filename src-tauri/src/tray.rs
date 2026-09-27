@@ -25,6 +25,7 @@ pub fn hide_library(app: &AppHandle) {
         return;
     }
     let _ = win.hide();
+    crate::layout::ping(app);
 }
 
 /// When the library last lost focus (D123). LIB needs to know whether the
@@ -82,6 +83,7 @@ pub fn reveal_library(app: &AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
+    crate::layout::ping(app);
 }
 
 fn install(app: &AppHandle) -> tauri::Result<()> {

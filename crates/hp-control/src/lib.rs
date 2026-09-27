@@ -151,6 +151,49 @@ pub enum Event {
     },
     #[serde(rename = "state_changed")]
     StateChanged { state: String },
+    /// Where the windows are and how they are bonded (#181). Sent when that
+    /// changes, at most every 50 ms while a drag runs, and always once after
+    /// the last change; the `layout` command answers with the same shape.
+    #[serde(rename = "layout_changed")]
+    LayoutChanged(LayoutInfo),
+}
+
+/// Every window a client could put something on, and the bond graph between
+/// the classic three (#181). Physical pixels, the app's own convention, so a
+/// client compositing against these never guesses a scale factor.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LayoutInfo {
+    pub windows: Vec<WindowRect>,
+    pub bonds: Vec<BondRect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindowRect {
+    /// `main`, `eq` or `playlist` in the bond group; `library`, `video` or
+    /// `prep` for a decorated window, listed while it exists.
+    pub id: String,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// One of the three classic windows, which bond. A decorated window is
+    /// never in `bonds`.
+    pub group: bool,
+    /// Collapsed to the windowshade strip (D60): `h` is the strip's.
+    pub shaded: bool,
+    /// Shown and not minimised. A window that is not visible keeps its last
+    /// rectangle, which is where it will come back.
+    pub visible: bool,
+}
+
+/// Two classic windows sharing an edge (D16). `edge` is the side of `a` that
+/// `b` sits against; `span` is the shared stretch along it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BondRect {
+    pub a: String,
+    pub b: String,
+    pub edge: String,
+    pub span: [i32; 2],
 }
 
 /// Commands the player is expected to act on, parsed from the wire.
@@ -161,6 +204,9 @@ pub enum Command {
         protocol_version: u32,
     },
     Status,
+    /// Where the windows are now (#181): the `layout_changed` shape, for a
+    /// client that connects after the last change.
+    Layout,
     Play,
     Pause,
     Toggle,
@@ -211,6 +257,7 @@ impl Request {
                 }
             }
             "status" => Command::Status,
+            "layout" => Command::Layout,
             "play" => Command::Play,
             "pause" => Command::Pause,
             "toggle" => Command::Toggle,
@@ -283,8 +330,9 @@ pub fn hello_result(app_version: &str) -> serde_json::Value {
     serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
         "app_version": app_version,
-        // "palette" joins at v0.5 with the skin loader (control-api.md).
-        "capabilities": ["transport", "viz"],
+        // "layout" is #181; "library" (#182) and "palette" (#183) join
+        // as they land, so a client looks for the word, not the version.
+        "capabilities": ["transport", "viz", "layout"],
         "stable": false,
     })
 }
@@ -432,10 +480,67 @@ mod tests {
         assert!(err.contains("\"ok\":false") && !err.contains("result"));
     }
 
+    /// #181: the layout event is flat, as control-api.md draws it: the tag
+    /// beside `windows` and `bonds`, spans as two-element arrays, and the
+    /// command that asks for it now parses.
     #[test]
-    fn hello_advertises_viz_and_is_still_unstable() {
+    fn the_layout_event_is_the_documented_shape() {
+        let e = Event::LayoutChanged(LayoutInfo {
+            windows: vec![
+                WindowRect {
+                    id: "main".into(),
+                    x: 420,
+                    y: 300,
+                    w: 550,
+                    h: 232,
+                    group: true,
+                    shaded: false,
+                    visible: true,
+                },
+                WindowRect {
+                    id: "library".into(),
+                    x: -1200,
+                    y: 80,
+                    w: 916,
+                    h: 659,
+                    group: false,
+                    shaded: false,
+                    visible: false,
+                },
+            ],
+            bonds: vec![BondRect {
+                a: "main".into(),
+                b: "playlist".into(),
+                edge: "bottom".into(),
+                span: [420, 970],
+            }],
+        });
+        let j: serde_json::Value = serde_json::to_value(&e).unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({
+                "event": "layout_changed",
+                "windows": [
+                    {"id":"main","x":420,"y":300,"w":550,"h":232,"group":true,"shaded":false,"visible":true},
+                    {"id":"library","x":-1200,"y":80,"w":916,"h":659,"group":false,"shaded":false,"visible":false}
+                ],
+                "bonds": [{"a":"main","b":"playlist","edge":"bottom","span":[420,970]}]
+            })
+        );
+        assert!(j.get("id").is_none());
+        assert_eq!(
+            req(r#"{"id":4,"cmd":"layout"}"#).parse().unwrap(),
+            Command::Layout
+        );
+    }
+
+    #[test]
+    fn hello_advertises_viz_and_layout_and_is_still_unstable() {
         let h = hello_result("0.4.0");
-        assert_eq!(h["capabilities"], serde_json::json!(["transport", "viz"]));
+        assert_eq!(
+            h["capabilities"],
+            serde_json::json!(["transport", "viz", "layout"])
+        );
         assert_eq!(h["stable"], false);
     }
 

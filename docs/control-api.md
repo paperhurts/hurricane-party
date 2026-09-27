@@ -38,7 +38,7 @@ Why a separate pipe rather than interleaving on one: mixing framed binary with n
 
 Clients check `protocol_version` and refuse to proceed on mismatch. Server rejects unknown major versions rather than guessing.
 
-**As built**, `capabilities` is `["transport", "viz"]`: `library` arrives with `queue_playlist` and `search`, and `palette` with `palette_changed`, each when it is built. A client should look for the capability, not the version, before it relies on either.
+**As built**, `capabilities` is `["transport", "viz", "layout"]`: `library` arrives with `queue_playlist` and `search`, and `palette` with `palette_changed`, each when it is built. A client should look for the capability, not the version, before it relies on either.
 
 ### Transport
 
@@ -51,7 +51,7 @@ Clients check `protocol_version` and refuse to proceed on mismatch. Server rejec
 {"id":6, "cmd":"status"}
 ```
 
-Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `queue_playlist` `search`. **Built:** `hello`, `status`, the transport eight and `subscribe_viz` (`Command` in `crates/hp-control/src/lib.rs`). `queue_playlist` and `search` are not built yet, and today answer as unknown commands.
+Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `layout` `queue_playlist` `search`. **Built:** `hello`, `status`, `layout`, the transport eight and `subscribe_viz` (`Command` in `crates/hp-control/src/lib.rs`). `queue_playlist` and `search` are not built yet, and today answer as unknown commands.
 
 **Video (D69, D70).** One thing plays at a time: starting a video pauses the track, starting a track pauses the video, and nothing resumes. `status` and `now_playing_changed` carry **`kind`**, `"audio"` or `"video"`, and describe whichever last started playing; a pause from the other side does not take the channel back. `play` `pause` `toggle` `stop` `seek` `volume` act on whatever is playing (`stop` on a video is pause-and-rewind; the window stays open on its first frame). `next` and `prev` step the library's list, which walks over videos and tracks alike. Closing the video window hands the channel back to the track: `status` describes the audio side again, paused or stopped, which is what a `play` would resume. `kind` is additive; absent means audio. The Main window's own buttons, seek bar and volume go through the same router as these commands (D81), so what a client sees and what the user sees never disagree.
 
@@ -69,7 +69,7 @@ Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` 
 {"event":"palette_changed", "viscolor":["#000000","#0f0f0f", "…24 entries…"]}
 ```
 
-**Built:** `now_playing_changed` and `state_changed`. `palette_changed` was placed at v0.5 below, and v0.5 shipped without it, although skins and themes now change at runtime (the `.wsz` importer, the skin maker and Purricane all shipped). It has no milestone until someone picks it up; `layout_changed` is v1.0.
+**Built:** `now_playing_changed`, `state_changed` and `layout_changed` (#181). `palette_changed` was placed at v0.5 below, and v0.5 shipped without it, although skins and themes now change at runtime (the `.wsz` importer, the skin maker and Purricane all shipped); it is v1.0 now (#183).
 
 `palette_changed` is the one worth calling out. When you switch skins, the LED wall changes color scheme to match. That's a genuinely nice thing that costs almost nothing to ship, and it's the kind of detail that makes people want to build against your API. The payload is the same 24-entry `viscolor` array the skin manifest defines (`skin-manifest.md`) — one definition, three consumers: analyser, Cone backdrop, and this event.
 
@@ -89,6 +89,17 @@ The viz stream carries no geometry, but the kittens treat the bonded window grou
 It generalizes past cats: any external overlay, LED positioning rig, or second-screen tool wants to know where the windows are. Coordinates are **physical pixels**, matching the internal convention (`CLAUDE.md`) — a client compositing against these must not have to guess a scale factor.
 
 Lands at v1.0 with the protocol freeze, since it's part of the public commitment rather than an early convenience.
+
+**As built (#181, D148).** Each window carries `id`, `x`, `y`, `w`, `h`, and three flags: `group` (one of the three classic windows, which bond), `shaded` (collapsed to the windowshade strip; `h` is the strip's) and `visible` (shown and not minimised, as the OS reports it, not as the app remembers it, D58). The decorated windows are listed too while they exist, so a companion can stand on them: `library`, `video` and `prep`, always `group: false`, never in `bonds`. A window that is not visible keeps its last rectangle. `edge` is the side of `a` that `b` sits against, and the pair is stored so `edge` is always `right` or `bottom`.
+
+A client that connects after the last change asks once:
+
+```jsonc
+→ {"id":7, "cmd":"layout"}
+← {"id":7, "ok":true, "result":{"windows":[…], "bonds":[…]}}
+```
+
+`layout_changed` is sent when anything in that picture changes, a move, a resize, a bond made or broken, a shade, a window shown or hidden, a display coming or going: at most every 50 ms while a drag runs, and always once after the last change, so a client ends on the true layout. Nothing is sent while no client is connected, and an event identical to the last one is not sent again.
 
 ---
 

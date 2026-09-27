@@ -6,6 +6,7 @@ mod egress;
 mod eq_presets;
 mod integrity;
 mod jobs;
+mod layout;
 mod library;
 mod localimport;
 mod pipeline;
@@ -190,6 +191,7 @@ pub(crate) fn show_prep(app: &AppHandle) -> Result<(), String> {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+        layout::ping(app);
         return Ok(());
     }
     tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App("prep.html".into()))
@@ -653,6 +655,7 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+        layout::ping(&app);
         return Ok(());
     }
 
@@ -861,6 +864,8 @@ fn wm_toggle_visible(app: AppHandle, label: String) -> bool {
     };
     let shown = win.is_visible().unwrap_or(false);
     let _ = if shown { win.hide() } else { win.show() };
+    // A hide moves nothing, so no window event says so (#181).
+    layout::ping(&app);
     !shown
 }
 
@@ -1677,6 +1682,19 @@ pub fn run() {
         .manage(video::OpenLock::default())
         .manage(skins::TemplateDir::default())
         .manage(radar::Wake::default())
+        // Any window that moves, resizes or closes may change what the pipe's
+        // `layout_changed` says (#181). A ping only: this runs on the UI
+        // thread, and the looking happens on the layout thread.
+        .on_window_event(|window, event| {
+            if matches!(
+                event,
+                tauri::WindowEvent::Moved(_)
+                    | tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::Destroyed
+            ) {
+                layout::ping(window.app_handle());
+            }
+        })
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this
             // process computes after this line depends on the answer, so there
@@ -1720,6 +1738,8 @@ pub fn run() {
             jobs::spawn_runner(handle.clone());
             // The roots, watched while the app runs (#111, D137).
             watch::spawn(handle.clone());
+            // Where the windows are, told to the pipe (#181).
+            layout::spawn(&handle);
 
             // Undocumented and unstable until v1.0 (control-api.md). Shipping
             // it now proves the pipe while nothing external depends on it.
