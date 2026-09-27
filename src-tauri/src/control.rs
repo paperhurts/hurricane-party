@@ -380,9 +380,6 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
     });
 }
 
-/// The webview reporting what it's actually doing. Also the point where
-/// unsolicited events are derived — by diffing against the previous mirror,
-/// so a client isn't spammed with a state_changed on every position tick.
 /// Main's ramp, checked against what the pipe promises (`hp_control::ramp`)
 /// and told to clients only when it changed (#183). The lock is let go
 /// before anything is sent.
@@ -401,6 +398,9 @@ pub fn update_palette(app: &AppHandle, viscolor: &[String]) -> Result<(), String
     Ok(())
 }
 
+/// The webview reporting what it's actually doing. Also the point where
+/// unsolicited events are derived — by diffing against the previous mirror,
+/// so a client isn't spammed with a state_changed on every position tick.
 pub fn update_state(app: &AppHandle, incoming: PlayerState) {
     let video = incoming.kind == "video";
     apply(app, |m| {
