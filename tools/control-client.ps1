@@ -13,7 +13,8 @@
       tools\control-client.ps1 toggle
       tools\control-client.ps1 seek 42.5
       tools\control-client.ps1 volume 0.4
-      tools\control-client.ps1 listen          # watch unsolicited events
+      tools\control-client.ps1 layout          # where the windows are (#181)
+      tools\control-client.ps1 listen          # watch unsolicited events, layout_changed among them
 #>
 param([string]$Cmd = "status", [double]$Arg)
 

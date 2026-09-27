@@ -996,6 +996,10 @@ pub fn emit_state(app: &AppHandle) {
     for (id, h) in all {
         let _ = app.emit_to(label_of(id), "wm:state", h);
     }
+    // Every gesture that ends comes through here: a bond made or broken, a
+    // shade, the zoom. The pipe hears it too (#181); a move or resize alone is
+    // heard from the OS's own window events.
+    crate::layout::ping(app);
 }
 
 /// D30: quantise a seam position so the resizable neighbour lands on a legal
@@ -2097,7 +2101,7 @@ fn monitor_id_of(r: Rect, monitors: &[MonitorInfo]) -> Option<String> {
         .map(|m| format!("{},{},{}x{}", m.rect.x, m.rect.y, m.rect.w, m.rect.h))
 }
 
-fn edge_name(e: Edge) -> &'static str {
+pub(crate) fn edge_name(e: Edge) -> &'static str {
     match e {
         Edge::Right => "right",
         Edge::Bottom => "bottom",
