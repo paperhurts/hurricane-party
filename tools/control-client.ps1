@@ -14,9 +14,13 @@
       tools\control-client.ps1 seek 42.5
       tools\control-client.ps1 volume 0.4
       tools\control-client.ps1 layout          # where the windows are (#181)
+      tools\control-client.ps1 playlists       # every playlist, with its id (#182)
+      tools\control-client.ps1 search "the cure"
+      tools\control-client.ps1 queue_playlist 12
+      tools\control-client.ps1 play 89         # one track, by an id from search
       tools\control-client.ps1 listen          # watch unsolicited events, layout_changed among them
 #>
-param([string]$Cmd = "status", [double]$Arg)
+param([string]$Cmd = "status", [string]$Arg)
 
 $ErrorActionPreference = "Stop"
 $pipe = New-Object System.IO.Pipes.NamedPipeClientStream(".", "hurricane-party", [System.IO.Pipes.PipeDirection]::InOut)
@@ -52,8 +56,11 @@ if ($Cmd -eq "listen") {
 
 $req = @{ id = 1; cmd = $Cmd }
 if ($PSBoundParameters.ContainsKey('Arg')) {
-    if ($Cmd -eq "seek")   { $req.pos_s = $Arg }
-    if ($Cmd -eq "volume") { $req.level = $Arg }
+    if ($Cmd -eq "seek")   { $req.pos_s = [double]$Arg }
+    if ($Cmd -eq "volume") { $req.level = [double]$Arg }
+    if ($Cmd -eq "search") { $req.q = $Arg }
+    if ($Cmd -eq "queue_playlist") { $req.playlist_id = [int64]$Arg }
+    if ($Cmd -eq "play")   { $req.media_id = [int64]$Arg }
 }
 Write-Host "-> $($req | ConvertTo-Json -Compress)" -ForegroundColor DarkGray
 Write-Host "<- $(Send $req)" -ForegroundColor Green

@@ -98,6 +98,51 @@ fn candidates(conn: &Connection) -> Result<Vec<smart::Candidate>, DbError> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// The roots whose drive is out (D143). A question for the disk, asked once
+/// per root rather than once per track.
+fn absent_roots(conn: &Connection) -> Result<std::collections::HashSet<i64>, DbError> {
+    Ok(crate::localimport::list_roots(conn)?
+        .into_iter()
+        .filter(|r| !r.present)
+        .map(|r| r.id)
+        .collect())
+}
+
+/// The pipe's `search` (#182): tracks whose title or artist hold every word,
+/// matched as the library's search box matches (`smart::words_match`), newest
+/// first, leaving out any on a drive that is out (D143). How many matched,
+/// and at most `limit` of them.
+pub fn search(conn: &Connection, q: &str, limit: usize) -> Result<(usize, Vec<MediaRow>), DbError> {
+    let absent = absent_roots(conn)?;
+    let terms = smart::terms(q);
+    let hits: Vec<MediaRow> = list_media(conn)?
+        .into_iter()
+        .filter(|t| !absent.contains(&t.root_id))
+        .filter(|t| smart::words_match(&terms, &t.title, t.uploader.as_deref()))
+        .collect();
+    let total = hits.len();
+    Ok((total, hits.into_iter().take(limit).collect()))
+}
+
+/// What `queue_playlist` would start (#182): the list's name and how many of
+/// its tracks can play now. `None` when there is no such list.
+pub fn playable(conn: &Connection, id: i64) -> Result<Option<(String, usize)>, DbError> {
+    let name: Option<String> = conn
+        .query_row("SELECT name FROM playlists WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let absent = absent_roots(conn)?;
+    let n = items(conn, id)?
+        .iter()
+        .filter(|t| !absent.contains(&t.root_id))
+        .count();
+    Ok(Some((name, n)))
+}
+
 /// A smart list's rule, `None` for a list made by hand. A rule that does not
 /// read is an error that says why, not an empty list pretending all is well.
 fn rule_of(conn: &Connection, id: i64) -> Result<Option<smart::Rule>, DbError> {
@@ -159,13 +204,7 @@ pub fn set_rule(conn: &Connection, id: i64, rule: &smart::Rule) -> Result<(), Db
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Playlist>, DbError> {
-    // Which roots are not there is a question for the disk, asked once per
-    // root rather than once per track.
-    let absent: std::collections::HashSet<i64> = crate::localimport::list_roots(conn)?
-        .into_iter()
-        .filter(|r| !r.present)
-        .map(|r| r.id)
-        .collect();
+    let absent = absent_roots(conn)?;
     let mut st = conn.prepare(
         "SELECT i.playlist_id, m.root_id, COUNT(*) FROM playlist_items i
          JOIN media m ON m.id = i.media_id GROUP BY i.playlist_id, m.root_id",
@@ -671,6 +710,57 @@ mod tests {
         let (conn, pid) = fixture(3);
         assert_eq!(titles(&conn, pid), ["track 0", "track 1", "track 2"]);
         assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2]);
+    }
+
+    /// #182: the pipe's search matches as the search box does, leaves out a
+    /// track on a drive that is out, caps what it returns and says how many
+    /// matched; and a playlist says how much of it could play now.
+    #[test]
+    fn the_pipe_searches_like_the_search_box_and_skips_a_drive_that_is_out() {
+        let (conn, _) = fixture(0);
+        let here = std::env::temp_dir().to_string_lossy().to_string();
+        conn.execute(
+            "INSERT INTO library_roots (id, label, path) VALUES (2, 'here', ?1),
+                    (3, 'stick', 'Q:\\definitely\\not\\plugged\\in')",
+            [here],
+        )
+        .unwrap();
+        let add_track = |root: i64, title: &str, by: &str, at: i64| {
+            conn.execute(
+                "INSERT INTO media (root_id, relpath, kind, title, uploader, added_at)
+                 VALUES (?1, ?2, 'audio', ?2, ?3, ?4)",
+                params![root, title, by, at],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let beach = add_track(2, "Beach", "Ian Stocker", 1);
+        let port = add_track(2, "At Port", "Ian Stocker", 2);
+        add_track(3, "Swamp", "Ian Stocker", 3);
+        add_track(2, "Déjà Vu", "Beyoncé", 4);
+
+        let (total, hits) = search(&conn, "STOCKER", 50).unwrap();
+        assert_eq!(total, 2, "Swamp is on the stick, which is out");
+        let ids: Vec<i64> = hits.iter().map(|t| t.id).collect();
+        assert_eq!(ids, [port, beach], "newest first");
+        let (total, hits) = search(&conn, "beyonce deja", 50).unwrap();
+        assert_eq!((total, hits.len()), (1, 1));
+        let (total, hits) = search(&conn, "stocker", 1).unwrap();
+        assert_eq!((total, hits.len()), (2, 1), "capped, with the total");
+
+        let list = create(&conn, "Road Tripping").unwrap();
+        add(&conn, list, beach).unwrap();
+        let swamp: i64 = conn
+            .query_row("SELECT id FROM media WHERE title = 'Swamp'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        add(&conn, list, swamp).unwrap();
+        assert_eq!(
+            playable(&conn, list).unwrap(),
+            Some(("Road Tripping".to_string(), 1))
+        );
+        assert_eq!(playable(&conn, 999).unwrap(), None);
     }
 
     /// #114: a checked selection goes in at the end, in the order given, a
