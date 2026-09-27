@@ -14,7 +14,7 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SW_SHOWNOACTIVATE,
+    SWP_NOSIZE, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE,
 };
 
 mod tree;
@@ -323,6 +323,15 @@ impl WindowPlatform for Win32Platform {
         // SAFETY: see D54 — caller must not hold the state lock.
         unsafe {
             let _ = ShowWindow(hwnd(w), SW_SHOWNOACTIVATE);
+        }
+    }
+
+    fn show_minimized_no_activate(&self, w: NativeWindow) {
+        // SW_SHOWMINNOACTIVE: shown straight into the taskbar, and the window
+        // that had focus keeps it (#191).
+        // SAFETY: see D54 — caller must not hold the state lock.
+        unsafe {
+            let _ = ShowWindow(hwnd(w), SW_SHOWMINNOACTIVE);
         }
     }
 }

@@ -1468,27 +1468,42 @@ pub fn focus_group(app: &AppHandle, focused: Option<WindowId>) {
 /// Bring a window's whole group to the front of our own stack without taking
 /// focus. The library asked Main to play something and the user wants to see
 /// it happen, but they are still working in the library, so activating Main
-/// would be rude. Restores a minimized member first, because `set_focus`
-/// never does (#39, D59). Leaves `focused` alone: the chrome should render
-/// active only where the OS focus actually is.
+/// would be rude. Leaves `focused` alone: the chrome should render active
+/// only where the OS focus actually is.
+///
+/// **Never out of the taskbar** (#191, D152). It used to restore a minimised
+/// member first, and Main called it on every track it loaded, so a group the
+/// person had minimised came back up with every new song. Now a group that is
+/// down, by Main's minimise (D86) or any other way, stays down: nothing is
+/// raised, and the music plays on.
 pub fn raise_group(app: &AppHandle, id: WindowId) {
-    let (plan, handles) = {
+    let (plan, handles, down) = {
         let state = app.state::<Wm>();
         let s = state.0.lock().unwrap();
         let comp = s.graph.component(id);
         (
             plan_ownership(&s, Some(id)),
             comp.iter().map(|w| s.handle(*w)).collect::<Vec<_>>(),
+            s.minimized,
         )
     }; // D54: the lock is gone before any Win32 call.
     let p = platform::platform();
-    for w in handles
-        .iter()
-        .filter(|w| !w.is_none() && p.is_minimized(**w))
-    {
-        p.restore_no_activate(*w);
+    if down || handles.iter().any(|w| !w.is_none() && p.is_minimized(*w)) {
+        return;
     }
     apply_ownership(&plan);
+}
+
+/// Whether the person has the player down in the taskbar (#191): Main's
+/// minimise (D86), or Main minimised any other way (its own taskbar button,
+/// Win+D). A video that comes up in the queue then goes to the taskbar too.
+pub fn player_down(app: &AppHandle) -> bool {
+    let (flag, main) = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        (s.minimized, s.handle(MAIN))
+    }; // D54: the lock is gone before the OS is asked.
+    flag || (!main.is_none() && platform::platform().is_minimized(main))
 }
 
 // ---- minimise (#86) ---------------------------------------------------------

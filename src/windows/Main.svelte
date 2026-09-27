@@ -28,6 +28,8 @@
     duration_s: number | null;
     path: string;
     kind: string;
+    /** The person pressed play on this row: Main may come forward (#191). */
+    raise?: boolean;
   };
 
   let audio: HTMLAudioElement;
@@ -168,8 +170,11 @@
     stopped = false;
     pos = 0;
     dur = t.duration_s ?? 0;
-    // Come forward so the user sees it start, without taking their focus.
-    invoke("wm_raise", { label: "main" }).catch(() => {});
+    // Come forward so the person sees it start, without taking their focus,
+    // but only when they pressed play on that row. A track ending into the
+    // next, Next, the tray and the pipe leave the windows where they are,
+    // and a minimised group stays minimised whatever asked (#191, D152).
+    if (t.raise) invoke("wm_raise", { label: "main" }).catch(() => {});
     ensureGraph();
     audio.src = convertFileSrc(t.path);
     // One transport (D69): starting a track pauses a video that is playing.

@@ -593,7 +593,9 @@ fn report_palette(app: AppHandle, viscolor: Vec<String>) -> Result<(), String> {
 /// pipe (D81): whatever is playing gets the command.
 #[tauri::command]
 fn transport(app: AppHandle, cmd: String, arg: Option<f64>) -> Result<(), String> {
-    control::route(&app, &cmd, arg)
+    // A press in Main or its mini-player: the person is here, so a video it
+    // resumes may come up (#191).
+    control::route(&app, &cmd, arg, true)
 }
 
 /// What the channel says is playing, for Main's display on mount (D81);
@@ -630,8 +632,13 @@ fn viz_demand(app: AppHandle) -> viz::Demand {
 /// the frontend stays plain Vite; v0.4 adds eq.html and playlist.html the same
 /// way.
 #[tauri::command]
-async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
+async fn open_video(app: AppHandle, id: i64, raise: Option<bool>) -> Result<(), String> {
     const LABEL: &str = "video";
+    // #191, D152: `raise` is true only when the person pressed play on that
+    // video's row. Then the window comes up, out of the taskbar if it is
+    // there, without taking focus. Anything automatic, a track ending into a
+    // video, Next, the pipe, leaves it where it is.
+    let raise = raise.unwrap_or(false);
 
     // Serialized, ack wait included: see `video::OpenLock` for the gap this
     // closes. Held to the end of the function on every path.
@@ -656,13 +663,11 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         // Measured so the hand test can judge ACK_TIMEOUT's margin.
         eprintln!("video: switch to {id} acked in {:?}", started.elapsed());
-        // Restored first: `set_focus` raises and activates but never unminimizes
-        // (#39, D59), so a switch into a minimized window succeeded invisibly.
-        // All three best-effort: failing to raise the window is not failing to
-        // switch the track (D67).
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
+        // Best-effort: failing to raise the window is not failing to switch
+        // the track (D67).
+        if raise {
+            video_forward(&w);
+        }
         layout::ping(&app);
         return Ok(());
     }
@@ -672,6 +677,7 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     // window would take the branch above and lose its event (D67). Register,
     // build, then wait for the page to say it is up and listening; only then
     // does the lock release and let the next click through.
+    let quiet = !raise && wm::player_down(&app);
     let pending = app.state::<video::SwitchAcks>().expect(id);
     let started = std::time::Instant::now();
     let window = tauri::WebviewWindowBuilder::new(
@@ -684,8 +690,18 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     .min_inner_size(320.0, 200.0)
     .resizable(true)
     .decorations(true)
+    // Never takes the keyboard (#191). While the person has the player down
+    // in the taskbar and did not ask for this video, it is built hidden and
+    // then shown straight into the taskbar beside it.
+    .focused(false)
+    .visible(!quiet)
     .build()
     .map_err(|e| e.to_string())?;
+    if quiet {
+        platform::platform().show_minimized_no_activate(platform::handle_of(&window));
+    } else if raise {
+        video_forward(&window);
+    }
     // The window reports its own playback while it lives (D70); when the user
     // closes it, nothing is left to report, so Rust says so on its behalf.
     let gone = app.clone();
@@ -701,6 +717,22 @@ async fn open_video(app: AppHandle, id: i64) -> Result<(), String> {
     // Measured so the hand test can judge MOUNT_TIMEOUT's margin.
     eprintln!("video: window up on {id} in {:?}", started.elapsed());
     Ok(())
+}
+
+/// Bring the video window up for a person's own press (#191, D152): out of
+/// the taskbar if it is there, and to the front of this app's windows,
+/// without taking the keyboard from wherever the person clicked. Called only
+/// for a play they pressed; nothing automatic calls it.
+pub(crate) fn video_forward(w: &tauri::WebviewWindow) {
+    let h = platform::handle_of(w);
+    if h.is_none() {
+        return;
+    }
+    let p = platform::platform();
+    if p.is_minimized(h) {
+        p.restore_no_activate(h);
+    }
+    p.raise_no_activate(h);
 }
 
 /// The video window confirming it has switched to `id` (D68). Completes the

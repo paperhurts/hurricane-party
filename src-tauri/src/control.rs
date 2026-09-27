@@ -282,7 +282,8 @@ fn handle(
                 Command::Volume(v) => ("volume", Some(v)),
                 _ => unreachable!("handled above"),
             };
-            match route(app, name, arg) {
+            // From the pipe: another program, which never raises a window (#191).
+            match route(app, name, arg, false) {
                 Ok(()) => Response::ok(req.id, serde_json::json!({ "accepted": name })),
                 Err(e) => Response::err(req.id, e),
             }
@@ -298,9 +299,12 @@ fn handle(
 /// videos and tracks alike, so they work from either. Targeted, not
 /// broadcast, or both windows would obey and D69's one transport becomes two.
 ///
-/// One router for two callers: the pipe, and Main's own buttons (D81), so a
-/// press in Main and a `pause` over the pipe do exactly the same thing.
-pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>) -> Result<(), String> {
+/// One router for three callers: the pipe, the tray, and Main's own buttons
+/// (D81), so a press in Main and a `pause` over the pipe do exactly the same
+/// thing to the transport. `raise` is the one difference (#191, D152): true
+/// only for a press in Main or its mini-player, which may bring a resumed
+/// video up; the pipe and the tray never raise a window.
+pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>, raise: bool) -> Result<(), String> {
     let needs_arg = matches!(cmd, "seek" | "volume");
     match cmd {
         "play" | "pause" | "toggle" | "stop" | "next" | "prev" | "seek" | "volume" => {}
@@ -326,16 +330,14 @@ pub fn route(app: &AppHandle, cmd: &str, arg: Option<f64>) -> Result<(), String>
         serde_json::json!({ "cmd": cmd, "arg": arg }),
     )
     .map_err(|e| e.to_string())?;
-    // A resume brings the video forward, as a switch does (`open_video`): the
-    // user pressed play to watch it, and it may have gone behind something
-    // while it sat paused. Only when the command would start it, so a toggle
-    // that pauses does not pull a window forward on its way to stopping.
-    // Restored first, as in `open_video`: `set_focus` does not unminimize (#39).
-    if to_video && (cmd == "play" || (cmd == "toggle" && video_paused)) {
+    // A resume the person pressed brings the video up, as their press on a
+    // video row does (`open_video`): it may have gone behind something while
+    // it sat paused. Only when the command would start it, so a toggle that
+    // pauses does not pull a window forward on its way to stopping; never
+    // with focus, and never for the pipe or the tray (#191).
+    if raise && to_video && (cmd == "play" || (cmd == "toggle" && video_paused)) {
         if let Some(w) = app.get_webview_window("video") {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
+            crate::video_forward(&w);
         }
         crate::layout::ping(app);
     }

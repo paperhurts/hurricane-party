@@ -103,6 +103,12 @@ pub trait WindowPlatform: Send + Sync {
     /// undecorated by design, so the constraint is permanent.
     fn restore_no_activate(&self, w: NativeWindow);
 
+    /// #191: show a window that has never been shown, minimised and without
+    /// focus: into the taskbar and nowhere else. A video that comes up in the
+    /// queue while the person has the player minimised gets its window this
+    /// way, so nothing pops up in front of what they are doing.
+    fn show_minimized_no_activate(&self, w: NativeWindow);
+
     /// D117: end a process **and every process it started**.
     ///
     /// The one call here that is not about a window, and it is here for the
