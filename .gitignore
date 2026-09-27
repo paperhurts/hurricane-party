@@ -39,3 +39,6 @@ src-tauri/binaries/
 # settings.local.json holds per-machine choices (which plugins this checkout
 # has enabled) and would fight between machines if it were tracked.
 .claude/settings.local.json
+
+# The Python example (examples/viz_bars.py) compiles itself on first run.
+__pycache__/
