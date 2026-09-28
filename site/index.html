@@ -146,10 +146,14 @@
   footer img { width: 220px; }
 
   @media (max-width: 760px) {
-    header.hero, .two, .windows, .purr, .shade, .tinker, .faq, footer.wrap { grid-template-columns: 1fr; }
+    /* minmax(0, …), not 1fr: a 1fr track never shrinks below its widest
+       content, so the 550 px shots pushed the whole page sideways instead
+       of scrolling inside their own boxes. */
+    header.hero, .two, .windows, .purr, .shade, .tinker, .faq, footer.wrap { grid-template-columns: minmax(0, 1fr); }
     .hero img, .tinker img, footer img { justify-self: start; }
     .wrap { padding: 40px 20px; }
     nav { padding: 18px 20px; }
+    .links { flex-wrap: wrap; gap: 12px 20px; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .button { transition: background 120ms linear, box-shadow 120ms linear; }
