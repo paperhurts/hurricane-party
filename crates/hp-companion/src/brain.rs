@@ -1,7 +1,8 @@
 //! What he does, moment to moment. Pure: time, the ledges, the window he is
-//! standing on, whether music is playing and whether a beat just landed go in;
-//! his feet, his facing and his state come out. The pack turns that into a
-//! frame (`pose`). The seven states are the app's, fixed (`purricane.md`).
+//! standing on and what the OS says about it, whether music is playing and
+//! whether a beat just landed go in; his feet, his facing and his state come
+//! out. The pack turns that into a frame (`pose`). The seven states are the
+//! app's, fixed (`purricane.md`).
 //!
 //! - **idle** by default, with a walk now and then to somewhere else on the
 //!   ledge he is on, across a seam if two windows sit side by side.
@@ -11,9 +12,14 @@
 //! - **startle**: when the window under him moves, shades, hides or goes, or
 //!   the stretch he stands on stops being a ledge, he jumps and falls to the
 //!   next ledge below, the floor above the taskbar at the bottom of it all.
+//!   When another window is in front of his, where his feet are, he is
+//!   standing on nothing: he jumps and falls straight to the floor (D166).
 //! - **pet**: a click on him. He leans into it for a moment, awake again.
 //! - **carry**: a drag. He hangs from the hand by his scruff, kicking, and
 //!   when he is let go he falls to the ledge below where he was dropped.
+//!
+//! When the window he stands on is minimised, he is minimised with it: not
+//! drawn, and back where he stood when it is restored (D166).
 //!
 //! A jolt or a pet wakes him and starts the quiet over, so he does not doze
 //! off again the moment he lands.
@@ -46,17 +52,27 @@ pub const DRAG_PX: i32 = 4;
 /// Carried, the hand holds him this far (1x pixels) below the top of his
 /// sprite: the scruff, where the carry frames stretch his jacket up to.
 pub const SCRUFF: f32 = 4.0;
+/// Something in front of his window where his feet are, for this long, and he
+/// is standing on nothing (D166). Long enough for a window dragged across him.
+pub const COVERED_FOR: f32 = 0.4;
+/// How far into his window's top (physical pixels) the OS is asked what is
+/// there: under his feet, and clear of his own sprite, which ends at them.
+pub const UNDERFOOT: i32 = 2;
 
+/// `Air` with `floor` falls straight to the floor, past every window's top.
+/// `Minimised`: his window is, and so is he, not drawn, `along` its top from
+/// its left edge, which is where he comes back when it does (D166).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Mode {
     Idle { until: f32 },
     Walk { to: f32 },
     Dance,
     Sleep,
-    Air { vy: f32 },
+    Air { vy: f32, floor: bool },
     Landing { until: f32 },
     Pet { until: f32 },
     Carry,
+    Minimised { along: i32 },
 }
 
 /// The pointer on him, in screen pixels. His window turns its mouse messages
@@ -95,6 +111,27 @@ impl Under {
     }
 }
 
+/// The player's window he stands on or is minimised with, for the OS to look
+/// at (`Brain::perch`): its id and rectangle from the layout, and the point
+/// just under his feet on it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spot<'a> {
+    pub id: &'a str,
+    pub rect: (i32, i32, i32, i32),
+    pub at: (i32, i32),
+}
+
+/// What the OS says about that window, which the layout cannot: it has no
+/// z-order, and a minimised window is `visible: false` there just as a hidden
+/// one is (D148). Both false when there is no such window, or it cannot be
+/// found, and then he behaves as he did before D166.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Seen {
+    /// Another window is in front of it at the spot under his feet.
+    pub covered: bool,
+    pub minimised: bool,
+}
+
 /// What the world looks like this tick.
 pub struct World<'a> {
     pub layout: &'a LayoutInfo,
@@ -106,6 +143,8 @@ pub struct World<'a> {
     pub zoom: f32,
     /// The pack's walking speed at 1x.
     pub walk_px_per_sec: f32,
+    /// What the OS says about the window he is on, as `perch` asked it.
+    pub seen: Seen,
 }
 
 pub struct Brain {
@@ -122,6 +161,8 @@ pub struct Brain {
     under: Option<Under>,
     placed: bool,
     grab: Option<Grab>,
+    /// When the OS first said something was in front of his window.
+    covered_since: Option<f32>,
     rng: u64,
 }
 
@@ -148,6 +189,7 @@ impl Brain {
             under: None,
             placed: false,
             grab: None,
+            covered_since: None,
             rng: seed | 1,
         }
     }
@@ -157,12 +199,14 @@ impl Brain {
         self.placed = false;
         self.under = None;
         self.grab = None;
+        self.covered_since = None;
+        self.set(Mode::Idle { until: 0.0 });
     }
 
     /// The pointer, as his window heard it. `hang` is how far below the hand
     /// his feet are while he is carried, in screen pixels.
     pub fn hand(&mut self, h: Hand, hang: f32) {
-        if !self.placed {
+        if !self.is_shown() {
             return;
         }
         match h {
@@ -188,7 +232,10 @@ impl Brain {
                 }
             }
             Hand::Up(..) => match self.grab.take() {
-                Some(Grab { carrying: true, .. }) => self.set(Mode::Air { vy: 0.0 }),
+                Some(Grab { carrying: true, .. }) => self.set(Mode::Air {
+                    vy: 0.0,
+                    floor: false,
+                }),
                 Some(_) if !matches!(self.mode, Mode::Air { .. }) => {
                     self.wake();
                     self.set(Mode::Pet {
@@ -199,7 +246,10 @@ impl Brain {
             },
             Hand::Cancel => {
                 if let Some(Grab { carrying: true, .. }) = self.grab.take() {
-                    self.set(Mode::Air { vy: 0.0 });
+                    self.set(Mode::Air {
+                        vy: 0.0,
+                        floor: false,
+                    });
                 }
             }
         }
@@ -216,6 +266,23 @@ impl Brain {
         self.placed
     }
 
+    /// Placed, and not minimised with his window: drawn, and there to touch.
+    pub fn is_shown(&self) -> bool {
+        self.placed && !matches!(self.mode, Mode::Minimised { .. })
+    }
+
+    /// The player's window to ask the OS about: the one he stands on, or is
+    /// minimised with. `None` on a floor, in the air and in the hand.
+    pub fn perch(&self) -> Option<Spot<'_>> {
+        let u = self.under.as_ref().filter(|_| self.placed)?;
+        let (x, y) = self.feet();
+        Some(Spot {
+            id: &u.id,
+            rect: u.rect,
+            at: (x, y + UNDERFOOT),
+        })
+    }
+
     #[cfg(test)]
     pub fn state(&self) -> &'static str {
         match self.mode {
@@ -226,6 +293,7 @@ impl Brain {
             Mode::Air { .. } | Mode::Landing { .. } => "startle",
             Mode::Pet { .. } => "pet",
             Mode::Carry => "carry",
+            Mode::Minimised { .. } => "minimised",
         }
     }
 
@@ -245,6 +313,26 @@ impl Brain {
             self.quiet_since = Some(self.clock);
         }
 
+        // His window minimised under him: so is he, until it is back.
+        if w.seen.minimised && self.is_shown() {
+            if let Some(u) = &self.under {
+                let along = self.feet().0 - u.rect.0;
+                self.grab = None;
+                self.covered_since = None;
+                self.set(Mode::Minimised { along });
+            }
+        }
+        if let Mode::Minimised { along } = self.mode {
+            if !self.back(along, w) {
+                return;
+            }
+        }
+        // None of the player's windows showing: he goes with them (D154).
+        if perch::shown(w.layout).next().is_none() {
+            self.leave();
+            return;
+        }
+
         if !self.placed {
             let Some((x, y)) = perch::spawn(w.layout, w.ledges) else {
                 return;
@@ -258,14 +346,20 @@ impl Brain {
 
         let grounded = !matches!(self.mode, Mode::Air { .. } | Mode::Carry);
         if grounded && self.ground_gone(w) {
-            self.set(Mode::Air { vy: -HOP * w.zoom });
-            self.under = None;
-            self.wake();
+            self.startle(w, false);
+        } else if grounded && self.under.is_some() && w.seen.covered {
+            // Another window in front of his: he is standing on nothing.
+            let since = *self.covered_since.get_or_insert(self.clock);
+            if self.clock - since >= COVERED_FOR {
+                self.startle(w, true);
+            }
+        } else {
+            self.covered_since = None;
         }
 
         match self.mode {
-            Mode::Air { vy } => self.fall(dt, vy, w),
-            Mode::Carry => {}
+            Mode::Air { vy, floor } => self.fall(dt, vy, floor, w),
+            Mode::Carry | Mode::Minimised { .. } => {}
             Mode::Landing { until } | Mode::Pet { until } => {
                 if self.clock >= until {
                     let rest = self.rest();
@@ -317,7 +411,10 @@ impl Brain {
                 let d = &pack.state("dance").frames;
                 ("dance", d[self.beats as usize % d.len()])
             }
-            Mode::Dance | Mode::Idle { .. } => ("idle", timed(pack, "idle", self.clock)),
+            // Minimised he is not drawn; idle is a frame every pack has.
+            Mode::Dance | Mode::Idle { .. } | Mode::Minimised { .. } => {
+                ("idle", timed(pack, "idle", self.clock))
+            }
             Mode::Walk { .. } => ("walk", timed(pack, "walk", self.clock - self.since)),
             Mode::Sleep => ("sleep", timed(pack, "sleep", self.clock)),
         };
@@ -374,6 +471,59 @@ impl Brain {
         }
     }
 
+    /// A jolt: he hops and falls, to the first ledge his feet pass, or with
+    /// `floor` straight to the floor.
+    fn startle(&mut self, w: &World, floor: bool) {
+        self.set(Mode::Air {
+            vy: -HOP * w.zoom,
+            floor,
+        });
+        self.under = None;
+        self.covered_since = None;
+        self.wake();
+    }
+
+    /// Minimised with his window: whether that is over, with him back where
+    /// he stood on it, or gone with it to appear afresh. The layout is up to
+    /// 50 ms behind the OS, so he waits until both say the window is up.
+    fn back(&mut self, along: i32, w: &World) -> bool {
+        if w.seen.minimised {
+            return false;
+        }
+        let Some(id) = self.under.as_ref().map(|u| u.id.clone()) else {
+            self.leave();
+            return true;
+        };
+        let Some(win) = w.layout.windows.iter().find(|win| win.id == id) else {
+            self.leave();
+            return true;
+        };
+        if !perch::shown(w.layout).any(|s| s.id == id) {
+            return false;
+        }
+        // As far along its top as before, within its width if that changed,
+        // on the stretch of it that is a ledge nearest there.
+        let want = win.x + along.clamp(0, win.w - 1);
+        let x = w
+            .ledges
+            .iter()
+            .filter(|l| l.y == win.y && l.on.contains(&id))
+            .map(|l| (l.x0.max(win.x), l.x1.min(win.x + win.w) - 1))
+            .filter(|(lo, hi)| lo <= hi)
+            .map(|(lo, hi)| want.clamp(lo, hi))
+            .min_by_key(|x| (x - want).abs());
+        let Some(x) = x else {
+            // No room on it any more (something bonded on top, say).
+            self.leave();
+            return true;
+        };
+        self.feet = (x as f32, win.y as f32);
+        self.under = self.window_under(w);
+        let rest = self.rest();
+        self.set(Mode::Idle { until: rest });
+        true
+    }
+
     fn start_walk(&mut self, w: &World) {
         let Some(l) = self.ledge(w) else { return };
         let (x0, x1) = (l.x0 as f32, (l.x1 - 1) as f32);
@@ -393,7 +543,7 @@ impl Brain {
         self.set(Mode::Walk { to });
     }
 
-    fn fall(&mut self, dt: f32, vy: f32, w: &World) {
+    fn fall(&mut self, dt: f32, vy: f32, floor: bool, w: &World) {
         let vy = vy + GRAVITY * w.zoom * dt;
         let (x, y0) = (self.feet.0.round() as i32, self.feet.1);
         let y1 = y0 + vy * dt;
@@ -402,6 +552,7 @@ impl Brain {
             let land = w
                 .ledges
                 .iter()
+                .filter(|l| !floor || l.is_floor())
                 .filter(|l| l.holds(x) && (l.y as f32) >= y0 && (l.y as f32) <= y1)
                 .min_by_key(|l| l.y);
             if let Some(l) = land {
@@ -413,7 +564,10 @@ impl Brain {
                 return;
             }
             // Past the lowest floor, or beside every floor: onto the nearest one.
-            let below = w.ledges.iter().any(|l| l.holds(x) && l.y as f32 > y1);
+            let below = w
+                .ledges
+                .iter()
+                .any(|l| (!floor || l.is_floor()) && l.holds(x) && l.y as f32 > y1);
             if !below {
                 if let Some(f) = perch::floor_under(w.ledges, x) {
                     self.feet = (x.clamp(f.x0, f.x1 - 1) as f32, f.y as f32);
@@ -426,7 +580,7 @@ impl Brain {
             }
         }
         self.feet.1 = y1;
-        self.mode = Mode::Air { vy };
+        self.mode = Mode::Air { vy, floor };
     }
 }
 
@@ -465,6 +619,8 @@ mod tests {
         layout: LayoutInfo,
         work: Vec<Rect>,
         playing: bool,
+        /// What the OS says about his window, as the platform would.
+        seen: Seen,
     }
 
     impl Sim {
@@ -474,6 +630,7 @@ mod tests {
                 layout,
                 work: vec![SCREEN],
                 playing: false,
+                seen: Seen::default(),
             }
         }
 
@@ -497,6 +654,7 @@ mod tests {
                     beat,
                     zoom: 1.0,
                     walk_px_per_sec: 24.0,
+                    seen: self.seen,
                 };
                 self.brain.step(dt, &w);
                 t += dt;
@@ -644,7 +802,9 @@ mod tests {
     }
 
     #[test]
-    fn a_minimised_window_drops_him_onto_the_next_ledge_down() {
+    fn a_hidden_window_drops_him_onto_the_next_ledge_down() {
+        // The EQ switched off, the library to the tray: hidden, not
+        // minimised, which only the OS can tell apart (D166).
         let lower = win("library", 400, 700, 600, 300);
         let mut s = Sim::new(layout(vec![win("main", 500, 400, 275, 116), lower.clone()]));
         s.run(0.1, None);
@@ -653,6 +813,195 @@ mod tests {
         s.layout = layout(vec![main, lower]);
         s.run(2.0, None);
         assert_eq!(s.brain.feet().1, 700, "onto the library's top");
+    }
+
+    /// Main at (500, 400) and the library below it, whose top he falls past
+    /// on the way to the floor.
+    fn main_over_the_library() -> LayoutInfo {
+        layout(vec![
+            win("main", 500, 400, 275, 116),
+            win("library", 400, 700, 600, 300),
+        ])
+    }
+
+    #[test]
+    fn the_os_is_asked_about_the_spot_just_under_his_feet() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        let spot = s.brain.perch().expect("on Main");
+        assert_eq!(spot.id, "main");
+        assert_eq!(spot.rect, (500, 400, 275, 116));
+        assert_eq!(spot.at, (583, 400 + UNDERFOOT));
+    }
+
+    #[test]
+    fn covered_past_the_debounce_he_falls_to_the_floor() {
+        let mut s = Sim::new(main_over_the_library());
+        s.run(0.1, None);
+        s.seen.covered = true;
+        s.run(COVERED_FOR - 0.1, None);
+        assert_eq!(s.brain.state(), "idle", "not yet: it may be passing");
+        assert_eq!(s.brain.feet(), (583, 400));
+        s.run(0.2, None);
+        assert_eq!(s.brain.state(), "startle", "standing on nothing");
+        assert!(s.brain.perch().is_none(), "nothing to ask about in the air");
+        s.seen.covered = false;
+        s.run(2.0, None);
+        assert_eq!(
+            s.brain.feet(),
+            (583, 1032),
+            "straight past the library's top to the floor"
+        );
+        s.run(LANDING + 0.1, None);
+        assert_eq!(s.brain.state(), "idle");
+    }
+
+    #[test]
+    fn covered_briefly_he_stays() {
+        let mut s = Sim::new(main_over_the_library());
+        s.run(0.1, None);
+        for _ in 0..6 {
+            s.seen.covered = true;
+            s.run(COVERED_FOR - 0.15, None);
+            s.seen.covered = false;
+            s.run(0.1, None);
+        }
+        assert_ne!(s.brain.state(), "startle", "a window dragged across him");
+        assert_eq!(s.brain.feet().1, 400, "still on Main");
+    }
+
+    #[test]
+    fn covered_on_the_floor_in_the_air_or_in_the_hand_is_nothing() {
+        // No room on Main at the top of the screen: he is on the floor.
+        let mut s = Sim::new(layout(vec![win("main", 0, 0, 275, 116)]));
+        s.run(0.1, None);
+        assert_eq!(s.brain.feet(), (137, 1032));
+        assert!(s.brain.perch().is_none(), "the floor is no window");
+        s.seen.covered = true;
+        s.run(1.0, None);
+        assert_ne!(s.brain.state(), "startle");
+        assert_eq!(s.brain.feet(), (137, 1032));
+
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.hand(Hand::Down(583, 370), HANG);
+        s.brain.hand(Hand::Move(900, 200), HANG);
+        s.seen.covered = true;
+        s.run(1.0, None);
+        assert_eq!(s.brain.state(), "carry", "held, he is not standing");
+        assert_eq!(s.brain.feet(), (900, 260));
+    }
+
+    #[test]
+    fn his_window_minimised_he_goes_with_it_and_comes_back_where_he_stood() {
+        let mut s = Sim::new(main_over_the_library());
+        s.run(0.1, None);
+        s.brain.feet.0 = 700.0;
+        let mut main = win("main", 500, 400, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main, win("library", 400, 700, 600, 300)]);
+        s.seen.minimised = true;
+        s.run(2.0, None);
+        assert_eq!(s.brain.state(), "minimised", "not dropped to the library");
+        assert!(s.brain.is_placed() && !s.brain.is_shown());
+        assert_eq!(s.brain.perch().map(|p| p.id), Some("main"), "still his");
+
+        // Restored: the OS says so first, the layout up to 50 ms later.
+        s.seen.minimised = false;
+        s.run(0.05, None);
+        assert!(!s.brain.is_shown(), "waiting for the layout to agree");
+        s.layout = main_over_the_library();
+        s.run(0.1, None);
+        assert!(s.brain.is_shown());
+        assert_eq!(s.brain.state(), "idle");
+        assert_eq!(s.brain.feet(), (700, 400), "where he stood");
+    }
+
+    #[test]
+    fn restored_narrower_he_is_kept_on_it() {
+        let lib = win("library", 100, 300, 900, 400);
+        let mut s = Sim::new(layout(vec![lib.clone()]));
+        s.run(0.1, None);
+        s.brain.feet.0 = 950.0;
+        let mut down = lib.clone();
+        down.visible = false;
+        s.layout = layout(vec![down]);
+        s.seen.minimised = true;
+        s.run(0.5, None);
+        assert_eq!(s.brain.state(), "minimised");
+        s.seen.minimised = false;
+        s.layout = layout(vec![win("library", 100, 300, 600, 400)]);
+        s.run(0.1, None);
+        assert_eq!(s.brain.feet(), (699, 300), "at its end, not past it");
+    }
+
+    #[test]
+    fn with_every_window_minimised_he_still_comes_back_where_he_stood() {
+        // Main's minimise takes the group (D86) and nothing else is showing:
+        // he is minimised with his window, not sent off to appear afresh.
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.feet.0 = 720.0;
+        let mut main = win("main", 500, 400, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main]);
+        s.seen.minimised = true;
+        s.run(1.0, None);
+        assert!(s.brain.is_placed() && !s.brain.is_shown());
+        s.seen.minimised = false;
+        s.layout = one_window();
+        s.run(0.1, None);
+        assert_eq!(s.brain.feet(), (720, 400), "not 30% along, afresh");
+    }
+
+    #[test]
+    fn every_window_hidden_still_sends_him_off() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        let mut main = win("main", 500, 400, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main]);
+        s.run(0.1, None);
+        assert!(!s.brain.is_placed(), "he goes with the player (D154)");
+        s.layout = one_window();
+        s.run(0.1, None);
+        assert_eq!(s.brain.feet(), (583, 400), "and appears afresh");
+    }
+
+    #[test]
+    fn his_window_gone_while_minimised_he_appears_afresh() {
+        let mut s = Sim::new(main_over_the_library());
+        s.run(0.1, None);
+        let mut main = win("main", 500, 400, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main, win("library", 400, 700, 600, 300)]);
+        s.seen.minimised = true;
+        s.run(0.5, None);
+        s.seen.minimised = false;
+        s.layout = layout(vec![win("library", 400, 700, 600, 300)]);
+        s.run(0.1, None);
+        assert!(s.brain.is_shown());
+        assert_eq!(s.brain.feet(), (580, 700), "30% along the library");
+    }
+
+    #[test]
+    fn on_the_floor_a_minimise_changes_nothing() {
+        // Main at the top of the screen with no room above it, so he is on
+        // the floor; the library shows too, so the player is still there.
+        let mut s = Sim::new(layout(vec![
+            win("main", 0, 0, 275, 116),
+            win("library", 1000, 0, 600, 300),
+        ]));
+        s.run(0.1, None);
+        assert_eq!(s.brain.feet(), (137, 1032));
+        let mut main = win("main", 0, 0, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main, win("library", 1000, 0, 600, 300)]);
+        s.seen.minimised = true;
+        s.run(1.0, None);
+        assert!(s.brain.is_shown(), "on the floor he is his own");
+        assert_ne!(s.brain.state(), "startle");
+        assert_eq!(s.brain.feet(), (137, 1032));
     }
 
     #[test]

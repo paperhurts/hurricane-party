@@ -1,6 +1,7 @@
 //! Not Windows: compiles, draws nothing. The player is Windows-first, and so is
 //! he; a macOS or Linux companion is #187's question, not this file's.
 
+use crate::brain::{Seen, Spot};
 use crate::perch::Rect;
 use crate::sprite::Bgra;
 
@@ -8,6 +9,10 @@ pub fn init() {}
 
 pub fn only_one() -> bool {
     true
+}
+
+pub fn pipe_server(_pipe: &std::fs::File) -> Option<u32> {
+    None
 }
 
 pub struct Surface;
@@ -25,6 +30,13 @@ impl Surface {
 
     pub fn hands(&mut self) -> Vec<crate::brain::Hand> {
         Vec::new()
+    }
+
+    pub fn player(&mut self, _pid: u32) {}
+
+    /// Nothing to see: he behaves as he did before D166.
+    pub fn look(&mut self, _spot: &Spot) -> Seen {
+        Seen::default()
     }
 }
 

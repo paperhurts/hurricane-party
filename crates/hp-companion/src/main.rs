@@ -6,9 +6,12 @@
 //! He lives on the player's windows (D154, D155): he stands on a top edge with
 //! room, walks along it now and then, dances on the beat while music plays,
 //! sleeps when nothing has played for a while, and jumps and falls to the next
-//! ledge down when the window under him moves, shades or goes. He goes when
-//! the player's windows do. Click him and he leans into the pet; drag him and
-//! he hangs by his scruff, kicking, until he is dropped (D156).
+//! ledge down when the window under him moves, shades or goes. He is always on
+//! top, so when another window comes in front of the one he stands on, he is
+//! standing on nothing and falls to the floor; when it is minimised, so is he,
+//! until it is back (D166). He goes when the player's windows do. Click him
+//! and he leans into the pet; drag him and he hangs by his scruff, kicking,
+//! until he is dropped (D156).
 //!
 //!     hp-companion [--with-player] [--pack <folder>]
 //!
@@ -208,6 +211,7 @@ impl Captain {
                     self.layout = Some(l);
                     moved = true;
                 }
+                Msg::Player(pid) => surface.player(pid),
                 Msg::Playing(p) => self.playing = p,
                 Msg::Beat => beat = true,
                 Msg::Gone => {
@@ -227,9 +231,6 @@ impl Captain {
         let Some(layout) = &self.layout else {
             return self.away(surface);
         };
-        if perch::shown(layout).next().is_none() {
-            return self.away(surface);
-        }
         let scale = perch::zoom(layout);
         let body = self.body(scale);
         let ledges = perch::ledges(layout, &self.work, body);
@@ -238,6 +239,12 @@ impl Captain {
         for h in surface.hands() {
             self.brain.hand(h, hang);
         }
+        // What the layout cannot say about the window he is on (D166).
+        let seen = self
+            .brain
+            .perch()
+            .map(|spot| surface.look(&spot))
+            .unwrap_or_default();
         self.brain.step(
             dt,
             &World {
@@ -247,10 +254,19 @@ impl Captain {
                 beat,
                 zoom: scale as f32,
                 walk_px_per_sec: self.pack.walk_px_per_sec,
+                seen,
             },
         );
+        // With none of the player's windows showing, the brain has let him go.
         if !self.brain.is_placed() {
             return self.away(surface);
+        }
+        if !self.brain.is_shown() {
+            if self.trace && self.traced != Some("minimised") {
+                eprintln!("hp-companion: minimised with his window");
+                self.traced = Some("minimised");
+            }
+            return self.hide(surface);
         }
 
         let pose = self.brain.pose(&self.pack);
@@ -291,6 +307,11 @@ impl Captain {
     /// appears afresh when it is back.
     fn away(&mut self, surface: &mut platform::Surface) {
         self.brain.leave();
+        self.hide(surface);
+    }
+
+    /// Not drawn, and drawn again from scratch when he is back.
+    fn hide(&mut self, surface: &mut platform::Surface) {
         self.drawn = None;
         surface.hide();
     }

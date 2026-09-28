@@ -99,7 +99,7 @@ And the payoff: **when you double-click a seam to break a bond, any kitten sitti
 | Sleep | No audio playing for a while. Curls up, ideally on a window |
 | Dance | Playing. Beat flag from the viz stream drives the bounce |
 | Walk | Periodic wander between perches |
-| Startle | Bond breaks under them, or the window they're on moves |
+| Startle | Bond breaks under them, the window they're on moves, or another window comes in front of it where they stand (D166) |
 | Pet | Clicked. Purr animation, hearts, brief affection |
 | Carry | Dragged. Dangles, complains, resettles when dropped |
 
