@@ -2,15 +2,23 @@
 //! `UpdateLayeredWindow` from a premultiplied 32-bit DIB, so his outline is his
 //! own pixels and not a rectangle.
 //!
-//! - `WS_EX_NOACTIVATE` and `SW_SHOWNOACTIVATE`: he never takes the keyboard
-//!   and never comes up in front of what someone is doing (#191, #192).
-//! - `WS_EX_TRANSPARENT`: every click goes through him to whatever is under.
-//!   Petting and carrying him (a later PR) will make his own pixels clickable.
+//! - `WS_EX_NOACTIVATE`, `SW_SHOWNOACTIVATE` and `MA_NOACTIVATE`: he never
+//!   takes the keyboard and never comes up in front of what someone is doing,
+//!   not even when he is clicked or carried (#191, #192).
+//! - **Clickable only where he is.** A layered window drawn with per-pixel
+//!   alpha is hit-tested by that alpha: a pixel with alpha 0 lets the mouse
+//!   through to whatever is under it. So there is no `WS_EX_TRANSPARENT`: his
+//!   outline catches the pointer, for petting and carrying (D156), and the
+//!   empty corners of his cell do not.
+//! - A press captures the mouse until it is released, so a drag keeps going
+//!   when the pointer runs ahead of him, which it does between two frames.
 //! - `WS_EX_TOOLWINDOW`: no taskbar button and no Alt+Tab entry.
 //! - `WS_EX_TOPMOST`: he stays in front, as #192 asks.
 
+use crate::brain::Hand;
 use crate::perch::Rect;
 use crate::sprite::Bgra;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use windows::core::{w, BOOL};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
@@ -23,13 +31,44 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetMessageW, KillTimer, RegisterClassW, SetTimer,
     SetWindowPos, ShowWindow, UpdateLayeredWindow, HWND_TOPMOST, MA_NOACTIVATE, MSG,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
     WM_MOUSEACTIVATE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    WS_EX_TOPMOST, WS_POPUP,
 };
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowRect, LoadCursorW, SetCursor, IDC_HAND, WM_CAPTURECHANGED, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR,
+};
+
+thread_local! {
+    /// The pointer on him since the last tick. His window and the loop that
+    /// drains this share one thread, so a queue here is all it takes.
+    static HANDS: RefCell<Vec<Hand>> = const { RefCell::new(Vec::new()) };
+    /// A press is down on him, and he holds the mouse capture for it.
+    static PRESSED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// A mouse message's position, in screen pixels. The coordinates are his
+/// client area's, which for a borderless popup starts at its window's corner;
+/// while he holds the capture they run past his edges, negative included.
+fn screen_point(h: HWND, lp: LPARAM) -> (i32, i32) {
+    let (cx, cy) = (
+        (lp.0 & 0xFFFF) as i16 as i32,
+        ((lp.0 >> 16) & 0xFFFF) as i16 as i32,
+    );
+    let mut r = RECT::default();
+    // SAFETY: a query about his own window.
+    let _ = unsafe { GetWindowRect(h, &mut r) };
+    (r.left + cx, r.top + cy)
+}
+
+fn heard(hand: Hand) {
+    HANDS.with(|q| q.borrow_mut().push(hand));
+}
 
 /// Physical pixels everywhere, like the player (D37): the pipe's layout is in
 /// physical pixels, and so are his window's position and size.
@@ -42,9 +81,46 @@ pub fn init() {
 }
 
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if msg == WM_MOUSEACTIVATE {
+    match msg {
         // Belt and braces with WS_EX_NOACTIVATE: a click never activates him.
-        return LRESULT(MA_NOACTIVATE as isize);
+        WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
+        WM_SETCURSOR => {
+            // A hand over him: he is something to pet and pick up.
+            // SAFETY: a stock cursor, set for the pointer over his window.
+            if let Ok(hand) = unsafe { LoadCursorW(None, IDC_HAND) } {
+                unsafe { SetCursor(Some(hand)) };
+            }
+            return LRESULT(1);
+        }
+        WM_LBUTTONDOWN => {
+            PRESSED.set(true);
+            // SAFETY: capture for his own window while the button is down.
+            unsafe { SetCapture(h) };
+            let (x, y) = screen_point(h, lp);
+            heard(Hand::Down(x, y));
+            return LRESULT(0);
+        }
+        WM_MOUSEMOVE if PRESSED.get() => {
+            let (x, y) = screen_point(h, lp);
+            heard(Hand::Move(x, y));
+            return LRESULT(0);
+        }
+        WM_LBUTTONUP if PRESSED.get() => {
+            // Cleared first, so the WM_CAPTURECHANGED that ReleaseCapture
+            // sends is not taken for someone else taking the mouse.
+            PRESSED.set(false);
+            let (x, y) = screen_point(h, lp);
+            heard(Hand::Up(x, y));
+            // SAFETY: gives back the capture this window took on the press.
+            let _ = unsafe { ReleaseCapture() };
+            return LRESULT(0);
+        }
+        WM_CAPTURECHANGED if PRESSED.get() => {
+            PRESSED.set(false);
+            heard(Hand::Cancel);
+            return LRESULT(0);
+        }
+        _ => {}
     }
     // SAFETY: the default handling for his own window's messages.
     unsafe { DefWindowProcW(h, msg, wp, lp) }
@@ -69,11 +145,7 @@ impl Surface {
             };
             RegisterClassW(&class);
             let hwnd = CreateWindowExW(
-                WS_EX_LAYERED
-                    | WS_EX_TRANSPARENT
-                    | WS_EX_TOPMOST
-                    | WS_EX_TOOLWINDOW
-                    | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 w!("hp-companion"),
                 w!("Cap'n Capy"),
                 WS_POPUP,
@@ -181,6 +253,11 @@ impl Surface {
             }
             self.shown = false;
         }
+    }
+
+    /// The pointer on him since the last call.
+    pub fn hands(&mut self) -> Vec<Hand> {
+        HANDS.with(|q| std::mem::take(&mut *q.borrow_mut()))
     }
 }
 

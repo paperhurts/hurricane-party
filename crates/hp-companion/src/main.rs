@@ -7,7 +7,8 @@
 //! room, walks along it now and then, dances on the beat while music plays,
 //! sleeps when nothing has played for a while, and jumps and falls to the next
 //! ledge down when the window under him moves, shades or goes. He goes when
-//! the player's windows do. Petting and carrying come with the pointer.
+//! the player's windows do. Click him and he leans into the pet; drag him and
+//! he hangs by his scruff, kicking, until he is dropped (D156).
 //!
 //!     hp-companion [--pack <folder>]
 //!
@@ -162,6 +163,11 @@ impl Captain {
         let scale = perch::zoom(layout);
         let body = self.body(scale);
         let ledges = perch::ledges(layout, &self.work, body);
+        // Carried, the hand is at his scruff: his feet hang this far below it.
+        let hang = body.ay as f32 - brain::SCRUFF * scale as f32;
+        for h in surface.hands() {
+            self.brain.hand(h, hang);
+        }
         self.brain.step(
             dt,
             &World {
