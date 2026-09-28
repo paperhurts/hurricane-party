@@ -28,8 +28,11 @@ pub const SLEEP_AFTER: f32 = 30.0;
 pub const IDLE_FOR: (f32, f32) = (5.0, 14.0);
 /// A walk goes at least this far (1x pixels), or it is not worth the frames.
 pub const MIN_WALK: f32 = 48.0;
-/// Beats this stale and the dance goes back to standing.
-pub const BEAT_STALE: f32 = 1.5;
+/// Between beats he holds the pose the last one gave him; only this long
+/// without a beat (a break, or a track with no bass to find) and he stands.
+/// It was 1.5 s, and a sparse song flicked him between his dance frames and
+/// his idle one, which is drawn bigger (D158).
+pub const BEAT_STALE: f32 = 6.0;
 /// Gravity and the startle's hop, in 1x pixels per second (squared).
 pub const GRAVITY: f32 = 2400.0;
 pub const HOP: f32 = 420.0;
@@ -566,10 +569,28 @@ mod tests {
         assert_eq!((a.state, b.state), ("dance", "dance"));
         assert_ne!(a.cell, b.cell, "the next beat, the next frame");
         s.run(BEAT_STALE + 0.5, None);
-        assert_eq!(s.brain.pose(&pack).state, "idle", "quiet passage: standing");
+        assert_eq!(s.brain.pose(&pack).state, "idle", "a long break: standing");
         s.playing = false;
         s.run(0.1, None);
         assert_eq!(s.brain.state(), "idle");
+    }
+
+    #[test]
+    fn a_gap_between_beats_holds_the_last_pose() {
+        let pack = captain();
+        let mut s = Sim::new(one_window());
+        s.playing = true;
+        s.run(0.2, Some(0.5));
+        let held = s.brain.pose(&pack);
+        assert_eq!(held.state, "dance");
+        for _ in 0..8 {
+            s.run(0.5, None);
+            assert_eq!(
+                s.brain.pose(&pack),
+                held,
+                "a sparse song does not flick him to idle"
+            );
+        }
     }
 
     #[test]
