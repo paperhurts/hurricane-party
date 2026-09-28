@@ -1,6 +1,6 @@
 [package]
 name = "hurricane-party"
-version = "1.0.0"
+version = "1.1.0"
 description = "Offline-first media library and player."
 authors = ["paperhurts"]
 edition = "2021"
