@@ -15,6 +15,12 @@
   } from "./lib/theme";
   import { checkSheetBounds, parseSkin, type Token } from "./lib/skin";
   import { guideSheet, paintableSheet, templateManifest, templateParts, templateReadme } from "./lib/template";
+  import {
+    blankCompanionSheet,
+    companionGuide,
+    companionTemplateManifest,
+    companionTemplateReadme,
+  } from "./lib/companiontemplate";
   import { eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
   import { wszManifest } from "./lib/wsz";
   import { alertsStale, issued, readout, type RadarSite, type RadarStatus } from "./lib/radar";
@@ -2100,6 +2106,40 @@
       painting = false;
     }
   }
+
+  /**
+   * Paint a companion (D163): a folder with a blank sheet in the format's
+   * layout, a guide the same size that names every row, a manifest that says
+   * it is painted, and a note on how. Import companion… turns it into a pack.
+   */
+  let paintingCompanion = $state(false);
+  async function paintCompanion() {
+    if (paintingCompanion) return;
+    const parent = await openDialog({ directory: true, title: "Where should the companion to paint go?" });
+    if (typeof parent !== "string") return;
+    paintingCompanion = true;
+    try {
+      const palette = colorsFor("eyewall") as Record<Token, string>;
+      const sheet = await blankCompanionSheet();
+      const guide = await companionGuide(palette);
+      const dir = await invoke<string>("start_companion_template", { parent });
+      const text = (s: string) => new TextEncoder().encode(s);
+      const files: [string, Uint8Array][] = [
+        ["companion.json", text(JSON.stringify(companionTemplateManifest(), null, 1))],
+        ["sheet.png", sheet],
+        ["guide.png", guide],
+        ["README.txt", text(companionTemplateReadme())],
+      ];
+      for (const [name, bytes] of files) {
+        await invoke("write_companion_template_file", bytes, { headers: { "x-hp-name": name } });
+      }
+      notice = `A companion to paint is in ${dir}. Paint sheet.png, a row for each thing it does (README.txt says which), then Import companion… and pick its companion.json.`;
+    } catch (e) {
+      notice = `Couldn't write the companion to paint: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      paintingCompanion = false;
+    }
+  }
 </script>
 
 <svelte:window
@@ -2188,7 +2228,7 @@
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
     </label>
-    <span class="glow" title="A companion who stands on the player's windows, dances to the music and naps when it stops. Click them, or pick them up. Cap'n Capy ships; Import companion… brings your own">
+    <span class="glow" title="A companion who stands on the player's windows, dances to the music and naps when it stops. Click them, or pick them up. Cap'n Capy ships; Paint a companion… or Import companion… brings your own">
       <input
         type="checkbox"
         aria-label="Companion on the desktop"
@@ -2257,6 +2297,14 @@
       title="A folder with the windows' chrome to paint over, and a guide to every part of it"
     >
       {painting ? "Writing…" : "Paint your own…"}
+    </button>
+    <button
+      class="mini"
+      onclick={paintCompanion}
+      disabled={paintingCompanion}
+      title="A folder with a blank companion sheet to paint, 64 px a frame, and a guide to every row"
+    >
+      {paintingCompanion ? "Writing…" : "Paint a companion…"}
     </button>
     <button class="mini" onclick={importCompanion} title="A companion of your own: its companion.json, or a zip of one"
       >Import companion…</button

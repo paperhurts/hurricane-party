@@ -262,6 +262,19 @@ mod tests {
     }
 
     #[test]
+    fn the_captains_own_sheet_painted_in_the_template_is_the_captain() {
+        // His sheet is laid out the way the template is, so read as a painted
+        // one it must come back as him: the same frames, the same timings.
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../skins/companions/captain");
+        let sheet = std::fs::read(dir.join("sheet.png")).unwrap();
+        let his: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("companion.json")).unwrap()).unwrap();
+        let files = finish(JSON, &sheet).unwrap();
+        assert_eq!(manifest_of(&files)["states"], his["states"]);
+    }
+
+    #[test]
     fn a_template_says_it_is_painted_and_a_finished_pack_does_not() {
         assert!(is_painted(JSON));
         assert!(!is_painted(

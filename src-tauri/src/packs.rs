@@ -256,6 +256,28 @@ fn slug_for(dir: &Path, name: &str) -> String {
         .unwrap_or_else(|| format!("{base}-x"))
 }
 
+// ---- a companion to paint (D163) ----
+
+/// The folder `start_companion_template` made this session, and the only
+/// place `write_companion_template_file` writes, as with a skin's template.
+#[derive(Default)]
+pub struct TemplateDir(pub std::sync::Mutex<Option<PathBuf>>);
+
+/// What a companion template is: the manifest, the sheet to paint, the guide
+/// under it, and a note on how.
+const TEMPLATE_FILES: [&str; 4] = [MANIFEST, "sheet.png", "guide.png", "README.txt"];
+
+/// Write one of a companion template's four files into its folder.
+pub fn write_template_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    if !TEMPLATE_FILES.contains(&name) {
+        return Err(format!("{name:?} is not part of a companion template"));
+    }
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(format!("{name} is too big"));
+    }
+    fs::write(dir.join(name), bytes).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
