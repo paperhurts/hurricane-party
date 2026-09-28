@@ -32,6 +32,13 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// carries no platform conditionals at all (#20).
 pub const PIPE_NAME: &str = r"\\.\pipe\hurricane-party";
 
+/// Not part of the pipe protocol: the one name the player and its own
+/// desktop companion share outside it (#192, D161). The companion holds a
+/// named event under this name while it runs; the player's Cap'n Capy box
+/// sets it to send him off, however he was started. Here because both
+/// programs already depend on this crate, so the name is written once.
+pub const COMPANION_LEAVE_EVENT: &str = r"Local\hurricane-party-companion-leave";
+
 /// A request from a client. `id` is echoed back so a client can match replies
 /// on a stream that also carries unsolicited events.
 #[derive(Debug, Clone, Deserialize, Serialize)]

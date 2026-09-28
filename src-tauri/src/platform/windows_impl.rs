@@ -200,6 +200,21 @@ impl WindowPlatform for Win32Platform {
             .spawn()
     }
 
+    fn ask_companion_to_leave(&self) {
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+        let name = HSTRING::from(hp_control::COMPANION_LEAVE_EVENT);
+        // SAFETY: opens a named event only if a companion created it, sets it,
+        // and closes our handle. Opening fails when none is running.
+        unsafe {
+            if let Ok(h) = OpenEventW(EVENT_MODIFY_STATE, false, &name) {
+                let _ = SetEvent(h);
+                let _ = CloseHandle(h);
+            }
+        }
+    }
+
     fn open_folder(&self, path: &std::path::Path) -> Result<(), String> {
         use std::os::windows::ffi::OsStrExt;
         use windows::core::{w, PCWSTR};

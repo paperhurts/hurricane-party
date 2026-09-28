@@ -325,3 +325,76 @@ pub fn run(interval_ms: u32, mut tick: impl FnMut()) {
         let _ = KillTimer(None, id);
     }
 }
+
+/// The player's request to leave (D161): a manual-reset named event he
+/// creates at start and checks every tick. Created cleared and reset at once,
+/// so a signal left over from an earlier Cap'n never sends this one home.
+/// The handle is never closed; Windows destroys the event when the last
+/// Cap'n exits, which is how the player knows there is no one to ask.
+pub struct Leave(Option<windows::Win32::Foundation::HANDLE>);
+
+impl Leave {
+    pub fn new() -> Leave {
+        Leave::named(hp_control::COMPANION_LEAVE_EVENT)
+    }
+
+    fn named(name: &str) -> Leave {
+        use windows::core::HSTRING;
+        use windows::Win32::System::Threading::{CreateEventW, ResetEvent};
+        // SAFETY: creates, or opens if a stale one survives, a named event
+        // this process then owns a handle to for its whole life.
+        unsafe {
+            match CreateEventW(None, true, false, &HSTRING::from(name)) {
+                Ok(h) => {
+                    let _ = ResetEvent(h);
+                    Leave(Some(h))
+                }
+                Err(_) => Leave(None),
+            }
+        }
+    }
+
+    /// Whether the player has asked him to go.
+    pub fn asked(&self) -> bool {
+        use windows::Win32::Foundation::WAIT_OBJECT_0;
+        use windows::Win32::System::Threading::WaitForSingleObject;
+        match self.0 {
+            // SAFETY: a zero-timeout wait on our own event handle.
+            Some(h) => (unsafe { WaitForSingleObject(h, 0) }) == WAIT_OBJECT_0,
+            None => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Leave;
+
+    /// What the player's box does (src-tauri's ask_companion_to_leave).
+    fn ask(name: &str) {
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+        unsafe {
+            let h = OpenEventW(EVENT_MODIFY_STATE, false, &HSTRING::from(name)).unwrap();
+            SetEvent(h).unwrap();
+            let _ = CloseHandle(h);
+        }
+    }
+
+    #[test]
+    fn he_hears_the_player_ask_and_a_new_cap_n_starts_clear() {
+        // A name of this test's own, so it never sends off a real Cap'n.
+        let name = format!(r"Local\hp-companion-test-leave-{}", std::process::id());
+        let leave = Leave::named(&name);
+        assert!(!leave.asked(), "nobody has asked yet");
+        ask(&name);
+        assert!(leave.asked(), "the box was unticked");
+        assert!(leave.asked(), "and it stays asked: he is on his way out");
+        let next = Leave::named(&name);
+        assert!(
+            !next.asked(),
+            "a Cap'n starting later clears a stale request"
+        );
+    }
+}

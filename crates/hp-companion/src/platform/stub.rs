@@ -43,3 +43,16 @@ pub fn run(interval_ms: u32, mut tick: impl FnMut()) {
         std::thread::sleep(std::time::Duration::from_millis(interval_ms as u64));
     }
 }
+
+/// Nothing to hear on a platform with no player to ask.
+pub struct Leave;
+
+impl Leave {
+    pub fn new() -> Leave {
+        Leave
+    }
+
+    pub fn asked(&self) -> bool {
+        false
+    }
+}
