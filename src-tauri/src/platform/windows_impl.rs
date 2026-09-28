@@ -215,6 +215,37 @@ impl WindowPlatform for Win32Platform {
         }
     }
 
+    fn companion_is_running(&self) -> bool {
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenEventW, SYNCHRONIZATION_SYNCHRONIZE};
+        let name = HSTRING::from(hp_control::COMPANION_LEAVE_EVENT);
+        // SAFETY: opens and closes a handle to a named event, if it exists.
+        unsafe {
+            match OpenEventW(SYNCHRONIZATION_SYNCHRONIZE, false, &name) {
+                Ok(h) => {
+                    let _ = CloseHandle(h);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    }
+
+    fn run_quiet(
+        &self,
+        exe: &std::path::Path,
+        args: &[&std::ffi::OsStr],
+    ) -> std::io::Result<std::process::Output> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new(exe)
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(std::process::Stdio::null())
+            .output()
+    }
+
     fn open_folder(&self, path: &std::path::Path) -> Result<(), String> {
         use std::os::windows::ffi::OsStrExt;
         use windows::core::{w, PCWSTR};

@@ -36,7 +36,7 @@ If no decision covers a choice, make the obvious call, write it down (a row in `
 | `.claude/skills/*/SKILL.md` | `/land` runs the gates and opens the PR; `/decide` appends a decision row. Those are the only workflow commands |
 | `skins/eyewall/` | The skin that ships, and the template a person copies to make their own (D90). `tools\chrome-sheet.ps1` redraws its sheets from the manifest |
 | `skins/purricane/` | The skin the Purricane theme wears (D132). `tools\purricane-sheet.ps1` redraws its sheets from the manifest |
-| `crates/hp-companion/`, `skins/companions/captain/` | Cap'n Capy (#192, D154 to D157): his own program on the public pipe, and the pack it loads. The library's Cap'n Capy box starts him (a debug player finds the crate's debug build); `cargo run` in the crate puts him on the running player's windows by hand |
+| `crates/hp-companion/`, `skins/companions/captain/` | Cap'n Capy (#192, D154 to D161): his own program on the public pipe, and the pack it loads. A person's own companions are imported into the app's `companions/` folder and picked beside the box (#208, D162). The library's Cap'n Capy box starts him (a debug player finds the crate's debug build); `cargo run` in the crate puts him on the running player's windows by hand |
 
 ---
 

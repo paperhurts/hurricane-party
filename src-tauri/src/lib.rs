@@ -10,6 +10,7 @@ mod jobs;
 mod layout;
 mod library;
 mod localimport;
+mod packs;
 mod pipeline;
 pub mod platform;
 mod playlist;
@@ -1634,6 +1635,80 @@ fn set_companion(app: AppHandle, on: bool) -> Result<(), String> {
     db::set_companion_on(&conn, on).map_err(|e| e.to_string())
 }
 
+/// Where imported companion packs live (#208, D162): configurable like the
+/// skins folder, and under the app's own data directory by default.
+pub(crate) fn companions_dir(app: &AppHandle) -> std::path::PathBuf {
+    let configured = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::get_setting(&conn, COMPANIONS_DIR_SETTING)
+    };
+    match configured {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => app
+            .path()
+            .app_data_dir()
+            .expect("no app data dir")
+            .join("companions"),
+    }
+}
+
+const COMPANIONS_DIR_SETTING: &str = "companions.dir";
+
+/// Every companion that can be picked: Cap'n Capy, who ships, then the
+/// imported ones by name (#208).
+#[tauri::command]
+fn list_companions(app: AppHandle) -> Vec<packs::PackInfo> {
+    let mut all = vec![packs::PackInfo {
+        id: packs::CAPTAIN.into(),
+        name: "Cap'n Capy".into(),
+    }];
+    all.extend(packs::list(&companions_dir(&app)));
+    all
+}
+
+#[tauri::command]
+fn get_companion_pick(app: AppHandle) -> String {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::companion_pick(&conn)
+}
+
+/// Pick which companion the box starts. With the box ticked, the one on
+/// screen is sent off and the pick comes in his place.
+#[tauri::command]
+fn set_companion_pick(app: AppHandle, id: String) -> Result<(), String> {
+    if id != packs::CAPTAIN && packs::folder(&companions_dir(&app), &id).is_none() {
+        return Err("no such companion".into());
+    }
+    let on = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::set_companion_pick(&conn, &id).map_err(|e| e.to_string())?;
+        db::companion_on(&conn)
+    };
+    if on {
+        companion::restart(&app)?;
+    }
+    Ok(())
+}
+
+/// Bring a finished companion in (#208): its companion.json or a zip of one.
+/// The companion's own loader checks it (D162), and a pack it refuses is
+/// taken out again, with its reason.
+#[tauri::command]
+fn import_companion(app: AppHandle, path: String) -> Result<packs::PackInfo, String> {
+    let dir = companions_dir(&app);
+    let id = packs::import(std::path::Path::new(&path), &dir)?;
+    match companion::check(&dir.join(&id)) {
+        Ok(name) => Ok(packs::PackInfo { id, name }),
+        Err(e) => {
+            let _ = packs::remove(&dir, &id);
+            Err(e)
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Focus is a group property (v0.4-brief): when any bonded window has focus, all
 /// of them render active.
@@ -1958,7 +2033,11 @@ pub fn run() {
             wm_splitter_end,
             wm_demagnetize,
             get_companion,
-            set_companion
+            set_companion,
+            list_companions,
+            get_companion_pick,
+            set_companion_pick,
+            import_companion
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

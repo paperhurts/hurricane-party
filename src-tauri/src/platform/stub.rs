@@ -44,6 +44,21 @@ impl WindowPlatform for StubPlatform {
 
     fn ask_companion_to_leave(&self) {}
 
+    fn companion_is_running(&self) -> bool {
+        false
+    }
+
+    fn run_quiet(
+        &self,
+        exe: &std::path::Path,
+        args: &[&std::ffi::OsStr],
+    ) -> std::io::Result<std::process::Output> {
+        std::process::Command::new(exe)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+    }
+
     fn spawn_quiet(
         &self,
         exe: &std::path::Path,

@@ -6,6 +6,7 @@
 //! exit handling here.
 
 use crate::db::{self, Db};
+use crate::packs;
 use crate::platform;
 use std::path::PathBuf;
 use std::process::Child;
@@ -40,9 +41,33 @@ fn exe_path() -> Option<PathBuf> {
     places.into_iter().find(|p| p.is_file())
 }
 
-/// Start him, unless the one we started is still running. A second copy
-/// started some other way leaves at once on its own (he is single-instance).
+fn exe() -> Result<PathBuf, String> {
+    exe_path().ok_or_else(|| {
+        format!(
+            "Cap'n Capy's program ({}) is not beside the player",
+            exe_name()
+        )
+    })
+}
+
+/// Start the picked companion, unless the one we started is still running. A
+/// second copy started some other way leaves at once on its own (only one
+/// runs). Cap'n Capy finds his own pack; any other is named by its folder
+/// in the companions folder (D162).
 pub fn start(app: &AppHandle) -> Result<(), String> {
+    let pick = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        db::companion_pick(&conn)
+    };
+    let pack = if pick == packs::CAPTAIN {
+        None
+    } else {
+        Some(
+            packs::folder(&crate::companions_dir(app), &pick)
+                .ok_or("that companion's folder is gone; pick another in the list")?,
+        )
+    };
     let state = app.state::<Companion>();
     let mut held = state.0.lock().unwrap();
     if let Some(child) = held.as_mut() {
@@ -50,17 +75,49 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
             return Ok(());
         }
     }
-    let exe = exe_path().ok_or_else(|| {
-        format!(
-            "Cap'n Capy's program ({}) is not beside the player",
-            exe_name()
-        )
-    })?;
+    let exe = exe()?;
+    let dir = pack.map(|p| p.to_string_lossy().into_owned());
+    let mut args = vec!["--with-player"];
+    if let Some(d) = &dir {
+        args.extend(["--pack", d.as_str()]);
+    }
     let child = platform::platform()
-        .spawn_quiet(&exe, &["--with-player"])
-        .map_err(|e| format!("Cap'n Capy would not start: {e}"))?;
+        .spawn_quiet(&exe, &args)
+        .map_err(|e| format!("the companion would not start: {e}"))?;
     *held = Some(child);
     Ok(())
+}
+
+/// Send off whoever is on screen and start the pick, for a new pick while
+/// the box is ticked. Only one companion runs, so the new one waits until the
+/// old one has gone, or it would meet him and leave.
+pub fn restart(app: &AppHandle) -> Result<(), String> {
+    stop(app);
+    let p = platform::platform();
+    for _ in 0..30 {
+        if !p.companion_is_running() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    start(app)
+}
+
+/// Check a pack with the companion's own loader (`--check`, D162): the
+/// pack's name when it is good, and his reason when it is not.
+pub fn check(pack: &std::path::Path) -> Result<String, String> {
+    let exe = exe()?;
+    let out = platform::platform()
+        .run_quiet(
+            &exe,
+            &["--check".as_ref(), "--pack".as_ref(), pack.as_os_str()],
+        )
+        .map_err(|e| format!("the companion could not check it: {e}"))?;
+    let said = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    match (out.status.success(), said.strip_prefix("ok: ")) {
+        (true, Some(name)) => Ok(name.to_string()),
+        _ => Err(said.strip_prefix("refused: ").unwrap_or(&said).to_string()),
+    }
 }
 
 /// Send him off, however he was started (D161): ask whichever Cap'n is

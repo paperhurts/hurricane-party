@@ -141,6 +141,9 @@
   let glow = $state(true);
   // Cap'n Capy's switch (#192, D157): the player starts his own little program.
   let capn = $state(false);
+  // Which companion the box starts (#208, D162): Cap'n Capy, or one imported.
+  let companions = $state<{ id: string; name: string }[]>([{ id: "captain", name: "Cap'n Capy" }]);
+  let companionPick = $state("captain");
   // The theme the app wears (#147), and calm, the kaleidoscope's still switch,
   // offered while the theme's analyser is one.
   let theme = $state<Wearable>("eyewall");
@@ -566,6 +569,8 @@
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
     invoke<boolean>("get_companion").then((on) => (capn = on));
+    invoke<{ id: string; name: string }[]>("list_companions").then((l) => (companions = l));
+    invoke<string>("get_companion_pick").then((id) => (companionPick = id));
     invoke<string>("get_theme").then((t) => {
       theme = isWearable(t) ? t : "eyewall";
       applyTheme(theme);
@@ -1625,7 +1630,7 @@
     await invoke("set_glow", { on });
   }
 
-  /** Start or stop Cap'n Capy. The box follows what happened, not what was asked. */
+  /** Start or stop the companion. The box follows what happened, not what was asked. */
   async function setCapn(on: boolean) {
     capn = on;
     try {
@@ -1633,6 +1638,41 @@
     } catch (e) {
       capn = !on;
       error = String(e);
+    }
+  }
+
+  /** Pick which companion the box starts; with the box ticked, he is swapped now. */
+  async function pickCompanion(id: string) {
+    const was = companionPick;
+    companionPick = id;
+    try {
+      await invoke("set_companion_pick", { id });
+    } catch (e) {
+      companionPick = was;
+      error = String(e);
+    }
+  }
+
+  /**
+   * Import companion (#208): a finished companion's companion.json, or a zip
+   * of one. The companion's own loader checks it before it is kept (D162),
+   * and it becomes the pick.
+   */
+  async function importCompanion() {
+    const picked = await openDialog({
+      multiple: false,
+      title: "Import a companion: its companion.json, or a zip of one",
+      filters: [{ name: "Companion", extensions: ["json", "zip"] }],
+    });
+    if (typeof picked !== "string") return;
+    notice = null;
+    try {
+      const made = await invoke<{ id: string; name: string }>("import_companion", { path: picked });
+      companions = await invoke<{ id: string; name: string }[]>("list_companions");
+      await pickCompanion(made.id);
+      notice = capn ? `${made.name} is here.` : `${made.name} is in. Tick the box to meet them.`;
+    } catch (e) {
+      notice = `That companion was refused: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
@@ -2148,10 +2188,17 @@
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
     </label>
-    <label class="glow" title="A capybara who stands on the player's windows, dances to the music and naps when it stops. Click him, or pick him up">
-      <input type="checkbox" checked={capn} onchange={(e) => setCapn(e.currentTarget.checked)} />
-      Cap'n Capy
-    </label>
+    <span class="glow" title="A companion who stands on the player's windows, dances to the music and naps when it stops. Click them, or pick them up. Cap'n Capy ships; Import companion… brings your own">
+      <input
+        type="checkbox"
+        aria-label="Companion on the desktop"
+        checked={capn}
+        onchange={(e) => setCapn(e.currentTarget.checked)}
+      />
+      <select aria-label="Which companion" value={companionPick} onchange={(e) => pickCompanion(e.currentTarget.value)}>
+        {#each companions as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+      </select>
+    </span>
     <label class="conc skinpick" title="The colours and type of the library, and of every skin that wears the theme">
       theme
       <select value={theme} onchange={(e) => setTheme(e.currentTarget.value)}>
@@ -2211,6 +2258,9 @@
     >
       {painting ? "Writing…" : "Paint your own…"}
     </button>
+    <button class="mini" onclick={importCompanion} title="A companion of your own: its companion.json, or a zip of one"
+      >Import companion…</button
+    >
     {#if picturePlace}
       <label class="conc skinpick" title="Which part of the picture shows behind the three windows">
         picture

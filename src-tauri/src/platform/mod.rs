@@ -137,6 +137,19 @@ pub trait WindowPlatform: Send + Sync {
     /// does not exist, and there is nothing to do.
     fn ask_companion_to_leave(&self);
 
+    /// Whether any companion is running: its leave event exists while one
+    /// does (D161). Switching companions waits on this, since only one may
+    /// run and a new one would otherwise meet the old and leave (D162).
+    fn companion_is_running(&self) -> bool;
+
+    /// Run a program of our own to completion with no console window and
+    /// its output captured: the companion's `--check` of a pack (D162).
+    fn run_quiet(
+        &self,
+        exe: &std::path::Path,
+        args: &[&std::ffi::OsStr],
+    ) -> std::io::Result<std::process::Output>;
+
     /// Open a folder in the OS file manager (#155). Not about a window
     /// either, and here for the same reason as `kill_tree`: there is no
     /// portable call, and the shell's own "open" is the one that gets a path
