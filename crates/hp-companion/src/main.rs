@@ -10,10 +10,20 @@
 //! the player's windows do. Click him and he leans into the pet; drag him and
 //! he hangs by his scruff, kicking, until he is dropped (D156).
 //!
-//!     hp-companion [--pack <folder>]
+//!     hp-companion [--with-player] [--pack <folder>]
 //!
 //! Without `--pack` he looks for `companions/captain` beside the exe, and in a
 //! debug build for the repo's own `skins/companions/captain`.
+//!
+//! The player's switch starts him with `--with-player` (D157): he leaves when
+//! the player's pipe closes, however the player went. Started by hand, he
+//! waits for the player and outlasts a restart of it. Either way there is only
+//! ever one of him.
+
+// A release build has no console: the player starts him, or a double-click
+// does, and a black window beside a capybara is nobody's idea of fun. A debug
+// build keeps its console for `cargo run` and `HP_COMPANION_TRACE`.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod brain;
 mod link;
@@ -43,13 +53,27 @@ const MAX_STEP: f32 = 0.1;
 const WORK_AREAS_EVERY: Duration = Duration::from_secs(2);
 
 fn main() {
-    let dir = pack_dir().unwrap_or_else(|e| fail(&e));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = Args::parse(&args).unwrap_or_else(|e| fail(&e));
+    if args.help {
+        println!("hp-companion [--with-player] [--pack <folder>]");
+        return;
+    }
+    if !platform::only_one() {
+        eprintln!("hp-companion: Cap'n Capy is already here");
+        return;
+    }
+    let dir = args
+        .pack
+        .map(Ok)
+        .unwrap_or_else(pack_dir)
+        .unwrap_or_else(|e| fail(&e));
     let pack = Pack::load(&dir).unwrap_or_else(|e| fail(&e));
     eprintln!("hp-companion: {} from {}", pack.name, dir.display());
 
     platform::init();
     let (tx, rx) = mpsc::channel();
-    link::spawn(tx);
+    link::spawn(tx, args.with_player);
     let mut surface = platform::Surface::new().unwrap_or_else(|e| fail(&e));
     let mut captain = Captain::new(pack, rx);
     platform::run(TICK_MS, || captain.tick(&mut surface));
@@ -60,17 +84,35 @@ fn fail(e: &str) -> ! {
     std::process::exit(1)
 }
 
-fn pack_dir() -> Result<PathBuf, String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-        [] => {}
-        ["--pack", dir] => return Ok(PathBuf::from(dir)),
-        ["-h"] | ["--help"] => {
-            println!("hp-companion [--pack <folder>]");
-            std::process::exit(0)
+#[derive(Debug, Default, PartialEq)]
+struct Args {
+    pack: Option<PathBuf>,
+    /// Started by the player's switch: leave when the player does.
+    with_player: bool,
+    help: bool,
+}
+
+impl Args {
+    fn parse(args: &[String]) -> Result<Args, String> {
+        let mut out = Args::default();
+        let mut it = args.iter();
+        while let Some(a) = it.next() {
+            match a.as_str() {
+                "--pack" => {
+                    let dir = it.next().ok_or("--pack needs a folder")?;
+                    out.pack = Some(PathBuf::from(dir));
+                }
+                "--with-player" => out.with_player = true,
+                "-h" | "--help" => out.help = true,
+                other => return Err(format!("unknown argument {other:?}; try --help")),
+            }
         }
-        _ => return Err(format!("unknown arguments {args:?}; try --help")),
+        Ok(out)
     }
+}
+
+/// The pack beside the exe (the release zip), or in a debug build the repo's.
+fn pack_dir() -> Result<PathBuf, String> {
     let mut places = Vec::new();
     if let Some(exe_dir) = std::env::current_exe()
         .ok()
@@ -147,6 +189,8 @@ impl Captain {
                     self.playing = false;
                     moved = true;
                 }
+                // The player that started him has gone: so does he.
+                Msg::Bye => std::process::exit(0),
             }
         }
         if moved || self.work_read.elapsed() >= WORK_AREAS_EVERY {
@@ -231,5 +275,47 @@ impl Captain {
             ax: (ax * scale) as i32,
             ay: ((ay + 1) * scale) as i32,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(a: &[&str]) -> Result<Args, String> {
+        Args::parse(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn by_hand_he_waits_for_the_player_and_by_the_switch_he_leaves_with_it() {
+        assert_eq!(parse(&[]).unwrap(), Args::default());
+        assert!(parse(&["--with-player"]).unwrap().with_player);
+    }
+
+    #[test]
+    fn a_pack_folder_goes_with_either() {
+        let a = parse(&["--with-player", "--pack", "packs/kittens"]).unwrap();
+        assert!(a.with_player);
+        assert_eq!(a.pack, Some(PathBuf::from("packs/kittens")));
+        assert_eq!(
+            parse(&["--pack", "p", "--with-player"]).unwrap(),
+            a_with("p")
+        );
+    }
+
+    fn a_with(p: &str) -> Args {
+        Args {
+            pack: Some(PathBuf::from(p)),
+            with_player: true,
+            help: false,
+        }
+    }
+
+    #[test]
+    fn anything_else_is_refused_by_name() {
+        assert!(parse(&["--pack"])
+            .unwrap_err()
+            .contains("--pack needs a folder"));
+        assert!(parse(&["--dance"]).unwrap_err().contains("--dance"));
     }
 }

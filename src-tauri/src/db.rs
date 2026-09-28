@@ -500,6 +500,18 @@ pub fn set_glow(conn: &Connection, on: bool) -> Result<(), DbError> {
     set_setting(conn, GLOW_SETTING, if on { "1" } else { "0" })
 }
 
+/// Cap'n Capy's switch (#192, D157): whether the player starts him. Off
+/// until a person turns him on; a capybara on the desktop is asked for.
+pub const COMPANION_SETTING: &str = "companion.on";
+
+pub fn companion_on(conn: &Connection) -> bool {
+    get_setting(conn, COMPANION_SETTING).is_some_and(|v| v == "1")
+}
+
+pub fn set_companion_on(conn: &Connection, on: bool) -> Result<(), DbError> {
+    set_setting(conn, COMPANION_SETTING, if on { "1" } else { "0" })
+}
+
 /// The theme the app wears (#147): which theme in `design/tokens.json`
 /// paints the library and every mask skin. The frontend has the tokens and
 /// says which names are themes; here a name is only ever a short slug, so a

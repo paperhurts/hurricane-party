@@ -184,6 +184,22 @@ impl WindowPlatform for Win32Platform {
             .status();
     }
 
+    fn spawn_quiet(
+        &self,
+        exe: &std::path::Path,
+        args: &[&str],
+    ) -> std::io::Result<std::process::Child> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new(exe)
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    }
+
     fn open_folder(&self, path: &std::path::Path) -> Result<(), String> {
         use std::os::windows::ffi::OsStrExt;
         use windows::core::{w, PCWSTR};
