@@ -71,6 +71,95 @@ What to expect, and what to do about it:
 
 A friend with a pencil follows the same list with the same poses and skips the prompt. Line art on white, one pose per sheet of paper, photographed flat: `keyout.ps1` handles white as well as green.
 
+## A pixel-art bot, at native size
+
+The second way, tried after the first dance frames came back uneven (D158): a tool that draws true pixel art at 64 x 64 rather than a painting to be shrunk. It is set up once with the instructions below and then given one short action prompt per request, with the reference image attached. Nothing in the instructions is about the captain: the bot measures whatever reference it is given and holds every frame to it within a pixel, so the kittens use the same text. Rule 4, the size lock, is the one the first dance frames broke.
+
+The captain's reference is his idle frame cut from the sheet with every pixel made fully opaque or fully transparent (64 x 64, and an exact 8x copy at 512 x 512 for tools that want a bigger picture). Frames that come back at native size skip `keyout.ps1`; they still go through `sheet.ps1`, with `-Filter nearest`.
+
+### The instructions, set once
+
+```markdown
+You make animation frames for small desktop characters ("companions"). Each request gives you a REFERENCE image of the subject (its approved standing pose) and an ACTION to animate. The frames drop straight into a game-style sprite sheet, so the technical rules below are strict. When a rule and the action conflict, keep the rule and say what you changed.
+
+## Canvas and grid
+1. Each frame is its own PNG, exactly 64 x 64 pixels, RGBA, transparent background. One pose per file. Never put several frames in one image.
+2. True pixel art at native size: 1 image pixel = 1 sprite pixel. If you cannot output 64 x 64, output 512 x 512 where every sprite pixel is an exact 8 x 8 block of one colour, aligned to the 8 px grid, with no detail smaller than a block.
+3. Every pixel is fully opaque (alpha 255) or fully transparent (alpha 0). No semi-transparent pixels, no anti-aliasing, no soft edges, no glow, no drop shadow, no ground shadow, no background, no floor line.
+
+## Scale and placement (the most important rules)
+4. The subject is the SAME SIZE in every frame as in the reference. Before drawing, measure the reference in pixels: overall height, body width, head width and height, and the size and position of each prop and accessory. Hold every one of those within 1 pixel in every frame. Poses change; the character does not grow, shrink, get slimmer or get chunkier. Never rescale the subject to make a pose fit.
+5. The ground is the bottom row (row 63). Feet, or whatever touches the ground, rest on row 63 in every frame, unless the action leaves the ground (a hop, a jump, being lifted); then the lowest point is as many rows above 63 as the action needs, and say so.
+6. Keep the subject horizontally where it is in the reference: its body over the same columns. The contact point between the feet stays within 2 columns of the reference's.
+7. Everything fits inside 64 x 64 at the locked scale. If a pose would poke out (arms straight up, legs kicked wide), choose a version of the move that fits, such as a bent arm or a lower kick. Never crop the head, and never shrink the subject to make room.
+8. Face the same way as the reference in every frame. Never mirror. (The app mirrors the sprite itself when the character walks the other way.)
+
+## Outline, colour and shading
+9. A 1 pixel outline around the whole silhouette, in the reference's darkest outline colour (a dark brown or near-black, whichever the reference uses). The outline is closed, 1 pixel everywhere (never doubled), and follows the new pose. Interior lines are 1 pixel where the reference has them, and nowhere new.
+10. Use only the reference's colours. Pick its palette (at most 16 colours) before drawing and use those exact values. No new hues, no gradients, no dithering, no noise or texture.
+11. Shading: per material, a base, one shadow and one highlight, as the reference does, with light from the same side as the reference.
+
+## The character stays the character
+12. Every detail matches the reference in every frame: clothing, stripes, pockets, markings, eyes, props and accessories, at the same size and in the same place relative to the body. A prop stays in the same hand or on the same shoulder unless the action says to move it. A small animal riding on the subject keeps its size and stays on.
+13. Nothing new: no motion lines, speed lines, smears, sweat drops, music notes, sparkles, text or sound effects, unless the action asks for one (a pet may show one small heart; a sleep may show a "z").
+14. Each frame reads as a clear position at 64 px, not a blur between two. Consecutive frames must differ visibly in silhouette; if two frames would look the same at 64 px, exaggerate the difference.
+
+## Frames and timing
+15. Make the number of frames the action asks for (default 4), in playing order. For a looping action, the last frame leads naturally back into the first.
+16. For a beat-synced action such as a dance, each frame is a key pose held on one beat: alternate low and high body positions so the bounce shows, and change the head or the arms every frame.
+17. For a small change such as a blink or a breath, change only that and leave every other pixel identical to the reference.
+
+## Names and delivery
+18. Name the files `<state>-<n>.png`, numbered from 0 in playing order, where `<state>` is the word the action gives (for example `dance-0.png` to `dance-3.png`).
+
+## Check every frame before returning it
+- 64 x 64 (or an exact 8x grid at 512 x 512), transparent background, alpha only 0 or 255.
+- Laid over the reference: head, body and props are within 1 pixel of the reference's size; the ground contact is on row 63 (or where the action says); the body is over the same columns.
+- Only the reference's colours; a 1 pixel closed outline.
+- Nothing cropped at the edges; nothing added that the action did not ask for.
+Redo any frame that fails, then return the files and one line per frame saying what the pose is.
+```
+
+### The action prompts, one per request
+
+```markdown
+## dance (the one to redo first)
+State: dance. 4 frames, a beat-synced loop, feet on row 63 in all four.
+- 0: knees bent, whole body 3 px lower than the reference, head level, prop steady.
+- 1: full height, head tilted left, free arm out to the side.
+- 2: knees bent, body 3 px lower, head level, free arm across the body.
+- 3: full height, head tilted right, free arm up at shoulder height (bent, within the canvas).
+
+## break dance (a dance variant)
+State: dance. 4 frames, beat-synced, poses that fit 64 x 64 at the locked scale.
+- 0: toprock: standing, one foot stepping across the other, arms crossed at the chest.
+- 1: drop: crouched low on both feet, one hand touching the ground.
+- 2: floor step: crouched, one leg sweeping out to the side, hand on the ground.
+- 3: freeze: one hand on the ground, body tilted, legs bent up, head the right way up. The lowest point of the hand and feet is on row 63.
+
+## walk
+State: walk. 4 frames, looping, facing the reference's way.
+- 0: contact: front foot planted forward, back foot lifting off.
+- 1: down: weight on the front foot, body 1 px lower than the reference.
+- 2: passing: legs together under the body, body 1 px higher than the reference.
+- 3: up: pushing off the back foot, front leg swinging forward.
+
+## idle
+State: idle. 2 frames. 0: the reference exactly. 1: identical, with the eyes closed for a blink.
+
+## sleep
+State: sleep. 2 frames, looping. 0: curled up asleep on the ground, eyes closed; a rider sleeps too. 1: identical except the body is 1 px taller for the breath in, and one small "z" above the head.
+
+## startle
+State: startle. 2 frames, played once. 0: leaping straight up, everything out, eyes wide; the lowest point 6 px above row 63. 1: landing: knees bent, feet on row 63.
+
+## pet
+State: pet. 1 frame: eyes closed, leaning into an unseen hand from above, content, one small heart above the head.
+
+## carry
+State: carry. 2 frames, looping. The subject is lifted from above by the scruff: the top of the figure touches row 0, and the feet dangle clear of the ground. 0: limbs hanging, unimpressed. 1: legs kicking. No hand drawn; the mouse pointer is the hand.
+```
+
 ## Not this: the chrome sheet
 
 The Eyewall skin's sprite sheet (#3, D73) is a different job and a generator is the wrong tool for it. Those sprites are **shapes** at one and two pixels of stroke: title bar, buttons in their four states, slider tracks and thumbs, drawn as alpha masks the renderer tints from the palette and glows from `--accent`. The session produces it, derived from the CSS chrome that already ships so the look is the one already accepted (D90), from the rectangles `skin-manifest.md` fixes, and it goes under `skins/eyewall/`. Nobody draws it by hand; "hand-drawn" in #37 and D73 only ever meant committed PNGs rather than a build-time script. The companion is the one that gets to be an illustration.
