@@ -123,6 +123,9 @@
   .purr .shots { overflow-x: auto; max-width: 100%; }
   .purr .shots img { width: 550px; max-width: none; image-rendering: pixelated; filter: drop-shadow(0 0 30px color-mix(in srgb, var(--alert) 22%, transparent)); }
   .purr .blurb .label { color: var(--alert); }
+  .capn { display: grid; grid-template-columns: minmax(0, auto) minmax(240px, 1fr); gap: 40px; align-items: center; }
+  .capn img { width: 256px; max-width: 100%; image-rendering: pixelated; }
+  .capn .blurb .label { color: var(--warn); }
   .trio { display: flex; flex-direction: column; gap: 10px; }
   .trio img { width: 100%; max-width: 740px; }
   .trio .caps { display: grid; grid-template-columns: repeat(3, 1fr); max-width: 740px; font: 400 11px/1.5 var(--mono); letter-spacing: 1.6px; color: var(--dim); text-align: center; }
@@ -149,7 +152,7 @@
     /* minmax(0, …), not 1fr: a 1fr track never shrinks below its widest
        content, so the 550 px shots pushed the whole page sideways instead
        of scrolling inside their own boxes. */
-    header.hero, .two, .windows, .purr, .shade, .tinker, .faq, footer.wrap { grid-template-columns: minmax(0, 1fr); }
+    header.hero, .two, .windows, .purr, .capn, .shade, .tinker, .faq, footer.wrap { grid-template-columns: minmax(0, 1fr); }
     .hero img, .tinker img, footer img { justify-self: start; }
     .wrap { padding: 40px 20px; }
     nav { padding: 18px 20px; }
@@ -169,6 +172,7 @@
     <a href="#storm">BEFORE THE STORM</a>
     <a href="#windows">THE WINDOWS</a>
     <a href="#purricane">PURRICANE</a>
+    <a href="#capn">CAP'N CAPY</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/paperhurts/hurricane-party">GITHUB</a>
   </div>
@@ -370,6 +374,21 @@
   <div class="trio">
     <img src="shots/kaleidoscope.png" alt="Three kaleidoscope badges playing the same track: six segments, eight segments, and calm, smaller and in one colour">
     <div class="caps"><span>6 SEG</span><span>8 SEG</span><span>CALM</span></div>
+  </div>
+</section>
+
+<section id="capn" class="wrap rule" style="display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow ember">CAP'N CAPY</div>
+    <h2>A capybara who lives on your windows.</h2>
+  </div>
+  <div class="capn">
+    <img src="shots/capn-dance.gif" width="256" height="256" alt="Cap'n Capy, a capybara in a yellow storm jacket with a boombox on his shoulder and a seagull on his head, break-dancing: toprock, drop, sweep, freeze">
+    <div class="blurbs">
+      <div class="blurb"><div class="label">HE LIVES UP THERE</div><p>Tick Cap'n Capy in the library and he turns up on the top edge of a window, seagull and all. He wanders along it now and then. Drag his window and he hops; pull it out from under him and he drops to the next one down.</p></div>
+      <div class="blurb"><div class="label">HE DANCES</div><p>While music plays he break-dances, a move on every beat. When nothing has played for half a minute he curls up for a nap, and the next song wakes him.</p></div>
+      <div class="blurb"><div class="label">HE MINDS HIS MANNERS</div><p>Click him and he leans into the pet; drag him and he hangs by his scruff until you let go. Clicks around him go straight through, and he never takes the keyboard, so he can stay out while you record your screen. He is his own little program: if he ever trips, the music plays on.</p></div>
+    </div>
   </div>
 </section>
 

@@ -96,6 +96,8 @@ Resize-Png (Join-Path $root "design\icon\capybara-1254.png") (Join-Path $dist "i
 $shots = Join-Path $site "shots"
 if (Test-Path $shots) {
     Copy-Item (Join-Path $shots "*.png") (Join-Path $dist "shots") -Force
+    # Cap'n Capy's dance is an animated GIF (#192).
+    Copy-Item (Join-Path $shots "*.gif") (Join-Path $dist "shots") -Force -ErrorAction SilentlyContinue
 }
 $missing = @("step1.png", "step2.png", "step3.png", "windows.png", "windowshade.png") | Where-Object { -not (Test-Path (Join-Path $dist "shots\$_")) }
 if ($missing) { Write-Warning ("screenshots missing from site/shots: " + ($missing -join ", ")) }
