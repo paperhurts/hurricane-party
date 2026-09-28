@@ -25,31 +25,43 @@ pub enum Msg {
     Beat,
     /// The player is not there (any more).
     Gone,
+    /// Started by the player's switch, and the player has gone: time to go.
+    Bye,
 }
 
 /// How long he waits before knocking again.
 pub const RETRY: Duration = Duration::from_secs(2);
+/// Started by the player but never let in: the player did not come up, and
+/// there is no one to leave with. He does not wait for ever.
+pub const NO_SHOW: Duration = Duration::from_secs(30);
 
 const STATUS_ID: u64 = 2;
 const LAYOUT_ID: u64 = 3;
 const VIZ_ID: u64 = 4;
 
-pub fn spawn(tx: Sender<Msg>) {
+/// `with_player`: he came from the player's switch (D157), so the pipe
+/// closing means the player has gone and so should he. Otherwise he waits for
+/// it, and outlasts a restart.
+pub fn spawn(tx: Sender<Msg>, with_player: bool) {
     std::thread::Builder::new()
         .name("link".into())
         .spawn(move || {
+            let born = std::time::Instant::now();
             let mut connected = false;
+            let mut ever = false;
             loop {
                 let outcome = session(&tx, &mut connected);
+                ever |= connected;
                 if connected {
                     match outcome {
-                        Ok(()) => eprintln!("hp-companion: the player went; waiting for it"),
-                        Err(e) => eprintln!("hp-companion: lost the player ({e}); waiting for it"),
+                        Ok(()) => eprintln!("hp-companion: the player went"),
+                        Err(e) => eprintln!("hp-companion: lost the player ({e})"),
                     }
                     connected = false;
                 }
-                if tx.send(Msg::Gone).is_err() {
-                    return; // the window side has gone
+                let bye = with_player && (ever || born.elapsed() >= NO_SHOW);
+                if tx.send(if bye { Msg::Bye } else { Msg::Gone }).is_err() || bye {
+                    return;
                 }
                 std::thread::sleep(RETRY);
             }

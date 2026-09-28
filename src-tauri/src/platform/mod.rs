@@ -121,6 +121,16 @@ pub trait WindowPlatform: Send + Sync {
     /// existed: Pause ended one of the two processes and not the other.
     fn kill_tree(&self, pid: u32);
 
+    /// Start a program of our own with no console window and nothing on its
+    /// standard streams (#192, D157: Cap'n Capy). Here for the reason
+    /// `kill_tree` is: without the flag, a console program started from a GUI
+    /// app flashes a console window up, and the flag is Windows-only.
+    fn spawn_quiet(
+        &self,
+        exe: &std::path::Path,
+        args: &[&str],
+    ) -> std::io::Result<std::process::Child>;
+
     /// Open a folder in the OS file manager (#155). Not about a window
     /// either, and here for the same reason as `kill_tree`: there is no
     /// portable call, and the shell's own "open" is the one that gets a path

@@ -42,6 +42,19 @@ impl WindowPlatform for StubPlatform {
     // what there is.
     fn kill_tree(&self, _pid: u32) {}
 
+    fn spawn_quiet(
+        &self,
+        exe: &std::path::Path,
+        args: &[&str],
+    ) -> std::io::Result<std::process::Child> {
+        std::process::Command::new(exe)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    }
+
     fn open_folder(&self, _path: &std::path::Path) -> Result<(), String> {
         Err("opening a folder is not supported on this platform".into())
     }

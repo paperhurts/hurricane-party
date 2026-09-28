@@ -6,6 +6,10 @@ use crate::sprite::Bgra;
 
 pub fn init() {}
 
+pub fn only_one() -> bool {
+    true
+}
+
 pub struct Surface;
 
 impl Surface {

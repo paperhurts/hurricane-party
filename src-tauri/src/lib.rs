@@ -1,4 +1,5 @@
 pub mod bond;
+mod companion;
 mod control;
 mod db;
 mod drives;
@@ -1610,6 +1611,29 @@ fn set_glow(app: AppHandle, on: bool) -> Result<(), db::DbError> {
     Ok(())
 }
 
+/// Cap'n Capy's switch (#192, D157): whether the player starts him.
+#[tauri::command]
+fn get_companion(app: AppHandle) -> bool {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::companion_on(&conn)
+}
+
+/// Turn him on or off. On starts him now and at every launch after; off ends
+/// the one the player started. The switch is only remembered once he has
+/// started, so a missing program leaves it off and says why.
+#[tauri::command]
+fn set_companion(app: AppHandle, on: bool) -> Result<(), String> {
+    if on {
+        companion::start(&app)?;
+    } else {
+        companion::stop(&app);
+    }
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    db::set_companion_on(&conn, on).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Focus is a group property (v0.4-brief): when any bonded window has focus, all
 /// of them render active.
@@ -1717,6 +1741,7 @@ pub fn run() {
         .manage(control::ControlState::default())
         .manage(control::Broadcaster::default())
         .manage(viz::VizHub::default())
+        .manage(companion::Companion::default())
         .manage(wm::Wm::default())
         .manage(video::SwitchAcks::default())
         .manage(video::OpenLock::default())
@@ -1806,6 +1831,10 @@ pub fn run() {
             // Cone's radar timer (#85, D19): idle unless Cone is the theme and
             // a radar is picked, and never before the windows are up.
             radar::spawn(handle.clone());
+            // Cap'n Capy, if his switch was left on (#192, D157). After the
+            // windows, so he has something to stand on; he knocks on the pipe
+            // every 2 s anyway.
+            companion::at_launch(&handle);
             // The library read back quietly, a while after launch (#164, D142).
             integrity::spawn(handle.clone());
             Ok(())
@@ -1927,7 +1956,9 @@ pub fn run() {
             wm_seam_down,
             wm_splitter_move,
             wm_splitter_end,
-            wm_demagnetize
+            wm_demagnetize,
+            get_companion,
+            set_companion
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

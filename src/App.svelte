@@ -139,6 +139,8 @@
   // setting until there is a settings window; Rust saves it and tells the
   // three classic windows.
   let glow = $state(true);
+  // Cap'n Capy's switch (#192, D157): the player starts his own little program.
+  let capn = $state(false);
   // The theme the app wears (#147), and calm, the kaleidoscope's still switch,
   // offered while the theme's analyser is one.
   let theme = $state<Wearable>("eyewall");
@@ -563,6 +565,7 @@
     refreshFailures();
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     invoke<boolean>("get_glow").then((on) => (glow = on));
+    invoke<boolean>("get_companion").then((on) => (capn = on));
     invoke<string>("get_theme").then((t) => {
       theme = isWearable(t) ? t : "eyewall";
       applyTheme(theme);
@@ -1622,6 +1625,17 @@
     await invoke("set_glow", { on });
   }
 
+  /** Start or stop Cap'n Capy. The box follows what happened, not what was asked. */
+  async function setCapn(on: boolean) {
+    capn = on;
+    try {
+      await invoke("set_companion", { on });
+    } catch (e) {
+      capn = !on;
+      error = String(e);
+    }
+  }
+
   /** Wear a theme (#147): this window now, the others when they hear it. A
    * theme that ships with a skin puts it on, and leaving it takes it off
    * (D132), so the picker follows what Rust says is worn. */
@@ -2133,6 +2147,10 @@
     <label class="glow" title="The halo on the player's buttons, clock and lit rows">
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
+    </label>
+    <label class="glow" title="A capybara who stands on the player's windows, dances to the music and naps when it stops. Click him, or pick him up">
+      <input type="checkbox" checked={capn} onchange={(e) => setCapn(e.currentTarget.checked)} />
+      Cap'n Capy
     </label>
     <label class="conc skinpick" title="The colours and type of the library, and of every skin that wears the theme">
       theme

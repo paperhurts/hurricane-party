@@ -80,6 +80,22 @@ pub fn init() {
     }
 }
 
+/// Whether this is the only Cap'n: a named mutex for the session, held for
+/// the life of the process (the handle is never closed; Windows lets go of
+/// it when he exits). A second one started by the switch or by hand sees it
+/// already there and leaves.
+pub fn only_one() -> bool {
+    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows::Win32::System::Threading::CreateMutexW;
+    // SAFETY: creates or opens a named kernel object; the name is a constant.
+    unsafe {
+        match CreateMutexW(None, false, w!("Local\\hurricane-party-companion")) {
+            Ok(_held) => GetLastError() != ERROR_ALREADY_EXISTS,
+            Err(_) => true, // cannot tell: better one extra than none
+        }
+    }
+}
+
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         // Belt and braces with WS_EX_NOACTIVATE: a click never activates him.

@@ -40,7 +40,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
+            crates/hp-companion/target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock', 'crates/hp-companion/Cargo.lock') }}
           restore-keys: cargo-release-${{ runner.os }}-
 
       - name: Fetch the pinned sidecars
@@ -58,6 +59,11 @@ jobs:
       - name: Build (no installer)
         run: pnpm tauri build --no-bundle
 
+      # Cap'n Capy (#192, D157): his own small program, beside the player,
+      # with the pack it loads. A release build has no console window.
+      - name: Build Cap'n Capy
+        run: cargo build --release --manifest-path crates/hp-companion/Cargo.toml
+
       # The sidecars' licences ride along beside them (D133): ffmpeg is GPL,
       # and a copy of the licence and where its source is go with the binary.
       - name: Collect the exe, its sidecars and their licences
@@ -65,7 +71,10 @@ jobs:
           mkdir -p out/licenses
           cp src-tauri/target/release/*.exe out/
           cp licenses/* out/licenses/
-          ls -la out out/licenses
+          cp crates/hp-companion/target/release/hp-companion.exe out/
+          mkdir -p out/companions
+          cp -r skins/companions/captain out/companions/
+          ls -la out out/licenses out/companions/captain
 
       # An artifact name may not contain a slash, and every branch here has
       # one (chore/61-…). Tags and main never did, which is why a manual run
