@@ -11,6 +11,7 @@ mod layout;
 mod library;
 mod localimport;
 mod packs;
+mod painted;
 mod pipeline;
 pub mod platform;
 mod playlist;

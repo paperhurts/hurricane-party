@@ -105,6 +105,14 @@ pub fn import(src: &Path, dir: &Path) -> Result<String, String> {
     } else {
         return Err("pick a companion's companion.json, or a zip of one".into());
     };
+    // A painted template (D163) becomes a pack here, before it is installed.
+    let first = String::from_utf8_lossy(&files[0].1).into_owned();
+    let files = if crate::painted::is_painted(&first) {
+        let sheet = &files.get(1).ok_or("the painted sheet is missing")?.1;
+        crate::painted::finish(&first, sheet)?
+    } else {
+        files
+    };
     let json = String::from_utf8(files[0].1.clone()).map_err(|_| "companion.json is not text")?;
     let name = manifest_name(&json).unwrap_or_else(|| "companion".into());
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
