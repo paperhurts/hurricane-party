@@ -73,8 +73,9 @@ jobs:
           cp licenses/* out/licenses/
           cp crates/hp-companion/target/release/hp-companion.exe out/
           mkdir -p out/companions
-          cp -r skins/companions/captain out/companions/
-          ls -la out out/licenses out/companions/captain
+          # The companions that ship (packs.rs SHIPPED, D164).
+          cp -r skins/companions/captain skins/companions/wee-man out/companions/
+          ls -la out out/licenses out/companions/captain out/companions/wee-man
 
       # An artifact name may not contain a slash, and every branch here has
       # one (chore/61-…). Tags and main never did, which is why a manual run

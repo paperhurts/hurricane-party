@@ -147,7 +147,8 @@
   let glow = $state(true);
   // Cap'n Capy's switch (#192, D157): the player starts his own little program.
   let capn = $state(false);
-  // Which companion the box starts (#208, D162): Cap'n Capy, or one imported.
+  // Which companion the box starts (#208, D162): one that ships (Cap'n Capy,
+  // Wee Man, D164), or one imported.
   let companions = $state<{ id: string; name: string }[]>([{ id: "captain", name: "Cap'n Capy" }]);
   let companionPick = $state("captain");
   // The theme the app wears (#147), and calm, the kaleidoscope's still switch,
@@ -2228,7 +2229,7 @@
       <input type="checkbox" checked={glow} onchange={(e) => setGlow(e.currentTarget.checked)} />
       glow
     </label>
-    <span class="glow" title="A companion who stands on the player's windows, dances to the music and naps when it stops. Click them, or pick them up. Cap'n Capy ships; Paint a companion… or Import companion… brings your own">
+    <span class="glow" title="A companion who stands on the player's windows, dances to the music and naps when it stops. Click them, or pick them up. Cap'n Capy and Wee Man ship; Paint a companion… or Import companion… brings your own">
       <input
         type="checkbox"
         aria-label="Companion on the desktop"

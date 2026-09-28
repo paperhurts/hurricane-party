@@ -41,6 +41,35 @@ fn exe_path() -> Option<PathBuf> {
     places.into_iter().find(|p| p.is_file())
 }
 
+/// Where the companions that ship are (D164): the `companions` folder beside
+/// the player in the release zip, or in a debug build the repo's own.
+pub fn shipped_dir() -> Option<PathBuf> {
+    let mut places = Vec::new();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from))
+    {
+        places.push(dir.join("companions"));
+    }
+    #[cfg(debug_assertions)]
+    places.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skins/companions"));
+    places
+        .into_iter()
+        .find(|d| d.join(packs::CAPTAIN).join(packs::MANIFEST).is_file())
+}
+
+/// A companion's pack folder by its id: a shipped one's beside the player,
+/// or an imported one's.
+pub fn folder_for(app: &AppHandle, id: &str) -> Option<PathBuf> {
+    if packs::SHIPPED.contains(&id) {
+        shipped_dir()
+            .map(|d| d.join(id))
+            .filter(|d| d.join(packs::MANIFEST).is_file())
+    } else {
+        packs::folder(&crate::companions_dir(app), id)
+    }
+}
+
 fn exe() -> Result<PathBuf, String> {
     exe_path().ok_or_else(|| {
         format!(
@@ -52,8 +81,9 @@ fn exe() -> Result<PathBuf, String> {
 
 /// Start the picked companion, unless the one we started is still running. A
 /// second copy started some other way leaves at once on its own (only one
-/// runs). Cap'n Capy finds his own pack; any other is named by its folder
-/// in the companions folder (D162).
+/// runs). Cap'n Capy finds his own pack; any other is named by its folder,
+/// beside the player for one that ships (D164) or in the companions folder
+/// (D162).
 pub fn start(app: &AppHandle) -> Result<(), String> {
     let pick = {
         let state = app.state::<Db>();
@@ -64,7 +94,7 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
         None
     } else {
         Some(
-            packs::folder(&crate::companions_dir(app), &pick)
+            folder_for(app, &pick)
                 .ok_or("that companion's folder is gone; pick another in the list")?,
         )
     };

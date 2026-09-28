@@ -386,6 +386,26 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn wee_mans_own_pack_loads() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skins/companions/wee-man");
+        let p = Pack::load(&dir).expect("the shipped pack loads");
+        assert_eq!(p.name, "Wee Man");
+        assert_eq!((p.frame, p.anchor), ((64, 64), (32, 63)));
+        assert_eq!(p.default_count, 1, "one kitten with a name");
+        // His grooming row became idle's moments: the pose, then a blink, a
+        // lick and a look up, each after the pose held eleven frames (D164).
+        let idle = &p.state("idle").frames;
+        assert_eq!(idle.len(), 36);
+        assert_eq!((idle[11], idle[23], idle[35]), (1, 2, 3));
+        assert_eq!(
+            p.state("startle").frames,
+            [32, 33],
+            "the leap, then landing puffed"
+        );
+        assert_eq!(p.cell_for(p.state("walk").frames[0], 2).0.w, 128);
+    }
+
+    #[test]
     fn an_even_scale_draws_the_2x_cell_and_an_odd_one_the_1x() {
         let p =
             Pack::parse_with_2x(&manifest(IDLE), &sheet(8, 1, 4), Some(&sheet(8, 1, 8))).unwrap();
