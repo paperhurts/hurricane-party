@@ -1,8 +1,7 @@
 //! What he does, moment to moment. Pure: time, the ledges, the window he is
 //! standing on, whether music is playing and whether a beat just landed go in;
 //! his feet, his facing and his state come out. The pack turns that into a
-//! frame (`pose`). The seven states are the app's, fixed (`purricane.md`); this
-//! PR drives five of them, and `pet` and `carry` come with the pointer.
+//! frame (`pose`). The seven states are the app's, fixed (`purricane.md`).
 //!
 //! - **idle** by default, with a walk now and then to somewhere else on the
 //!   ledge he is on, across a seam if two windows sit side by side.
@@ -12,6 +11,12 @@
 //! - **startle**: when the window under him moves, shades, hides or goes, or
 //!   the stretch he stands on stops being a ledge, he jumps and falls to the
 //!   next ledge below, the floor above the taskbar at the bottom of it all.
+//! - **pet**: a click on him. He leans into it for a moment, awake again.
+//! - **carry**: a drag. He hangs from the hand by his scruff, kicking, and
+//!   when he is let go he falls to the ledge below where he was dropped.
+//!
+//! A jolt or a pet wakes him and starts the quiet over, so he does not doze
+//! off again the moment he lands.
 
 use crate::pack::Pack;
 use crate::perch::{self, Ledge};
@@ -30,6 +35,14 @@ pub const GRAVITY: f32 = 2400.0;
 pub const HOP: f32 = 420.0;
 /// He holds the landing frame this long before standing.
 pub const LANDING: f32 = 0.3;
+/// A pet lasts this long, whatever the pack's frame count.
+pub const PET_FOR: f32 = 1.5;
+/// A press that moves further than this (physical pixels, either axis) is a
+/// drag; less is a click. Windows' own drag threshold is the same size.
+pub const DRAG_PX: i32 = 4;
+/// Carried, the hand holds him this far (1x pixels) below the top of his
+/// sprite: the scruff, where the carry frames stretch his jacket up to.
+pub const SCRUFF: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Mode {
@@ -39,6 +52,26 @@ enum Mode {
     Sleep,
     Air { vy: f32 },
     Landing { until: f32 },
+    Pet { until: f32 },
+    Carry,
+}
+
+/// The pointer on him, in screen pixels. His window turns its mouse messages
+/// into these, and only his own opaque pixels get them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Hand {
+    Down(i32, i32),
+    Move(i32, i32),
+    Up(i32, i32),
+    /// The mouse was taken away mid-press (another window captured it).
+    Cancel,
+}
+
+/// A press on him: where it started, and whether it has become a drag.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Grab {
+    from: (i32, i32),
+    carrying: bool,
 }
 
 /// The window under his feet as it was when he landed, so a move is noticed.
@@ -85,6 +118,7 @@ pub struct Brain {
     /// `None` on a floor or in the air.
     under: Option<Under>,
     placed: bool,
+    grab: Option<Grab>,
     rng: u64,
 }
 
@@ -110,6 +144,7 @@ impl Brain {
             last_beat: f32::NEG_INFINITY,
             under: None,
             placed: false,
+            grab: None,
             rng: seed | 1,
         }
     }
@@ -118,6 +153,60 @@ impl Brain {
     pub fn leave(&mut self) {
         self.placed = false;
         self.under = None;
+        self.grab = None;
+    }
+
+    /// The pointer, as his window heard it. `hang` is how far below the hand
+    /// his feet are while he is carried, in screen pixels.
+    pub fn hand(&mut self, h: Hand, hang: f32) {
+        if !self.placed {
+            return;
+        }
+        match h {
+            Hand::Down(x, y) => {
+                self.grab = Some(Grab {
+                    from: (x, y),
+                    carrying: false,
+                })
+            }
+            Hand::Move(x, y) => {
+                let Some(g) = self.grab else { return };
+                let far = (x - g.from.0).abs() > DRAG_PX || (y - g.from.1).abs() > DRAG_PX;
+                if !g.carrying && far {
+                    self.grab = Some(Grab {
+                        carrying: true,
+                        ..g
+                    });
+                    self.under = None;
+                    self.set(Mode::Carry);
+                }
+                if self.mode == Mode::Carry {
+                    self.feet = (x as f32, y as f32 + hang);
+                }
+            }
+            Hand::Up(..) => match self.grab.take() {
+                Some(Grab { carrying: true, .. }) => self.set(Mode::Air { vy: 0.0 }),
+                Some(_) if !matches!(self.mode, Mode::Air { .. }) => {
+                    self.wake();
+                    self.set(Mode::Pet {
+                        until: self.clock + PET_FOR,
+                    });
+                }
+                _ => {}
+            },
+            Hand::Cancel => {
+                if let Some(Grab { carrying: true, .. }) = self.grab.take() {
+                    self.set(Mode::Air { vy: 0.0 });
+                }
+            }
+        }
+    }
+
+    /// Start the quiet over: whatever woke him, he stays up a while.
+    fn wake(&mut self) {
+        if self.quiet_since.is_some() {
+            self.quiet_since = Some(self.clock);
+        }
     }
 
     pub fn is_placed(&self) -> bool {
@@ -132,6 +221,8 @@ impl Brain {
             Mode::Dance => "dance",
             Mode::Sleep => "sleep",
             Mode::Air { .. } | Mode::Landing { .. } => "startle",
+            Mode::Pet { .. } => "pet",
+            Mode::Carry => "carry",
         }
     }
 
@@ -162,15 +253,17 @@ impl Brain {
             self.set(Mode::Idle { until: rest });
         }
 
-        let grounded = !matches!(self.mode, Mode::Air { .. });
+        let grounded = !matches!(self.mode, Mode::Air { .. } | Mode::Carry);
         if grounded && self.ground_gone(w) {
             self.set(Mode::Air { vy: -HOP * w.zoom });
             self.under = None;
+            self.wake();
         }
 
         match self.mode {
             Mode::Air { vy } => self.fall(dt, vy, w),
-            Mode::Landing { until } => {
+            Mode::Carry => {}
+            Mode::Landing { until } | Mode::Pet { until } => {
                 if self.clock >= until {
                     let rest = self.rest();
                     self.set(Mode::Idle { until: rest });
@@ -215,6 +308,8 @@ impl Brain {
         let (state, cell) = match self.mode {
             Mode::Air { .. } => ("startle", first(pack, "startle")),
             Mode::Landing { .. } => ("startle", last(pack, "startle")),
+            Mode::Pet { .. } => ("pet", timed(pack, "pet", self.clock - self.since)),
+            Mode::Carry => ("carry", timed(pack, "carry", self.clock - self.since)),
             Mode::Dance if self.clock - self.last_beat <= BEAT_STALE => {
                 let d = &pack.state("dance").frames;
                 ("dance", d[self.beats as usize % d.len()])
@@ -551,5 +646,125 @@ mod tests {
             "startle",
             "Main moving does not shake the floor"
         );
+    }
+
+    /// Where the hand is while carrying him at 1x: feet this far below it.
+    const HANG: f32 = 64.0 - SCRUFF;
+
+    #[test]
+    fn a_click_is_a_pet_and_then_he_stands() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.hand(Hand::Down(583, 370), HANG);
+        s.brain.hand(Hand::Up(584, 371), HANG);
+        s.run(0.1, None);
+        assert_eq!(s.brain.state(), "pet");
+        assert_eq!(s.brain.pose(&captain()).state, "pet");
+        s.run(PET_FOR, None);
+        assert_eq!(s.brain.state(), "idle");
+        assert_eq!(s.brain.feet(), (583, 400), "a pet does not move him");
+    }
+
+    #[test]
+    fn a_pet_wakes_him_and_he_stays_up_a_while() {
+        let mut s = Sim::new(one_window());
+        s.run(SLEEP_AFTER + 20.0, None);
+        assert_eq!(s.brain.state(), "sleep");
+        let (x, y) = s.brain.feet();
+        s.brain.hand(Hand::Down(x, y - 30), HANG);
+        s.brain.hand(Hand::Up(x, y - 30), HANG);
+        s.run(PET_FOR + 1.0, None);
+        assert_ne!(s.brain.state(), "sleep", "not straight back to sleep");
+        s.run(SLEEP_AFTER, None);
+        assert_eq!(
+            s.brain.state(),
+            "sleep",
+            "until the quiet has been long enough again"
+        );
+    }
+
+    #[test]
+    fn a_jolt_wakes_him_and_he_stays_up_a_while() {
+        let lower = win("library", 400, 700, 600, 300);
+        let mut s = Sim::new(layout(vec![win("main", 500, 400, 275, 116), lower.clone()]));
+        s.run(SLEEP_AFTER + 20.0, None);
+        assert_eq!(s.brain.state(), "sleep");
+        let mut main = win("main", 500, 400, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main, lower]);
+        s.run(3.0, None);
+        assert_eq!(s.brain.feet().1, 700);
+        assert_ne!(s.brain.state(), "sleep", "the fall woke him");
+    }
+
+    #[test]
+    fn a_drag_carries_him_by_the_scruff() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.hand(Hand::Down(583, 370), HANG);
+        s.brain.hand(Hand::Move(600, 360), HANG);
+        assert_eq!(s.brain.state(), "carry");
+        s.brain.hand(Hand::Move(900, 200), HANG);
+        s.run(0.5, None);
+        assert_eq!(s.brain.feet(), (900, 260), "hanging under the hand");
+        assert_eq!(s.brain.pose(&captain()).state, "carry");
+        assert_eq!(s.brain.state(), "carry", "no gravity while held");
+    }
+
+    #[test]
+    fn let_go_he_falls_to_the_ledge_below_where_he_was_dropped() {
+        let lib = win("library", 800, 700, 600, 300);
+        let mut s = Sim::new(layout(vec![win("main", 500, 400, 275, 116), lib]));
+        s.run(0.1, None);
+        s.brain.hand(Hand::Down(583, 370), HANG);
+        s.brain.hand(Hand::Move(1000, 300), HANG);
+        s.brain.hand(Hand::Up(1000, 300), HANG);
+        s.run(2.0, None);
+        assert_eq!(
+            s.brain.feet(),
+            (1000, 700),
+            "onto the library, where he was dropped"
+        );
+        s.brain.hand(Hand::Down(1000, 670), HANG);
+        s.brain.hand(Hand::Move(1700, 100), HANG);
+        s.brain.hand(Hand::Up(1700, 100), HANG);
+        s.run(2.0, None);
+        assert_eq!(s.brain.feet(), (1700, 1032), "over nothing: the floor");
+    }
+
+    #[test]
+    fn a_wobble_smaller_than_a_drag_is_still_a_pet() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.hand(Hand::Down(583, 370), HANG);
+        s.brain.hand(Hand::Move(583 + DRAG_PX, 370 - DRAG_PX), HANG);
+        s.brain.hand(Hand::Up(583 + DRAG_PX, 370), HANG);
+        assert_eq!(s.brain.state(), "pet");
+    }
+
+    #[test]
+    fn a_carry_the_mouse_is_taken_from_drops_him() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.hand(Hand::Down(583, 370), HANG);
+        s.brain.hand(Hand::Move(583, 300), HANG);
+        s.brain.hand(Hand::Cancel, HANG);
+        s.run(2.0, None);
+        assert_eq!(s.brain.feet(), (583, 400), "straight down onto Main again");
+    }
+
+    #[test]
+    fn a_click_while_he_falls_does_nothing_but_a_drag_catches_him() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.layout = layout(vec![win("main", 1200, 400, 275, 116)]);
+        s.run(0.2, None);
+        assert_eq!(s.brain.state(), "startle");
+        s.brain.hand(Hand::Down(583, 500), HANG);
+        s.brain.hand(Hand::Up(583, 500), HANG);
+        assert_eq!(s.brain.state(), "startle", "no pet in mid-air");
+        s.brain.hand(Hand::Down(583, 500), HANG);
+        s.brain.hand(Hand::Move(583, 520), HANG);
+        assert_eq!(s.brain.state(), "carry", "caught");
     }
 }

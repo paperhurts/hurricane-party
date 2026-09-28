@@ -18,6 +18,10 @@ impl Surface {
     }
 
     pub fn hide(&mut self) {}
+
+    pub fn hands(&mut self) -> Vec<crate::brain::Hand> {
+        Vec::new()
+    }
 }
 
 pub fn work_areas() -> Vec<Rect> {
