@@ -57,6 +57,23 @@ fn main() {
     let args = Args::parse(&args).unwrap_or_else(|e| fail(&e));
     if args.help {
         println!("hp-companion [--with-player] [--pack <folder>]");
+        println!("hp-companion --check --pack <folder>");
+        return;
+    }
+    // The player checks a pack before installing it (D162), with these rules
+    // and no others: load it as he would, say so, and go. No window, and no
+    // claim on being the only one, so it works while he is on screen.
+    if args.check {
+        let Some(dir) = args.pack else {
+            fail("--check needs --pack <folder>")
+        };
+        match Pack::load(&dir) {
+            Ok(p) => println!("ok: {}", p.name),
+            Err(e) => {
+                println!("refused: {e}");
+                std::process::exit(1)
+            }
+        }
         return;
     }
     if !platform::only_one() {
@@ -89,6 +106,8 @@ struct Args {
     pack: Option<PathBuf>,
     /// Started by the player's switch: leave when the player does.
     with_player: bool,
+    /// Load the pack, say whether it is good, and exit (D162).
+    check: bool,
     help: bool,
 }
 
@@ -103,6 +122,7 @@ impl Args {
                     out.pack = Some(PathBuf::from(dir));
                 }
                 "--with-player" => out.with_player = true,
+                "--check" => out.check = true,
                 "-h" | "--help" => out.help = true,
                 other => return Err(format!("unknown argument {other:?}; try --help")),
             }
@@ -316,8 +336,15 @@ mod tests {
         Args {
             pack: Some(PathBuf::from(p)),
             with_player: true,
-            help: false,
+            ..Args::default()
         }
+    }
+
+    #[test]
+    fn check_is_a_flag_beside_the_pack() {
+        let a = parse(&["--check", "--pack", "companions/mine"]).unwrap();
+        assert!(a.check && !a.with_player);
+        assert_eq!(a.pack, Some(PathBuf::from("companions/mine")));
     }
 
     #[test]

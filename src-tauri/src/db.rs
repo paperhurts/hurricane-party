@@ -512,6 +512,20 @@ pub fn set_companion_on(conn: &Connection, on: bool) -> Result<(), DbError> {
     set_setting(conn, COMPANION_SETTING, if on { "1" } else { "0" })
 }
 
+/// Which companion the box starts (#208, D162): `captain`, or the folder name
+/// of an imported pack.
+pub const COMPANION_PICK_SETTING: &str = "companion.pick";
+
+pub fn companion_pick(conn: &Connection) -> String {
+    get_setting(conn, COMPANION_PICK_SETTING)
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| crate::packs::CAPTAIN.to_string())
+}
+
+pub fn set_companion_pick(conn: &Connection, id: &str) -> Result<(), DbError> {
+    set_setting(conn, COMPANION_PICK_SETTING, id)
+}
+
 /// The theme the app wears (#147): which theme in `design/tokens.json`
 /// paints the library and every mask skin. The frontend has the tokens and
 /// says which names are themes; here a name is only ever a short slug, so a

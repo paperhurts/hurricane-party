@@ -208,6 +208,8 @@ Three fields carry most of the design:
 
 A pack may carry its sheet at twice the size beside it: `sheet@2x.png` for `sheet.png`, exactly twice as wide and tall, with the same cells in the same places. It is drawn whenever the companion is at an even zoom, beside 2x chrome, and without it the 1x frames are doubled, which comes out soft. It is the same `@2x` convention the skins' chrome uses (D76, D160). No key in `companion.json` names it, so an older loader simply ignores it.
 
+**A person's own pack** comes in through **Import companion…** in the library: its `companion.json`, or a zip holding one. Exactly three files are copied into the app's `companions/` folder: the manifest, its sheet and the sheet's `@2x` twin. The companion's own loader checks the pack first (`hp-companion --check --pack <folder>`), and a pack it refuses is taken out again, with the reason on screen. The picker beside the Cap'n Capy box chooses which companion the box starts (D162).
+
 How the art for a pack comes into existence, with an image model or a pencil, and the script that packs the frames into this shape: `companion-art.md`.
 
 ### Validation and failure
