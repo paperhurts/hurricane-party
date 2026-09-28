@@ -232,13 +232,13 @@ Worth stating plainly, because it's the whole extensibility story:
 
 ## Scope
 
-**v0.7**, after the protocol freezes at v1.0. Not because it's low value — it's the most distinctive thing in the project — but because it's the *reward* for a stable API. Build it first and it drags the protocol into a kitten-shaped form that serves nobody else.
+**v1.1**, after the protocol freezes at v1.0 (numbered v0.7 until D153). Not because it's low value — it's the most distinctive thing in the project — but because it's the *reward* for a stable API. Build it first and it drags the protocol into a kitten-shaped form that serves nobody else.
 
 Split it:
 
 | | Ships in | Where it lives |
 |---|---|---|
 | Kaleidoscope visualizer + Purricane palette | **v0.5**, with the skin system. *Built* (#147, D130, D132): picked in the library, in the designer's colours, wearing its own skin with the kaleidoscope in Main's round badge, and calm both beside the picker and on Main | In the player |
-| Kittens | After **v0.7**: the companion ships at v0.7 with **Cap'n Capy** as its first pack, whose art was drawn first (D147), and the kittens are a second pack once their frames are made | External process |
+| Kittens | After **v1.1**: the companion ships at v1.1 with **Cap'n Capy** as its first pack, whose art was drawn first (D147), and the kittens are a second pack once their frames are made | External process |
 
 The theme is usable and complete without the cats. The cats are the encore.
