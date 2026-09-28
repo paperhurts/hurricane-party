@@ -5,7 +5,9 @@
 //! quarter megabyte a second of number formatting for data that is natively
 //! 32 bytes; a separate pipe rather than interleaving because mixing framed
 //! binary with newline-delimited JSON is a parsing hazard for every client
-//! that will ever be written (`docs/control-api.md`). Unstable until v1.0.
+//! that will ever be written (`docs/control-api.md`). The layout below is
+//! frozen with protocol 1 (#184), and `header_layout_is_the_documented_one`
+//! holds it there.
 //!
 //! Frame layout, little-endian:
 //!

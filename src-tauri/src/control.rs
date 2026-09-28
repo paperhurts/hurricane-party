@@ -1,7 +1,8 @@
 //! The control channel server: named pipe in, NDJSON, transport out.
 //!
-//! **Undocumented and unstable until v1.0.** That's the point of shipping it at
-//! v0.3 — it proves the pipe while nothing external depends on the shape.
+//! **Protocol 1, frozen with v1.0** (#184, D151); `docs/control-api.md` is the
+//! reference. Each connection says `hello` first and is held to the
+//! capabilities it asked for there (`gate`), its events included.
 //!
 //! The awkward part, flagged honestly in `control-api.md`: the audio graph
 //! lives in the webview (D5), so Rust is not the source of truth for playback.
@@ -57,10 +58,14 @@ impl Mirror {
 
 /// Broadcast an event to every connected client.
 #[derive(Default, Clone)]
-pub struct Broadcaster(Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<String>>>>);
+pub struct Broadcaster(Arc<Mutex<Vec<Sub>>>);
+
+/// One connection's feed: each event's line, and the capability it belongs
+/// to, so the connection can keep only what it asked for at `hello` (#184).
+type Sub = tokio::sync::mpsc::UnboundedSender<(&'static str, String)>;
 
 impl Broadcaster {
-    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<String> {
+    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<(&'static str, String)> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.0.lock().unwrap().push(tx);
         rx
@@ -80,7 +85,7 @@ impl Broadcaster {
         self.0
             .lock()
             .unwrap()
-            .retain(|tx| tx.send(line.clone()).is_ok());
+            .retain(|tx| tx.send((ev.capability(), line.clone())).is_ok());
     }
 }
 
@@ -90,16 +95,46 @@ impl Broadcaster {
 /// The reply says the command was accepted, not that it has taken effect —
 /// which is honest, and is why `status` reads the mirrored state rather than
 /// pretending to know synchronously.
-fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
+/// #184: hello first, then only what the connection asked for at hello.
+/// Enforced at the freeze because loosening a rule later is additive and
+/// tightening one is not. `granted` is `None` until hello.
+fn gate(granted: Option<&[&'static str]>, cmd: &Command, name: &str) -> Result<(), String> {
+    if matches!(cmd, Command::Hello { .. }) {
+        return Ok(());
+    }
+    let Some(g) = granted else {
+        return Err(r#"say hello first: {"cmd":"hello", "protocol_version":1}"#.into());
+    };
+    match cmd.capability() {
+        Some(cap) if !g.contains(&cap) => Err(format!(
+            "{name:?} needs {cap:?}, and this connection asked for {g:?} at hello"
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn handle(
+    app: &AppHandle,
+    state: &ControlState,
+    granted: &mut Option<Vec<&'static str>>,
+    req: &Request,
+) -> Response {
     let cmd = match req.parse() {
         Ok(c) => c,
         Err(e) => return Response::err(req.id, e.to_string()),
     };
 
+    if let Err(why) = gate(granted.as_deref(), &cmd, &req.cmd) {
+        return Response::err(req.id, why);
+    }
+
     match cmd {
-        Command::Hello { client, .. } => {
-            eprintln!("hp-control: {client} connected");
-            Response::ok(req.id, hello_result(env!("CARGO_PKG_VERSION")))
+        Command::Hello { client, want, .. } => {
+            let g = hp_control::granted(want.as_deref());
+            eprintln!("hp-control: {client} connected, for {g:?}");
+            let result = hello_result(env!("CARGO_PKG_VERSION"), &g);
+            *granted = Some(g);
+            Response::ok(req.id, result)
         }
         Command::Status => {
             // The transport's state is the mirror's; shuffle and repeat are
@@ -343,13 +378,18 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
 
             let app = app.clone();
             let mut events = broadcaster.subscribe();
+            // Nothing is granted, and no event is sent, until hello (#184).
+            let mut granted: Option<Vec<&'static str>> = None;
             tauri::async_runtime::spawn(async move {
                 let (reader, mut writer) = tokio::io::split(server);
                 let mut lines = BufReader::new(reader).lines();
                 loop {
                     tokio::select! {
                         // Unsolicited events, pushed as they happen.
-                        Some(line) = events.recv() => {
+                        Some((cap, line)) = events.recv() => {
+                            if !granted.as_ref().is_some_and(|g| g.contains(&cap)) {
+                                continue;
+                            }
                             if writer.write_all(format!("{line}\n").as_bytes()).await.is_err() {
                                 break;
                             }
@@ -362,7 +402,7 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
                             let resp = match serde_json::from_str::<Request>(&line) {
                                 Ok(req) => {
                                     let st = app.state::<ControlState>();
-                                    handle(&app, &st, &req)
+                                    handle(&app, &st, &mut granted, &req)
                                 }
                                 Err(e) => Response::err(0, format!("malformed request: {e}")),
                             };
@@ -468,5 +508,48 @@ fn apply(app: &AppHandle, change: impl FnOnce(&mut Mirror)) {
     }
     if state_changed {
         bc.send(&Event::StateChanged { state: now.state });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cmd(json: &str) -> Command {
+        serde_json::from_str::<Request>(json)
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    /// #184: nothing before hello; after it, only what was asked for, with
+    /// the refusal naming the capability; hello again is always allowed.
+    #[test]
+    fn a_connection_says_hello_first_and_gets_what_it_asked_for() {
+        let status = cmd(r#"{"cmd":"status"}"#);
+        let why = gate(None, &status, "status").unwrap_err();
+        assert!(why.contains("hello first"), "{why}");
+
+        let all = hp_control::granted(None);
+        assert!(gate(Some(&all), &status, "status").is_ok());
+
+        let bars = hp_control::granted(Some(&["viz".to_string()]));
+        assert!(gate(
+            Some(&bars),
+            &cmd(r#"{"cmd":"subscribe_viz"}"#),
+            "subscribe_viz"
+        )
+        .is_ok());
+        let why = gate(Some(&bars), &cmd(r#"{"cmd":"next"}"#), "next").unwrap_err();
+        assert!(
+            why.contains("\"transport\"") && why.contains("[\"viz\"]"),
+            "{why}"
+        );
+        let why = gate(Some(&bars), &cmd(r#"{"cmd":"search","q":"x"}"#), "search").unwrap_err();
+        assert!(why.contains("\"library\""), "{why}");
+
+        let hello = cmd(r#"{"cmd":"hello","protocol_version":1}"#);
+        assert!(gate(None, &hello, "hello").is_ok());
+        assert!(gate(Some(&bars), &hello, "hello").is_ok());
     }
 }

@@ -1,9 +1,9 @@
 //! hp-control — the public control protocol.
 //!
-//! **Status at v0.3: undocumented and explicitly unstable.** The shape below is
-//! from `docs/control-api.md`, but nothing here is a commitment until v1.0
-//! freezes protocol v1. That window is deliberate — it's the time to change
-//! your mind before someone's LED rig is calibrated against it.
+//! **Protocol 1, frozen with v1.0 (#184, D151).** `docs/control-api.md` is the
+//! reference, and this crate is its shape in types. From here the protocol
+//! grows only by adding: a new command, an optional field, an event, a
+//! capability. Anything that would break a client is protocol 2.
 //!
 //! Two design points inherited from the decision log, both load-bearing:
 //!
@@ -44,6 +44,10 @@ pub struct Request {
     pub client: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_version: Option<u32>,
+    /// The capabilities this connection will use (#184). Absent is all of
+    /// them, which is what every client written before v1 gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub want: Option<Vec<String>>,
     // transport
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos_s: Option<f64>,
@@ -276,6 +280,8 @@ pub enum Command {
     Hello {
         client: String,
         protocol_version: u32,
+        /// What the client asked to use (#184); `None` is everything.
+        want: Option<Vec<String>>,
     },
     Status,
     /// Where the windows are now (#181): the `layout_changed` shape, for a
@@ -337,9 +343,32 @@ impl Request {
                 if v != PROTOCOL_VERSION {
                     return Err(ParseError::UnsupportedVersion(v));
                 }
+                // Asked for by name, so a typo is a refusal that says what
+                // exists rather than a connection that quietly can do less.
+                let want = match &self.want {
+                    None => None,
+                    Some(w) if w.is_empty() => {
+                        return Err(ParseError::InvalidField {
+                            cmd: self.cmd.clone(),
+                            field: "want",
+                            why: "asks for nothing".into(),
+                        })
+                    }
+                    Some(w) => {
+                        if let Some(bad) = w.iter().find(|c| !CAPABILITIES.contains(&c.as_str())) {
+                            return Err(ParseError::InvalidField {
+                                cmd: self.cmd.clone(),
+                                field: "want",
+                                why: format!("{bad:?} is not one of {CAPABILITIES:?}"),
+                            });
+                        }
+                        Some(w.clone())
+                    }
+                };
                 Command::Hello {
                     client: self.client.clone().unwrap_or_else(|| "unknown".into()),
                     protocol_version: v,
+                    want,
                 }
             }
             "status" => Command::Status,
@@ -431,16 +460,71 @@ impl Request {
     }
 }
 
+/// Everything this build does, by the word a client asks for it by. Each
+/// joined as it was built: "layout" #181, "library" #182, "palette" #183.
+pub const CAPABILITIES: [&str; 5] = ["transport", "viz", "layout", "library", "palette"];
+
+impl Command {
+    /// The capability a command belongs to (#184), which a connection must
+    /// have been granted at `hello`. `hello` itself belongs to none.
+    pub fn capability(&self) -> Option<&'static str> {
+        Some(match self {
+            Command::Hello { .. } => return None,
+            Command::Status
+            | Command::Play
+            | Command::Pause
+            | Command::Toggle
+            | Command::Stop
+            | Command::Next
+            | Command::Prev
+            | Command::Seek(_)
+            | Command::Volume(_) => "transport",
+            Command::SubscribeViz(_) => "viz",
+            Command::Layout => "layout",
+            Command::Playlists
+            | Command::Search(_)
+            | Command::QueuePlaylist(_)
+            | Command::PlayMedia(_) => "library",
+            Command::Palette => "palette",
+        })
+    }
+}
+
+impl Event {
+    /// The capability an event belongs to (#184): a connection hears only the
+    /// events of what it was granted.
+    pub fn capability(&self) -> &'static str {
+        match self {
+            Event::NowPlaying { .. } | Event::StateChanged { .. } => "transport",
+            Event::LayoutChanged(_) => "layout",
+            Event::PaletteChanged { .. } => "palette",
+        }
+    }
+}
+
+/// The capabilities a `want` grants: those asked for, in `CAPABILITIES`'
+/// order, or all of them when nothing was asked.
+pub fn granted(want: Option<&[String]>) -> Vec<&'static str> {
+    match want {
+        None => CAPABILITIES.to_vec(),
+        Some(w) => CAPABILITIES
+            .iter()
+            .copied()
+            .filter(|c| w.iter().any(|x| x == c))
+            .collect(),
+    }
+}
+
 /// What `hello` reports. `capabilities` is how a client discovers what this
-/// build actually supports without version-sniffing.
-pub fn hello_result(app_version: &str) -> serde_json::Value {
+/// build supports without version-sniffing; `granted` is what this connection
+/// may use (#184). Stable from protocol 1 on (#184): changes only by adding.
+pub fn hello_result(app_version: &str, granted: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
         "app_version": app_version,
-        // Each joined as it was built: "layout" #181, "library" #182,
-        // "palette" #183. A client looks for the word, not the version.
-        "capabilities": ["transport", "viz", "layout", "library", "palette"],
-        "stable": false,
+        "capabilities": CAPABILITIES,
+        "granted": granted,
+        "stable": true,
     })
 }
 
@@ -459,8 +543,92 @@ mod tests {
             r.parse().unwrap(),
             Command::Hello {
                 client: "led-bridge".into(),
-                protocol_version: 1
+                protocol_version: 1,
+                want: None,
             }
+        );
+    }
+
+    /// #184: a client may ask for part of the protocol by name; a word that
+    /// is not a capability, or asking for nothing, is refused with the list.
+    #[test]
+    fn hello_can_ask_for_part_of_the_protocol() {
+        let r =
+            req(r#"{"id":0,"cmd":"hello","client":"bars","protocol_version":1,"want":["viz"]}"#);
+        assert_eq!(
+            r.parse().unwrap(),
+            Command::Hello {
+                client: "bars".into(),
+                protocol_version: 1,
+                want: Some(vec!["viz".into()]),
+            }
+        );
+        let typo = req(r#"{"id":0,"cmd":"hello","protocol_version":1,"want":["vis"]}"#)
+            .parse()
+            .unwrap_err();
+        assert!(
+            matches!(&typo, ParseError::InvalidField { field: "want", why, .. } if why.contains("\"vis\"") && why.contains("viz")),
+            "{typo:?}"
+        );
+        assert!(matches!(
+            req(r#"{"id":0,"cmd":"hello","protocol_version":1,"want":[]}"#)
+                .parse()
+                .unwrap_err(),
+            ParseError::InvalidField { field: "want", .. }
+        ));
+
+        // What a want grants, in the protocol's own order.
+        assert_eq!(granted(None), CAPABILITIES.to_vec());
+        assert_eq!(
+            granted(Some(&["palette".into(), "viz".into()])),
+            ["viz", "palette"]
+        );
+    }
+
+    /// #184: every command but hello, and every event, belongs to exactly one
+    /// capability, and each capability has something in it.
+    #[test]
+    fn every_command_and_event_belongs_to_a_capability() {
+        let cases = [
+            (r#"{"cmd":"status"}"#, "transport"),
+            (r#"{"cmd":"next"}"#, "transport"),
+            (r#"{"cmd":"seek","pos_s":1}"#, "transport"),
+            (r#"{"cmd":"subscribe_viz"}"#, "viz"),
+            (r#"{"cmd":"layout"}"#, "layout"),
+            (r#"{"cmd":"playlists"}"#, "library"),
+            (r#"{"cmd":"search","q":"x"}"#, "library"),
+            (r#"{"cmd":"queue_playlist","playlist_id":1}"#, "library"),
+            (r#"{"cmd":"play","media_id":1}"#, "library"),
+            (r#"{"cmd":"play"}"#, "transport"),
+            (r#"{"cmd":"palette"}"#, "palette"),
+        ];
+        for (json, cap) in cases {
+            assert_eq!(req(json).parse().unwrap().capability(), Some(cap), "{json}");
+        }
+        assert_eq!(
+            req(r#"{"cmd":"hello","protocol_version":1}"#)
+                .parse()
+                .unwrap()
+                .capability(),
+            None
+        );
+        for c in CAPABILITIES {
+            assert!(cases.iter().any(|(_, k)| *k == c), "{c} has no command");
+        }
+        assert_eq!(
+            Event::StateChanged {
+                state: "paused".into()
+            }
+            .capability(),
+            "transport"
+        );
+        assert_eq!(
+            Event::LayoutChanged(LayoutInfo::default()).capability(),
+            "layout"
+        );
+        assert_eq!(
+            Event::PaletteChanged { viscolor: vec![] }.capability(),
+            "palette"
         );
     }
 
@@ -721,13 +889,16 @@ mod tests {
     }
 
     #[test]
-    fn hello_advertises_what_is_built_and_is_still_unstable() {
-        let h = hello_result("0.4.0");
+    fn hello_advertises_what_is_built_what_is_granted_and_that_it_is_stable() {
+        let h = hello_result("1.0.0", &["viz"]);
         assert_eq!(
             h["capabilities"],
             serde_json::json!(["transport", "viz", "layout", "library", "palette"])
         );
-        assert_eq!(h["stable"], false);
+        assert_eq!(h["granted"], serde_json::json!(["viz"]));
+        assert_eq!(h["protocol_version"], 1);
+        // #184: the freeze. From here the protocol changes only by adding.
+        assert_eq!(h["stable"], true);
     }
 
     /// A bare subscribe is the LED wall's numbers from control-api.md.
