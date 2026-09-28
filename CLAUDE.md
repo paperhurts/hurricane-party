@@ -36,6 +36,7 @@ If no decision covers a choice, make the obvious call, write it down (a row in `
 | `.claude/skills/*/SKILL.md` | `/land` runs the gates and opens the PR; `/decide` appends a decision row. Those are the only workflow commands |
 | `skins/eyewall/` | The skin that ships, and the template a person copies to make their own (D90). `tools\chrome-sheet.ps1` redraws its sheets from the manifest |
 | `skins/purricane/` | The skin the Purricane theme wears (D132). `tools\purricane-sheet.ps1` redraws its sheets from the manifest |
+| `crates/hp-companion/`, `skins/companions/captain/` | Cap'n Capy (#192, D154): his own program on the public pipe, and the pack it loads. `cargo run` in the crate puts him on the running player's windows |
 
 ---
 
@@ -73,7 +74,7 @@ Say what you want. The session builds it and lands it.
 
 Any session, any model. There is no planning session and no execution session; a session is disposable and the branch and PR carry everything.
 
-**Gates:** `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on both crates, then `pnpm check`. Warnings are errors in both crates (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI (`.github/workflows/ci.yml`) agree by construction. A shipping exe comes from the `release-exe` workflow on demand.
+**Gates:** `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on each crate (the app, `hp-control`, `hp-companion`), then `pnpm check`. Warnings are errors in every crate (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI (`.github/workflows/ci.yml`) agree by construction. A shipping exe comes from the `release-exe` workflow on demand.
 
 **Issues** are the list of work that isn't happening yet. An issue body is the spec; there is no brief format to fill in first. Work that's happening now doesn't need an issue; the PR is enough.
 

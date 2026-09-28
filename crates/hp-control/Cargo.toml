@@ -2,8 +2,8 @@
 name = "hp-control"
 version = "0.3.0"
 edition = "2021"
-description = "The public control protocol for hurricane-party. Unstable until v1.0."
-# Matches the app: both crates build with the one toolchain rust-toolchain.toml pins.
+description = "The public control protocol for hurricane-party. Protocol 1, frozen at v1.0 (D151): it grows only by adding."
+# Matches the app: every crate builds with the one toolchain rust-toolchain.toml pins.
 rust-version = "1.89"
 
 [dependencies]

@@ -1,4 +1,4 @@
-# One compiler everywhere. Warnings are errors in both crates ([lints] in each
+# One compiler everywhere. Warnings are errors in every crate ([lints] in each
 # Cargo.toml), so a Rust release that adds a lint must not be able to turn main
 # red on its own: it arrives when this pin is bumped, in a PR whose only job is
 # to absorb the new lints. rustup installs this toolchain on first use, and CI

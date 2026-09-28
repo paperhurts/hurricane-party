@@ -16,13 +16,16 @@ Issue: $ARGUMENTS (when omitted, the number in the branch name `<type>/<n>-...`,
 
        cargo fmt --manifest-path src-tauri/Cargo.toml
        cargo fmt --manifest-path crates/hp-control/Cargo.toml
+       cargo fmt --manifest-path crates/hp-companion/Cargo.toml
        cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
        cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
+       cargo clippy --manifest-path crates/hp-companion/Cargo.toml --all-targets
        cargo test --manifest-path src-tauri/Cargo.toml --lib
        cargo test --manifest-path crates/hp-control/Cargo.toml
+       cargo test --manifest-path crates/hp-companion/Cargo.toml
        pnpm check
 
-   Warnings are errors in both crates and the compiler is pinned, so this list is exactly what CI runs. A docs-only diff skips the Rust gates.
+   Warnings are errors in every crate and the compiler is pinned, so this list is exactly what CI runs. A docs-only diff skips the Rust gates.
 3. **Commit** in the repo's voice: `<area>: <what> (#n)`, the why in the body. End the message with the `Co-Authored-By` line only: no `Claude-Session:` trailer, no session URL, no machine paths or personal data. The repo is public.
 4. `git push -u origin <branch>`.
 5. **Pull request.** None open yet: `gh pr create --title "<subject>" --body-file <tmp>`, `--milestone` from the issue when there is one, `--label needs-hand-test` when there is something to see on a screen. The body follows `.github/pull_request_template.md`: what changed, outcome first; `Closes #n` when there is an issue; the hand test as an unticked checklist when there is one; any decision made along the way, by D-number. No session link, no generated-with footer, repo-relative paths. A PR already open: the push is enough; comment only if the hand-test steps changed.
