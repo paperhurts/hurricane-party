@@ -1,7 +1,9 @@
 <#
     sheet.ps1 - pack companion frames into an hp-companion/1 sprite sheet.
 
-      powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In design\sprites\captain -Out skins\companions\captain -Frame 64 -Name "Cap'n Capy"
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In .sid\captain-keyed -Out skins\companions\captain -Frame 64 -Name "Cap'n Capy" -Count 1
+      (the captain's poses in design\sprites\captain are the raw green-screen ones;
+       key each into .sid\captain-keyed with keyout.ps1 -Size 1024 -NoCrop first)
       powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Filter nearest   # real pixel art at its own size
 
     Reads <state>-<n>.png from -In (idle-0.png, idle-1.png, walk-0.png ...), each a
@@ -27,6 +29,9 @@ param(
     [string]$Name = "Companion",
     [ValidateSet("fixed", "theme")][string]$Palette = "fixed",
     [int]$WalkPxPerSec = 24,
+    # How many the app shows by default: the kittens' two (purricane.md), or
+    # one for a character like Cap'n Capy (#192).
+    [int]$Count = 2,
     # nearest: real pixel art at or near its native size. area: an image
     # model's "pixel art", which is drawn at ~10 px per fake pixel and does not
     # divide evenly into the cell, so nearest keeps or drops whole fake pixels
@@ -160,7 +165,16 @@ foreach ($state in $States) {
     $mine = @($frames | Where-Object { $_.state -eq $state })
     if ($mine.Count -eq 0) { continue }
     $row = [Array]::IndexOf($States, $state)
-    $entry = [ordered]@{ frames = @($mine | ForEach-Object { $row * $Columns + $_.index }) }
+    $cells = @($mine | ForEach-Object { $row * $Columns + $_.index })
+    if ($state -eq "idle" -and $cells.Count -gt 1) {
+        # idle-0 is the pose; each later idle frame (the blink, a small shift,
+        # docs/companion-art.md) is a moment, not half the loop. Hold the pose
+        # eleven ticks, then the moment for one: at 4 fps, a blink every 3 s.
+        $held = @()
+        foreach ($c in $cells[1..($cells.Count - 1)]) { $held += @($cells[0]) * 11; $held += $c }
+        $cells = $held
+    }
+    $entry = [ordered]@{ frames = $cells }
     foreach ($k in @("fps", "syncTo", "loop", "then")) {
         if ($Timing[$state].ContainsKey($k)) { $entry[$k] = $Timing[$state][$k] }
     }
@@ -177,7 +191,7 @@ $manifest = [ordered]@{
     palette      = $Palette
     states       = $manifestStates
     walkPxPerSec = $WalkPxPerSec
-    defaultCount = 2
+    defaultCount = $Count
 }
 $json = $manifest | ConvertTo-Json -Depth 6
 [System.IO.File]::WriteAllText((Join-Path $Out "companion.json"), $json, (New-Object System.Text.UTF8Encoding $false))

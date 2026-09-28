@@ -48,13 +48,16 @@ jobs:
             ~/.cargo/git
             src-tauri/target
             crates/hp-control/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock', 'crates/hp-control/Cargo.lock') }}
+            crates/hp-companion/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock', 'crates/hp-control/Cargo.lock', 'crates/hp-companion/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
       - name: rustfmt (app)
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: rustfmt (hp-control)
         run: cargo fmt --manifest-path crates/hp-control/Cargo.toml --check
+      - name: rustfmt (hp-companion)
+        run: cargo fmt --manifest-path crates/hp-companion/Cargo.toml --check
 
       # Warnings are errors via [lints]; --all-targets includes the test modules.
       # hp-control gets its own step: as a path dependency of the app it is
@@ -64,6 +67,9 @@ jobs:
       - name: clippy (hp-control)
         if: ${{ !cancelled() }}
         run: cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
+      - name: clippy (hp-companion)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --manifest-path crates/hp-companion/Cargo.toml --all-targets
 
       # Still run after a lint failure, so one push answers both questions.
       - name: cargo test (app)
@@ -72,6 +78,9 @@ jobs:
       - name: cargo test (hp-control)
         if: ${{ !cancelled() }}
         run: cargo test --manifest-path crates/hp-control/Cargo.toml
+      - name: cargo test (hp-companion)
+        if: ${{ !cancelled() }}
+        run: cargo test --manifest-path crates/hp-companion/Cargo.toml
 
       - uses: actions/setup-node@v7
         with:

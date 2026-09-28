@@ -1,0 +1,30 @@
+[package]
+name = "hp-companion"
+version = "0.1.0"
+edition = "2021"
+description = "A desktop companion for hurricane-party: Cap'n Capy first. A separate process and a client of the public control pipe (D22), so a crash in him never stops the music."
+# Matches the app: every crate builds with the one toolchain rust-toolchain.toml pins.
+rust-version = "1.89"
+publish = false
+
+[dependencies]
+hp-control = { path = "../hp-control" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The same decoder the app uses for the radar (radar.rs).
+png = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  # A per-pixel-alpha layered window, drawn from a DIB (UpdateLayeredWindow).
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+# Warnings are errors, as in the app and hp-control. Not a workspace member, so
+# it gets its own fmt, clippy and test in /land and CI.
+[lints.rust]
+warnings = "deny"
