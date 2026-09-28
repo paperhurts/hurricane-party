@@ -42,6 +42,8 @@ impl WindowPlatform for StubPlatform {
     // what there is.
     fn kill_tree(&self, _pid: u32) {}
 
+    fn ask_companion_to_leave(&self) {}
+
     fn spawn_quiet(
         &self,
         exe: &std::path::Path,

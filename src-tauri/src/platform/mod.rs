@@ -131,6 +131,12 @@ pub trait WindowPlatform: Send + Sync {
         args: &[&str],
     ) -> std::io::Result<std::process::Child>;
 
+    /// Ask any running desktop companion to leave (#192, D161), whoever
+    /// started it: set the named event it watches
+    /// (`hp_control::COMPANION_LEAVE_EVENT`). When none is running the event
+    /// does not exist, and there is nothing to do.
+    fn ask_companion_to_leave(&self);
+
     /// Open a folder in the OS file manager (#155). Not about a window
     /// either, and here for the same reason as `kill_tree`: there is no
     /// portable call, and the shell's own "open" is the one that gets a path

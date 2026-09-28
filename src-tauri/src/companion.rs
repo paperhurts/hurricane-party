@@ -63,8 +63,11 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Stop the one we started. He keeps nothing, so ending him is all it takes.
+/// Send him off, however he was started (D161): ask whichever Cap'n is
+/// running to leave, then end the one we started, if it is still here. He
+/// keeps nothing, so ending him is all it takes.
 pub fn stop(app: &AppHandle) {
+    platform::platform().ask_companion_to_leave();
     let state = app.state::<Companion>();
     let taken = state.0.lock().unwrap().take();
     if let Some(mut child) = taken {

@@ -8,9 +8,9 @@
 #[cfg(windows)]
 mod windows_impl;
 #[cfg(windows)]
-pub use windows_impl::{init, only_one, run, work_areas, Surface};
+pub use windows_impl::{init, only_one, run, work_areas, Leave, Surface};
 
 #[cfg(not(windows))]
 mod stub;
 #[cfg(not(windows))]
-pub use stub::{init, only_one, run, work_areas, Surface};
+pub use stub::{init, only_one, run, work_areas, Leave, Surface};

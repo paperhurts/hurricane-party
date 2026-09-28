@@ -75,7 +75,7 @@ fn main() {
     let (tx, rx) = mpsc::channel();
     link::spawn(tx, args.with_player);
     let mut surface = platform::Surface::new().unwrap_or_else(|e| fail(&e));
-    let mut captain = Captain::new(pack, rx);
+    let mut captain = Captain::new(pack, rx, platform::Leave::new());
     platform::run(TICK_MS, || captain.tick(&mut surface));
 }
 
@@ -143,13 +143,15 @@ struct Captain {
     /// redrawn until it changes.
     drawn: Option<(i32, i32, u32, u32, bool)>,
     complained: bool,
+    /// The player's box asking him to go, however he was started (D161).
+    leave: platform::Leave,
     /// `HP_COMPANION_TRACE=1`: print each change of state, for a hand test.
     trace: bool,
     traced: Option<&'static str>,
 }
 
 impl Captain {
-    fn new(pack: Pack, rx: Receiver<Msg>) -> Captain {
+    fn new(pack: Pack, rx: Receiver<Msg>, leave: platform::Leave) -> Captain {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -166,12 +168,16 @@ impl Captain {
             frames: HashMap::new(),
             drawn: None,
             complained: false,
+            leave,
             trace: std::env::var_os("HP_COMPANION_TRACE").is_some_and(|v| v == "1"),
             traced: None,
         }
     }
 
     fn tick(&mut self, surface: &mut platform::Surface) {
+        if self.leave.asked() {
+            std::process::exit(0);
+        }
         let dt = self.last_tick.elapsed().as_secs_f32().min(MAX_STEP);
         self.last_tick = Instant::now();
 
