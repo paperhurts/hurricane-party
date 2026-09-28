@@ -87,6 +87,10 @@ The captain's reference is his idle frame cut from the sheet with every pixel ma
 
 The break dance (toprock, drop, sweep, freeze) is his dance. The disco set (fist pump, tuck, point, tuck) is kept beside it as `cells/disco-*.png`, which the packer ignores, and the bot's originals for both are in `design/sprites/captain/pixel/`.
 
+**At 2x (D160).** Beside 2x chrome he is 128 px, and his 64 px frames doubled came out soft, because they are shrunk paintings to begin with. So the pack carries `sheet@2x.png` too, packed at 128 px from the same sources: `sheet.ps1 ... -Double -Cells2x design\sprites\captain\cells@2x`. The painted states are re-shrunk from their 1024 px keyed poses at twice the factor, and a set of ready cells needs 128 px twins in `cells@2x/` under the same names, made from the bot's originals with the geometry above doubled. The whole command, from the repo root:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In .sid\captain-keyed -Cells design\sprites\captain\cells -Double -Cells2x design\sprites\captain\cells@2x -Out skins\companions\captain -Frame 64 -Name "Cap'n Capy" -Count 1
+
 ### The instructions, set once
 
 ```markdown

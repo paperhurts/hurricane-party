@@ -45,7 +45,13 @@ param(
     # from here and none from -In, so its poses neither get rescaled nor sway
     # the one factor the rest share. For true pixel art drawn at the cell size
     # (docs/companion-art.md, "A pixel-art bot, at native size").
-    [string]$Cells = ""
+    [string]$Cells = "",
+    # Also write sheet@2x.png: the same sheet at twice the cell size, packed
+    # from the same sources, so a companion beside 2x chrome (D76) is drawn
+    # from real detail and not from its 1x frames doubled (D160). A state with
+    # ready cells needs them at 2x too, in -Cells2x, with the same names.
+    [switch]$Double,
+    [string]$Cells2x = ""
 )
 if ($Smooth) { $Filter = "bicubic" }
 
@@ -87,10 +93,21 @@ foreach ($state in $States) {
         if ($ready -and ($bmp.Width -ne $Frame -or $bmp.Height -ne $Frame)) {
             throw "$($f.FullName) is $($bmp.Width)x$($bmp.Height); a ready cell must be exactly ${Frame}x${Frame}"
         }
+        $bmp2 = $null
+        if ($ready -and $Double) {
+            $twin = if ($Cells2x) { Join-Path $Cells2x $f.Name } else { "" }
+            if (-not $twin -or -not (Test-Path -LiteralPath $twin)) {
+                throw "$($f.Name) is a ready cell, so -Double needs it at 2x in -Cells2x too"
+            }
+            $bmp2 = [System.Drawing.Bitmap]::FromFile($twin)
+            if ($bmp2.Width -ne 2 * $Frame -or $bmp2.Height -ne 2 * $Frame) {
+                throw "$twin is $($bmp2.Width)x$($bmp2.Height); a 2x ready cell must be exactly $(2 * $Frame)x$(2 * $Frame)"
+            }
+        }
         # Objects, not hashtables: Where-Object and Group-Object resolve a
         # property, and Windows PowerShell 5.1 does not read a hashtable's
         # keys as properties there.
-        $frames += [pscustomobject]@{ state = $state; index = $i; path = $f.FullName; bmp = $bmp; box = $null; ready = $ready }
+        $frames += [pscustomobject]@{ state = $state; index = $i; path = $f.FullName; bmp = $bmp; bmp2 = $bmp2; box = $null; ready = $ready }
         $i++
     }
 }
@@ -135,7 +152,11 @@ $factor = [Math]::Min($Frame / $maxH, $Frame / $maxW)
 
 New-Item -ItemType Directory -Force $Out | Out-Null
 $rows = $States.Count
-$sheet = New-Object System.Drawing.Bitmap ($Columns * $Frame), ($rows * $Frame), ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+
+# One sheet at cell size $px: the scaled poses at $mul times the one factor,
+# and the ready cells as they are (their 2x twins when $twox).
+function Write-Sheet([int]$px, [double]$mul, [bool]$twox, [string]$sheetfile) {
+$sheet = New-Object System.Drawing.Bitmap ($Columns * $px), ($rows * $px), ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $g = [System.Drawing.Graphics]::FromImage($sheet)
 try {
     $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
@@ -163,24 +184,29 @@ try {
         if ($fr.ready) {
             # As it is: same size in and out, nearest, so no pixel is resampled.
             $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
-            $cell = New-Object System.Drawing.Rectangle ($fr.index * $Frame), ($row * $Frame), $Frame, $Frame
-            $all = New-Object System.Drawing.Rectangle 0, 0, $Frame, $Frame
-            $g.DrawImage($fr.bmp, $cell, $all, [System.Drawing.GraphicsUnit]::Pixel)
+            $src = if ($twox) { $fr.bmp2 } else { $fr.bmp }
+            $cell = New-Object System.Drawing.Rectangle ($fr.index * $px), ($row * $px), $px, $px
+            $all = New-Object System.Drawing.Rectangle 0, 0, $px, $px
+            $g.DrawImage($src, $cell, $all, [System.Drawing.GraphicsUnit]::Pixel)
             $g.InterpolationMode = $scaled
             continue
         }
-        $w = [Math]::Max(1, [int][Math]::Round($fr.box.Width * $factor))
-        $h = [Math]::Max(1, [int][Math]::Round($fr.box.Height * $factor))
+        $w = [Math]::Max(1, [int][Math]::Round($fr.box.Width * $factor * $mul))
+        $h = [Math]::Max(1, [int][Math]::Round($fr.box.Height * $factor * $mul))
         # Centred on the pose's own width, feet on the bottom edge.
-        $x = $fr.index * $Frame + [int][Math]::Floor(($Frame - $w) / 2)
-        $y = $row * $Frame + ($Frame - $h)
+        $x = $fr.index * $px + [int][Math]::Floor(($px - $w) / 2)
+        $y = $row * $px + ($px - $h)
         $dest = New-Object System.Drawing.Rectangle $x, $y, $w, $h
         $g.DrawImage($fr.bmp, $dest, $fr.box, [System.Drawing.GraphicsUnit]::Pixel)
     }
 } finally { $g.Dispose() }
-$sheet.Save((Join-Path $Out "sheet.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+$sheet.Save((Join-Path $Out $sheetfile), [System.Drawing.Imaging.ImageFormat]::Png)
 $sheet.Dispose()
-foreach ($fr in $frames) { $fr.bmp.Dispose() }
+}
+
+Write-Sheet $Frame 1.0 $false "sheet.png"
+if ($Double) { Write-Sheet (2 * $Frame) 2.0 $true "sheet@2x.png" }
+foreach ($fr in $frames) { $fr.bmp.Dispose(); if ($fr.bmp2) { $fr.bmp2.Dispose() } }
 
 # ---- the manifest ----------------------------------------------------------------
 
@@ -227,3 +253,4 @@ $placed = ($frames | Group-Object state | ForEach-Object {
         "$($_.Name) $($_.Count)$tag"
     }) -join ", "
 Write-Host ("sheet.png {0}x{1}, {2} px cells, scale {3:0.000}: {4}" -f ($Columns * $Frame), ($rows * $Frame), $Frame, $factor, $placed)
+if ($Double) { Write-Host ("sheet@2x.png {0}x{1}, {2} px cells" -f ($Columns * 2 * $Frame), ($rows * 2 * $Frame), (2 * $Frame)) }
