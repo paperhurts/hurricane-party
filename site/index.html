@@ -374,7 +374,7 @@
   <div class="stack">
     <div class="eyebrow">FOR TINKERERS</div>
     <h2>A control pipe and a viz stream.</h2>
-    <p class="lead">The player listens on a named pipe. Anything on the machine can ask what is playing, skip, seek, or read the analyser as a stream of frames, which is enough to drive an LED rig from the bass. The protocol is unstable until v1.0. <a href="https://github.com/paperhurts/hurricane-party/blob/main/docs/control-api.md">docs/control-api.md</a> has the handshake and the message table, and the repo's <code>tools</code> folder has two PowerShell clients to start from.</p>
+    <p class="lead">The player listens on a named pipe, and since v1.0 the protocol holds still: it only grows, so a program written against it keeps working. Anything on the machine can ask what is playing, skip or seek, search the library and play from it, see where the windows are, follow the analyser's colours, or read the analyser as a stream of frames, which is enough to drive an LED rig from the bass. <a href="https://github.com/paperhurts/hurricane-party/blob/main/docs/control-api.md">docs/control-api.md</a> is the reference, and <a href="https://github.com/paperhurts/hurricane-party/blob/main/examples/viz_bars.py">examples/viz_bars.py</a> is a small Python client to start from.</p>
   </div>
 </section>
 
