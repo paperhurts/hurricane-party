@@ -3,35 +3,40 @@
 //! him never stops the music, and the protocol is proven by its first real
 //! client.
 //!
-//! This first cut stands him on the player's windows and lets him idle: he
-//! finds a top edge with room, rides it when the window moves, drops to the
-//! floor when there is nowhere else, and goes when the player's windows do.
-//! Walking, the beat, sleep, petting and carrying come after.
+//! He lives on the player's windows (D154, D155): he stands on a top edge with
+//! room, walks along it now and then, dances on the beat while music plays,
+//! sleeps when nothing has played for a while, and jumps and falls to the next
+//! ledge down when the window under him moves, shades or goes. He goes when
+//! the player's windows do. Petting and carrying come with the pointer.
 //!
 //!     hp-companion [--pack <folder>]
 //!
 //! Without `--pack` he looks for `companions/captain` beside the exe, and in a
 //! debug build for the repo's own `skins/companions/captain`.
 
+mod brain;
 mod link;
 mod pack;
 mod perch;
 mod platform;
 mod sprite;
 
+use brain::{Brain, World};
 use hp_control::LayoutInfo;
 use link::Msg;
 use pack::Pack;
-use perch::{Body, Rect, Spot};
+use perch::{Body, Rect};
 use sprite::Bgra;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// About 30 checks a second: fast enough to ride a dragged window, and the
-/// frame only changes at the pack's own rate.
+/// About 30 steps a second: smooth enough for a walk and a fall; the frame
+/// only changes at the pack's own rate, or on the beat.
 const TICK_MS: u32 = 33;
+/// A stalled tick (the machine asleep, a debugger) is not a long fall.
+const MAX_STEP: f32 = 0.1;
 /// Monitors change rarely (D55); their work areas are re-read this often, and
 /// whenever the layout changes.
 const WORK_AREAS_EVERY: Duration = Duration::from_secs(2);
@@ -83,42 +88,65 @@ fn pack_dir() -> Result<PathBuf, String> {
 struct Captain {
     pack: Pack,
     rx: Receiver<Msg>,
+    brain: Brain,
     layout: Option<LayoutInfo>,
+    playing: bool,
     work: Vec<Rect>,
     work_read: Instant,
-    spot: Option<Spot>,
-    born: Instant,
-    /// Rendered frames by (cell, scale).
-    frames: HashMap<(u32, u32), Bgra>,
-    /// What is on screen now: (x, y, cell, scale). Nothing is redrawn until it changes.
-    drawn: Option<(i32, i32, u32, u32)>,
+    last_tick: Instant,
+    /// Rendered frames by (cell, scale, mirrored).
+    frames: HashMap<(u32, u32, bool), Bgra>,
+    /// What is on screen now: (x, y, cell, scale, mirrored). Nothing is
+    /// redrawn until it changes.
+    drawn: Option<(i32, i32, u32, u32, bool)>,
     complained: bool,
+    /// `HP_COMPANION_TRACE=1`: print each change of state, for a hand test.
+    trace: bool,
+    traced: Option<&'static str>,
 }
 
 impl Captain {
     fn new(pack: Pack, rx: Receiver<Msg>) -> Captain {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x5eed);
         Captain {
             pack,
             rx,
+            brain: Brain::new(seed),
             layout: None,
+            playing: false,
             work: platform::work_areas(),
             work_read: Instant::now(),
-            spot: None,
-            born: Instant::now(),
+            last_tick: Instant::now(),
             frames: HashMap::new(),
             drawn: None,
             complained: false,
+            trace: std::env::var_os("HP_COMPANION_TRACE").is_some_and(|v| v == "1"),
+            traced: None,
         }
     }
 
     fn tick(&mut self, surface: &mut platform::Surface) {
-        let mut moved = false;
+        let dt = self.last_tick.elapsed().as_secs_f32().min(MAX_STEP);
+        self.last_tick = Instant::now();
+
+        let (mut moved, mut beat) = (false, false);
         while let Ok(m) = self.rx.try_recv() {
-            self.layout = match m {
-                Msg::Layout(l) => Some(l),
-                Msg::Gone => None,
-            };
-            moved = true;
+            match m {
+                Msg::Layout(l) => {
+                    self.layout = Some(l);
+                    moved = true;
+                }
+                Msg::Playing(p) => self.playing = p,
+                Msg::Beat => beat = true,
+                Msg::Gone => {
+                    self.layout = None;
+                    self.playing = false;
+                    moved = true;
+                }
+            }
         }
         if moved || self.work_read.elapsed() >= WORK_AREAS_EVERY {
             self.work = platform::work_areas();
@@ -128,23 +156,46 @@ impl Captain {
         let Some(layout) = &self.layout else {
             return self.away(surface);
         };
-        let scale = perch::zoom(layout);
-        self.spot = perch::choose(layout, &self.work, self.body(scale), self.spot.as_ref());
-        let Some(spot) = &self.spot else {
+        if perch::shown(layout).next().is_none() {
             return self.away(surface);
-        };
+        }
+        let scale = perch::zoom(layout);
+        let body = self.body(scale);
+        let ledges = perch::ledges(layout, &self.work, body);
+        self.brain.step(
+            dt,
+            &World {
+                layout,
+                ledges: &ledges,
+                playing: self.playing,
+                beat,
+                zoom: scale as f32,
+                walk_px_per_sec: self.pack.walk_px_per_sec,
+            },
+        );
+        if !self.brain.is_placed() {
+            return self.away(surface);
+        }
 
-        let cell = self.idle_cell();
-        let now = (spot.x, spot.y, cell, scale);
+        let pose = self.brain.pose(&self.pack);
+        if self.trace && self.traced != Some(pose.state) {
+            eprintln!(
+                "hp-companion: {} at {},{}",
+                pose.state, pose.feet.0, pose.feet.1
+            );
+            self.traced = Some(pose.state);
+        }
+        let (x, y) = (pose.feet.0 - body.ax, pose.feet.1 - body.ay);
+        let now = (x, y, pose.cell, scale, pose.flip);
         if self.drawn == Some(now) {
             return;
         }
         let pack = &self.pack;
         let img = self
             .frames
-            .entry((cell, scale))
-            .or_insert_with(|| sprite::render(pack.cell(cell), scale, false));
-        match surface.present(img, spot.x, spot.y) {
+            .entry((pose.cell, scale, pose.flip))
+            .or_insert_with(|| sprite::render(pack.cell(pose.cell), scale, pose.flip));
+        match surface.present(img, x, y) {
             Ok(()) => {
                 self.drawn = Some(now);
                 self.complained = false;
@@ -157,9 +208,10 @@ impl Captain {
         }
     }
 
-    /// No player, or none of its windows showing: he goes with it.
+    /// No player, or none of its windows showing: he goes with it, and
+    /// appears afresh when it is back.
     fn away(&mut self, surface: &mut platform::Surface) {
-        self.spot = None;
+        self.brain.leave();
         self.drawn = None;
         surface.hide();
     }
@@ -173,12 +225,5 @@ impl Captain {
             ax: (ax * scale) as i32,
             ay: ((ay + 1) * scale) as i32,
         }
-    }
-
-    fn idle_cell(&self) -> u32 {
-        let idle = self.pack.state("idle");
-        let fps = idle.fps.unwrap_or(4.0);
-        let n = (self.born.elapsed().as_secs_f32() * fps) as usize;
-        idle.frames[n % idle.frames.len()]
     }
 }
