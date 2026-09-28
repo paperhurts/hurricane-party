@@ -1656,14 +1656,11 @@ pub(crate) fn companions_dir(app: &AppHandle) -> std::path::PathBuf {
 
 const COMPANIONS_DIR_SETTING: &str = "companions.dir";
 
-/// Every companion that can be picked: Cap'n Capy, who ships, then the
-/// imported ones by name (#208).
+/// Every companion that can be picked: the ones that ship, Cap'n Capy first
+/// and then Wee Man (D164), then the imported ones by name (#208).
 #[tauri::command]
 fn list_companions(app: AppHandle) -> Vec<packs::PackInfo> {
-    let mut all = vec![packs::PackInfo {
-        id: packs::CAPTAIN.into(),
-        name: "Cap'n Capy".into(),
-    }];
+    let mut all = packs::shipped(companion::shipped_dir().as_deref());
     all.extend(packs::list(&companions_dir(&app)));
     all
 }
@@ -1679,7 +1676,7 @@ fn get_companion_pick(app: AppHandle) -> String {
 /// screen is sent off and the pick comes in his place.
 #[tauri::command]
 fn set_companion_pick(app: AppHandle, id: String) -> Result<(), String> {
-    if id != packs::CAPTAIN && packs::folder(&companions_dir(&app), &id).is_none() {
+    if id != packs::CAPTAIN && companion::folder_for(&app, &id).is_none() {
         return Err("no such companion".into());
     }
     let on = {

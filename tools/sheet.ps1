@@ -51,7 +51,13 @@ param(
     # from real detail and not from its 1x frames doubled (D160). A state with
     # ready cells needs them at 2x too, in -Cells2x, with the same names.
     [switch]$Double,
-    [string]$Cells2x = ""
+    [string]$Cells2x = "",
+    # Where a pose sits across its cell. box: the middle of its opaque box, as
+    # the captain was packed. mass: the middle of its weight, then nudged only
+    # as far as it must be to stay inside the cell, so a tail swung out to one
+    # side or a hand reaching in does not slide the body sideways between
+    # frames (Wee Man, D164).
+    [ValidateSet("box", "mass")][string]$Centre = "box"
 )
 if ($Smooth) { $Filter = "bicubic" }
 
@@ -107,7 +113,7 @@ foreach ($state in $States) {
         # Objects, not hashtables: Where-Object and Group-Object resolve a
         # property, and Windows PowerShell 5.1 does not read a hashtable's
         # keys as properties there.
-        $frames += [pscustomobject]@{ state = $state; index = $i; path = $f.FullName; bmp = $bmp; bmp2 = $bmp2; box = $null; ready = $ready }
+        $frames += [pscustomobject]@{ state = $state; index = $i; path = $f.FullName; bmp = $bmp; bmp2 = $bmp2; box = $null; massX = $null; ready = $ready }
         $i++
     }
 }
@@ -135,11 +141,32 @@ function Get-OpaqueBox([System.Drawing.Bitmap]$b) {
     New-Object System.Drawing.Rectangle $minX, $minY, ($maxX - $minX + 1), ($maxY - $minY + 1)
 }
 
+# Where a pose's weight sits across it: the alpha-weighted mean column, from
+# the left of its opaque box.
+function Get-MassX([System.Drawing.Bitmap]$b, [System.Drawing.Rectangle]$box) {
+    $rect = New-Object System.Drawing.Rectangle 0, 0, $b.Width, $b.Height
+    $data = $b.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+        $bytes = New-Object byte[] ($data.Stride * $b.Height)
+        [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+        $weight = 0.0; $moment = 0.0
+        for ($y = $box.Top; $y -lt $box.Bottom; $y++) {
+            $row = $y * $data.Stride
+            for ($x = $box.Left; $x -lt $box.Right; $x++) {
+                $a = $bytes[$row + $x * 4 + 3]
+                if ($a -gt 8) { $weight += $a; $moment += $a * ($x - $box.Left + 0.5) }
+            }
+        }
+    } finally { $b.UnlockBits($data) }
+    $moment / $weight
+}
+
 $maxW = 0; $maxH = 0
 foreach ($fr in ($frames | Where-Object { -not $_.ready })) {
     $box = Get-OpaqueBox $fr.bmp
     if ($null -eq $box) { throw "$($fr.path) is fully transparent" }
     $fr.box = $box
+    if ($Centre -eq "mass") { $fr.massX = Get-MassX $fr.bmp $box }
     if ($box.Width -gt $maxW) { $maxW = $box.Width }
     if ($box.Height -gt $maxH) { $maxH = $box.Height }
 }
@@ -193,8 +220,14 @@ try {
         }
         $w = [Math]::Max(1, [int][Math]::Round($fr.box.Width * $factor * $mul))
         $h = [Math]::Max(1, [int][Math]::Round($fr.box.Height * $factor * $mul))
-        # Centred on the pose's own width, feet on the bottom edge.
-        $x = $fr.index * $px + [int][Math]::Floor(($px - $w) / 2)
+        # Centred on the pose's own width (or its weight, nudged to stay in
+        # the cell), feet on the bottom edge.
+        $left = [int][Math]::Floor(($px - $w) / 2)
+        if ($Centre -eq "mass") {
+            $left = [int][Math]::Round($px / 2 - $fr.massX * $factor * $mul)
+            $left = [Math]::Min([Math]::Max($left, 0), $px - $w)
+        }
+        $x = $fr.index * $px + $left
         $y = $row * $px + ($px - $h)
         $dest = New-Object System.Drawing.Rectangle $x, $y, $w, $h
         $g.DrawImage($fr.bmp, $dest, $fr.box, [System.Drawing.GraphicsUnit]::Pixel)

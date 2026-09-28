@@ -1,6 +1,7 @@
 //! Companion packs a person brought in (#208, D162): where they live, how one
-//! comes in, and what they are called. Cap'n Capy ships beside the player and
-//! is not one of these; his id is `captain`.
+//! comes in, and what they are called. The companions that ship beside the
+//! player, Cap'n Capy and Wee Man (D164), are not these; `shipped` lists them,
+//! and their ids are never an imported pack's.
 //!
 //! A pack is art and a manifest (`purricane.md`, "the line that keeps this
 //! safe"), so bringing one in copies exactly three files and nothing else:
@@ -13,8 +14,11 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// The id of the companion that ships.
+/// The id of the companion that ships first, and finds his own pack.
 pub const CAPTAIN: &str = "captain";
+/// Every companion that ships beside the player, in the picker's order:
+/// Cap'n Capy (#192), then Wee Man (D164). No imported pack takes their ids.
+pub const SHIPPED: [&str; 2] = [CAPTAIN, "wee-man"];
 pub const MANIFEST: &str = "companion.json";
 /// No file in a pack is bigger than this.
 const MAX_FILE: u64 = 32 * 1024 * 1024;
@@ -27,6 +31,33 @@ pub struct PackInfo {
     pub name: String,
 }
 
+/// The companions that ship, from the folder they ship in (`None` when it
+/// cannot be found): Cap'n Capy always, since he finds his own pack, and each
+/// of the others whose folder is there.
+pub fn shipped(dir: Option<&Path>) -> Vec<PackInfo> {
+    SHIPPED
+        .iter()
+        .filter_map(|&id| {
+            let manifest = dir.map(|d| d.join(id).join(MANIFEST));
+            let name = manifest
+                .as_ref()
+                .and_then(|m| fs::read_to_string(m).ok())
+                .and_then(|j| manifest_name(&j));
+            match name {
+                Some(name) => Some(PackInfo {
+                    id: id.into(),
+                    name,
+                }),
+                None if id == CAPTAIN => Some(PackInfo {
+                    id: id.into(),
+                    name: "Cap'n Capy".into(),
+                }),
+                None => None,
+            }
+        })
+        .collect()
+}
+
 /// Every installed pack in `dir`, by name.
 pub fn list(dir: &Path) -> Vec<PackInfo> {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -35,6 +66,7 @@ pub fn list(dir: &Path) -> Vec<PackInfo> {
     let mut out: Vec<PackInfo> = entries
         .flatten()
         .filter(|e| e.path().join(MANIFEST).is_file())
+        .filter(|e| !SHIPPED.iter().any(|s| e.file_name() == *s))
         .map(|e| {
             let id = e.file_name().to_string_lossy().into_owned();
             let name = fs::read_to_string(e.path().join(MANIFEST))
@@ -226,7 +258,7 @@ fn parts(p: &Path) -> Vec<String> {
 }
 
 /// A folder name for a pack: its name, lower-case, dashes for the rest, and
-/// a number when taken. `captain` is always taken.
+/// a number when taken. The shipped companions' ids are always taken.
 fn slug_for(dir: &Path, name: &str) -> String {
     let mut base: String = name
         .chars()
@@ -246,7 +278,7 @@ fn slug_for(dir: &Path, name: &str) -> String {
         base = "companion".into();
     }
     base.truncate(48);
-    let taken = |c: &str| c == CAPTAIN || dir.join(c).exists();
+    let taken = |c: &str| SHIPPED.contains(&c) || dir.join(c).exists();
     if !taken(&base) {
         return base;
     }
@@ -372,12 +404,36 @@ mod tests {
     }
 
     #[test]
-    fn names_become_plain_folder_names_and_captain_is_never_taken() {
+    fn names_become_plain_folder_names_and_a_shipped_id_is_never_taken() {
         let root = tmp("slug");
         assert_eq!(slug_for(&root, "Sir  Waddles!!"), "sir-waddles");
         assert_eq!(slug_for(&root, "Captain"), "captain-2");
+        assert_eq!(slug_for(&root, "Wee Man"), "wee-man-2");
         assert_eq!(slug_for(&root, "???"), "companion");
         assert!(folder(&root, "../etc").is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_shipped_companions_come_first_and_an_imported_one_never_shadows_them() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skins/companions");
+        let names: Vec<String> = shipped(Some(&repo)).into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["Cap'n Capy", "Wee Man"]);
+        // Without the folder the Cap'n is still there: he finds his own pack.
+        assert_eq!(
+            shipped(None),
+            [PackInfo {
+                id: CAPTAIN.into(),
+                name: "Cap'n Capy".into()
+            }]
+        );
+        let root = tmp("shadow");
+        for id in ["wee-man", "sir-waddles"] {
+            fs::create_dir_all(root.join(id)).unwrap();
+            fs::write(root.join(id).join(MANIFEST), JSON).unwrap();
+        }
+        let ids: Vec<String> = list(&root).into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["sir-waddles"]);
         let _ = fs::remove_dir_all(root);
     }
 }
