@@ -214,6 +214,8 @@ A pack may carry its sheet at twice the size beside it: `sheet@2x.png` for `shee
 
 **A companion to paint** comes from **Paint a companion…** beside it: a folder with a blank `sheet.png` in this layout at 64 px a cell, a `guide.png` naming every row, a `companion.json` that says `"painted": true`, and a README. Import companion… on that `companion.json` reads the painted cells off the sheet, left to right in each row, and installs a finished pack with both sheets (D163).
 
+**Frames the app packs** come in the same way: Import companion… on one frame of a folder of `<state>-<n>.png` at any size, or on an Aseprite sprite-sheet export's `.json` with a tag per state, cuts each pose to what is drawn, sizes them all by one factor (a whole one for art smaller than the cell, so pixel art stays crisp), and writes both sheets and the manifest (D165).
+
 How the art for a pack comes into existence, with an image model or a pencil, and the script that packs the frames into this shape: `companion-art.md`.
 
 ### Validation and failure

@@ -1661,15 +1661,16 @@
   }
 
   /**
-   * Import companion (#208): a finished companion's companion.json, or a zip
-   * of one. The companion's own loader checks it before it is kept (D162),
-   * and it becomes the pick.
+   * Import companion (#208): a finished companion's companion.json or a zip
+   * of one, or frames the app packs (D165): any frame of a folder of
+   * <state>-<n>.png, or an Aseprite export's .json. The companion's own
+   * loader checks it before it is kept (D162), and it becomes the pick.
    */
   async function importCompanion() {
     const picked = await openDialog({
       multiple: false,
-      title: "Import a companion: its companion.json, or a zip of one",
-      filters: [{ name: "Companion", extensions: ["json", "zip"] }],
+      title: "Import a companion: its companion.json or a zip, one frame of a folder of frames (idle-0.png), or an Aseprite export's .json",
+      filters: [{ name: "Companion", extensions: ["json", "zip", "png"] }],
     });
     if (typeof picked !== "string") return;
     notice = null;
@@ -2307,7 +2308,7 @@
     >
       {paintingCompanion ? "Writing…" : "Paint a companion…"}
     </button>
-    <button class="mini" onclick={importCompanion} title="A companion of your own: its companion.json, or a zip of one"
+    <button class="mini" onclick={importCompanion} title="A companion of your own: its companion.json or a zip, a folder of frames named idle-0.png, walk-0.png…, or an Aseprite sprite-sheet export with a tag per state"
       >Import companion…</button
     >
     {#if picturePlace}

@@ -185,6 +185,15 @@ For a person with a pixel editor rather than a bot: **Paint a companion…** in 
 
 The rules are this page's: face right, feet on row 63, centred, a transparent background. The frames are counted, not declared: a row's frames are its painted cells from the left, so a row is painted left to right with no gap, only idle is required, and an empty row falls back to idle. Import companion… on the folder's `companion.json` does the rest (`src-tauri/src/painted.rs`): the manifest with the format's timings, and the `@2x` twin by doubling each pixel. A sheet painted at twice the size, 1024 x 896, is taken too, and then the 1x is made from it by halving.
 
+## Bringing frames or an Aseprite export (D165)
+
+**Import companion…** packs frames in the app, by this page's rules, so neither script is needed to make a companion of your own:
+
+- **A folder of frames**: name them `<state>-<n>.png` (`idle-0.png`, `idle-1.png`, `walk-0.png` …), any size, one pose each on transparency, and pick any one of them. The companion is named after the folder.
+- **An Aseprite export**: File > Export Sprite Sheet, with JSON Data ticked (Hash or Array) and Tags listed, and one tag per state named `idle`, `walk`, `dance`, `sleep`, `startle`, `pet` or `carry`. Pick the `.json`; its sheet is read from beside it. A tag with another name is left out; a reverse tag plays reversed. The companion is named after the `.json`.
+
+Either way each pose is cut to what is drawn, one factor sizes them all so the tallest and widest fit the 64 px cell, and each pose's weight sits in the middle of its cell with its feet on the bottom edge, as `sheet.ps1 -Centre mass` does. Art drawn smaller than the cell is scaled up by a whole number and never stretched to fill it, so pixel art stays crisp: a 32 px kitten comes out 64 px at 1x and 128 at 2x. Idle's first frame is the pose and the rest its moments. The timings are the format's; Aseprite's frame durations are not read.
+
 ## Not this: the chrome sheet
 
 The Eyewall skin's sprite sheet (#3, D73) is a different job and a generator is the wrong tool for it. Those sprites are **shapes** at one and two pixels of stroke: title bar, buttons in their four states, slider tracks and thumbs, drawn as alpha masks the renderer tints from the palette and glows from `--accent`. The session produces it, derived from the CSS chrome that already ships so the look is the one already accepted (D90), from the rectangles `skin-manifest.md` fixes, and it goes under `skins/eyewall/`. Nobody draws it by hand; "hand-drawn" in #37 and D73 only ever meant committed PNGs rather than a build-time script. The companion is the one that gets to be an illustration.
