@@ -58,6 +58,13 @@ pub struct Request {
     pub depth: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include: Option<Vec<String>>,
+    // the library (#182)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playlist_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -186,6 +193,40 @@ pub struct WindowRect {
     pub visible: bool,
 }
 
+/// One playlist, as `playlists` lists it (#182). `count` is what can play
+/// now: a track on a drive that is not plugged in is not counted (D143).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistSummary {
+    pub id: i64,
+    pub name: String,
+    pub count: i64,
+    /// Fills itself from a rule (D144).
+    pub smart: bool,
+}
+
+/// One track, as `search` returns it (#182). `id` is what `play` takes as
+/// `media_id`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackSummary {
+    pub id: i64,
+    pub title: String,
+    pub uploader: Option<String>,
+    /// `"audio"` or `"video"`.
+    pub kind: String,
+    pub duration_s: Option<f64>,
+}
+
+/// What `search` answers: at most `SEARCH_LIMIT` tracks, newest first, and
+/// how many matched in all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub total: usize,
+    pub tracks: Vec<TrackSummary>,
+}
+
+/// The most tracks one `search` returns (#182, the owner's call).
+pub const SEARCH_LIMIT: usize = 50;
+
 /// Two classic windows sharing an edge (D16). `edge` is the side of `a` that
 /// `b` sits against; `span` is the shared stretch along it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -207,6 +248,15 @@ pub enum Command {
     /// Where the windows are now (#181): the `layout_changed` shape, for a
     /// client that connects after the last change.
     Layout,
+    /// Every playlist (#182).
+    Playlists,
+    /// Tracks whose title or artist hold every word, blind to case and
+    /// accents, as the library's search box matches (#182).
+    Search(String),
+    /// Make a playlist the queue and start it from the top (#182).
+    QueuePlaylist(i64),
+    /// `play` with a `media_id`: play that one track (#182).
+    PlayMedia(i64),
     Play,
     Pause,
     Toggle,
@@ -258,7 +308,27 @@ impl Request {
             }
             "status" => Command::Status,
             "layout" => Command::Layout,
-            "play" => Command::Play,
+            "play" => match self.media_id {
+                Some(id) => Command::PlayMedia(id),
+                None => Command::Play,
+            },
+            "playlists" => Command::Playlists,
+            // An empty search is refused rather than answered with the whole
+            // library: a remote that sends nothing has a bug, not a question.
+            "search" => match self.q.as_deref().map(str::trim) {
+                Some(q) if !q.is_empty() => Command::Search(q.to_string()),
+                Some(_) => {
+                    return Err(ParseError::InvalidField {
+                        cmd: self.cmd.clone(),
+                        field: "q",
+                        why: "is empty".into(),
+                    })
+                }
+                None => return Err(missing("q")),
+            },
+            "queue_playlist" => {
+                Command::QueuePlaylist(self.playlist_id.ok_or_else(|| missing("playlist_id"))?)
+            }
             "pause" => Command::Pause,
             "toggle" => Command::Toggle,
             "stop" => Command::Stop,
@@ -330,9 +400,9 @@ pub fn hello_result(app_version: &str) -> serde_json::Value {
     serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
         "app_version": app_version,
-        // "layout" is #181; "library" (#182) and "palette" (#183) join
+        // "layout" is #181 and "library" #182; "palette" (#183) joins
         // as they land, so a client looks for the word, not the version.
-        "capabilities": ["transport", "viz", "layout"],
+        "capabilities": ["transport", "viz", "layout", "library"],
         "stable": false,
     })
 }
@@ -480,6 +550,57 @@ mod tests {
         assert!(err.contains("\"ok\":false") && !err.contains("result"));
     }
 
+    /// #182: the library commands parse, a bare `play` is still the
+    /// transport's, and what they need is asked for by name.
+    #[test]
+    fn the_library_commands_parse_and_say_what_is_missing() {
+        assert_eq!(
+            req(r#"{"id":1,"cmd":"playlists"}"#).parse().unwrap(),
+            Command::Playlists
+        );
+        assert_eq!(
+            req(r#"{"id":2,"cmd":"search","q":"  cure  "}"#)
+                .parse()
+                .unwrap(),
+            Command::Search("cure".into())
+        );
+        assert_eq!(
+            req(r#"{"id":3,"cmd":"queue_playlist","playlist_id":12}"#)
+                .parse()
+                .unwrap(),
+            Command::QueuePlaylist(12)
+        );
+        assert_eq!(
+            req(r#"{"id":4,"cmd":"play","media_id":89}"#)
+                .parse()
+                .unwrap(),
+            Command::PlayMedia(89)
+        );
+        assert_eq!(
+            req(r#"{"id":5,"cmd":"play"}"#).parse().unwrap(),
+            Command::Play
+        );
+        assert!(matches!(
+            req(r#"{"id":6,"cmd":"search"}"#).parse().unwrap_err(),
+            ParseError::MissingField { field: "q", .. }
+        ));
+        assert!(matches!(
+            req(r#"{"id":7,"cmd":"search","q":"   "}"#)
+                .parse()
+                .unwrap_err(),
+            ParseError::InvalidField { field: "q", .. }
+        ));
+        assert!(matches!(
+            req(r#"{"id":8,"cmd":"queue_playlist"}"#)
+                .parse()
+                .unwrap_err(),
+            ParseError::MissingField {
+                field: "playlist_id",
+                ..
+            }
+        ));
+    }
+
     /// #181: the layout event is flat, as control-api.md draws it: the tag
     /// beside `windows` and `bonds`, spans as two-element arrays, and the
     /// command that asks for it now parses.
@@ -535,11 +656,11 @@ mod tests {
     }
 
     #[test]
-    fn hello_advertises_viz_and_layout_and_is_still_unstable() {
+    fn hello_advertises_what_is_built_and_is_still_unstable() {
         let h = hello_result("0.4.0");
         assert_eq!(
             h["capabilities"],
-            serde_json::json!(["transport", "viz", "layout"])
+            serde_json::json!(["transport", "viz", "layout", "library"])
         );
         assert_eq!(h["stable"], false);
     }

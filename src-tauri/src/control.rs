@@ -13,7 +13,10 @@
 //! free instead of hand-rolling FFT in Rust. Worth it — but it's why the viz
 //! channel (v0.4) needs its latency measured before v1.0 freezes anything.
 
-use hp_control::{hello_result, Command, Event, PlayerState, Request, Response, Status};
+use hp_control::{
+    hello_result, Command, Event, PlayerState, PlaylistSummary, Request, Response, SearchResult,
+    Status, TrackSummary, SEARCH_LIMIT,
+};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -111,6 +114,106 @@ fn handle(app: &AppHandle, state: &ControlState, req: &Request) -> Response {
                 repeat,
             };
             Response::ok(req.id, serde_json::to_value(s).unwrap_or_default())
+        }
+        // The library on the pipe (#182). Asking is answered here from the
+        // database; playing goes to the library window, which holds the
+        // queue (D120), after Rust has made sure there is something to play,
+        // so a bad id or an unplugged drive is an error the client can read
+        // rather than a silence.
+        Command::Playlists => {
+            let lists = {
+                let db = app.state::<crate::db::Db>();
+                let conn = db.0.lock().unwrap();
+                crate::playlist::list(&conn)
+            };
+            match lists {
+                Ok(lists) => {
+                    let lists: Vec<PlaylistSummary> = lists
+                        .into_iter()
+                        .map(|p| PlaylistSummary {
+                            id: p.id,
+                            name: p.name,
+                            count: p.count - p.offline,
+                            smart: p.smart,
+                        })
+                        .collect();
+                    Response::ok(req.id, serde_json::json!({ "playlists": lists }))
+                }
+                Err(e) => Response::err(req.id, e.to_string()),
+            }
+        }
+        Command::Search(q) => {
+            let found = {
+                let db = app.state::<crate::db::Db>();
+                let conn = db.0.lock().unwrap();
+                crate::playlist::search(&conn, &q, SEARCH_LIMIT)
+            };
+            match found {
+                Ok((total, rows)) => {
+                    let result = SearchResult {
+                        total,
+                        tracks: rows
+                            .into_iter()
+                            .map(|t| TrackSummary {
+                                id: t.id,
+                                title: t.title,
+                                uploader: t.uploader,
+                                kind: t.kind,
+                                duration_s: t.duration_s,
+                            })
+                            .collect(),
+                    };
+                    Response::ok(req.id, serde_json::to_value(result).unwrap_or_default())
+                }
+                Err(e) => Response::err(req.id, e.to_string()),
+            }
+        }
+        Command::QueuePlaylist(id) => {
+            let found = {
+                let db = app.state::<crate::db::Db>();
+                let conn = db.0.lock().unwrap();
+                crate::playlist::playable(&conn, id)
+            };
+            match found {
+                Ok(None) => Response::err(req.id, format!("no playlist {id}")),
+                Ok(Some((name, 0))) => {
+                    Response::err(req.id, format!("“{name}” has nothing that can play now"))
+                }
+                Ok(Some((name, count))) => {
+                    match app.emit_to("library", "pipe:queue-playlist", id) {
+                        Ok(()) => Response::ok(
+                            req.id,
+                            serde_json::json!({ "playlist_id": id, "name": name, "count": count }),
+                        ),
+                        Err(e) => Response::err(req.id, e.to_string()),
+                    }
+                }
+                Err(e) => Response::err(req.id, e.to_string()),
+            }
+        }
+        Command::PlayMedia(id) => {
+            let found = {
+                let db = app.state::<crate::db::Db>();
+                let conn = db.0.lock().unwrap();
+                let title: Option<String> = conn
+                    .query_row("SELECT title FROM media WHERE id = ?1", [id], |r| r.get(0))
+                    .ok();
+                title.map(|t| (t, crate::drives::out_for(&conn, id).ok().flatten()))
+            };
+            match found {
+                None => Response::err(req.id, format!("track {id} is not in the library")),
+                Some((title, Some(drive))) => Response::err(
+                    req.id,
+                    format!("“{title}” is on {drive}, which isn't plugged in"),
+                ),
+                Some((title, None)) => match app.emit_to("library", "pipe:play-media", id) {
+                    Ok(()) => Response::ok(
+                        req.id,
+                        serde_json::json!({ "media_id": id, "title": title }),
+                    ),
+                    Err(e) => Response::err(req.id, e.to_string()),
+                },
+            }
         }
         // Answered here, off the UI thread, which is where the window getters
         // behind it have to be asked from (#181).

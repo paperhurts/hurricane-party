@@ -130,11 +130,24 @@ pub struct Candidate {
 
 /// What a rule makes of the library, in the rule's order. `rows` come newest
 /// first, as the library lists them; `now` is seconds since the epoch.
+/// The words of a search, folded: what [`words_match`] looks for.
+pub fn terms(q: &str) -> Vec<String> {
+    fold(q).split_whitespace().map(str::to_string).collect()
+}
+
+/// Whether every term is in "title artist", folded: the library's search box
+/// (D121), a smart list's words (D144) and the pipe's `search` (#182) all
+/// match this way.
+pub fn words_match(terms: &[String], title: &str, uploader: Option<&str>) -> bool {
+    if terms.is_empty() {
+        return true;
+    }
+    let hay = fold(&format!("{} {}", title, uploader.unwrap_or("")));
+    terms.iter().all(|w| hay.contains(w.as_str()))
+}
+
 pub fn select(rule: &Rule, rows: &[Candidate], now: i64) -> Vec<MediaRow> {
-    let terms: Vec<String> = fold(&rule.words)
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
+    let terms = terms(&rule.words);
     let since = rule.added_within_days.map(|d| now - i64::from(d) * 86_400);
     let mut kept: Vec<MediaRow> = rows
         .iter()
@@ -158,17 +171,7 @@ pub fn select(rule: &Rule, rows: &[Candidate], now: i64) -> Vec<MediaRow> {
             rule.shorter_than_s
                 .is_none_or(|s| t.duration_s.is_some_and(|d| d < f64::from(s)))
         })
-        .filter(|t| {
-            if terms.is_empty() {
-                return true;
-            }
-            let hay = fold(&format!(
-                "{} {}",
-                t.title,
-                t.uploader.as_deref().unwrap_or("")
-            ));
-            terms.iter().all(|w| hay.contains(w.as_str()))
-        })
+        .filter(|t| words_match(&terms, &t.title, t.uploader.as_deref()))
         .collect();
 
     // Stable, as the library's own sort is, so ties keep the newest first.

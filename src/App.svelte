@@ -435,13 +435,46 @@
 
   /** Make the list showing the queue, because a row of it was just played. */
   function adoptShowingAsQueue() {
-    queueFrom = selectedList;
-    queueItems = selectedList == null ? [] : listItems;
+    adoptQueue(selectedList, listItems);
+  }
+
+  /** Make a list the queue (D120); `null` is the whole library. */
+  function adoptQueue(listId: number | null, items: MediaRow[]) {
+    queueFrom = listId;
+    queueItems = listId == null ? [] : items;
     try {
-      localStorage.setItem(QUEUE_KEY, selectedList == null ? "library" : String(selectedList));
+      localStorage.setItem(QUEUE_KEY, listId == null ? "library" : String(listId));
     } catch {
       // A private window or a blocked store: the queue still works this session.
     }
+  }
+
+  // ---- the library on the pipe (#182) ----
+  //
+  // Rust answers `playlists` and `search` itself and has already checked
+  // that there is something to play before it sends either of these; the
+  // queue lives here (D120), so here is where they land.
+
+  /** `queue_playlist`: that list becomes the queue and starts, as Play from a standing start would (D97). */
+  async function pipeQueuePlaylist(id: number) {
+    const items = await invoke<MediaRow[]>("playlist_items", { id }).catch(() => null);
+    if (!items) return;
+    adoptQueue(id, items);
+    picked = null;
+    start(null);
+  }
+
+  /** `play` with a `media_id`: that track, in the queue that is current if it is there, otherwise in the library, as a row played from the library would be. */
+  async function pipePlayMedia(id: number) {
+    let t = queue.find((x) => x.id === id);
+    if (!t) {
+      if (!tracks.some((x) => x.id === id)) await refreshLibrary();
+      t = tracks.find((x) => x.id === id);
+      if (!t) return;
+      adoptQueue(null, []);
+    }
+    picked = null;
+    play(t);
   }
 
   /** Re-read the queue's own list, or let go of a playlist that is gone. */
@@ -565,6 +598,13 @@
       // Purricane's Main has a calm pill of its own (D132); the box here
       // moves with it.
       listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "library" } }),
+      // The library on the pipe (#182): Rust relays what plays, to here.
+      listen<number>("pipe:queue-playlist", (e) => pipeQueuePlaylist(e.payload), {
+        target: { kind: "WebviewWindow", label: "library" },
+      }),
+      listen<number>("pipe:play-media", (e) => pipePlayMedia(e.payload), {
+        target: { kind: "WebviewWindow", label: "library" },
+      }),
       listen("library-changed", () => {
         refreshLibrary();
         refreshStorage();

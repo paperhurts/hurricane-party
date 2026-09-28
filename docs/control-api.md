@@ -38,7 +38,7 @@ Why a separate pipe rather than interleaving on one: mixing framed binary with n
 
 Clients check `protocol_version` and refuse to proceed on mismatch. Server rejects unknown major versions rather than guessing.
 
-**As built**, `capabilities` is `["transport", "viz", "layout"]`: `library` arrives with `queue_playlist` and `search`, and `palette` with `palette_changed`, each when it is built. A client should look for the capability, not the version, before it relies on either.
+**As built**, `capabilities` is `["transport", "viz", "layout", "library"]`: `palette` arrives with `palette_changed` when it is built. A client should look for the capability, not the version, before it relies on one.
 
 ### Transport
 
@@ -51,7 +51,29 @@ Clients check `protocol_version` and refuse to proceed on mismatch. Server rejec
 {"id":6, "cmd":"status"}
 ```
 
-Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `layout` `queue_playlist` `search`. **Built:** `hello`, `status`, `layout`, the transport eight and `subscribe_viz` (`Command` in `crates/hp-control/src/lib.rs`). `queue_playlist` and `search` are not built yet, and today answer as unknown commands.
+Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` `layout` `playlists` `search` `queue_playlist`. **All built** (`Command` in `crates/hp-control/src/lib.rs`), with `hello` and `subscribe_viz`.
+
+**The library (#182, D149).** Four commands find something and play it; `hello` advertises them as `library`.
+
+```jsonc
+→ {"id":8, "cmd":"playlists"}
+← {"id":8, "ok":true, "result":{"playlists":[{"id":12, "name":"Road Tripping", "count":22, "smart":false}]}}
+
+→ {"id":9, "cmd":"search", "q":"cure"}
+← {"id":9, "ok":true, "result":{"total":212, "tracks":[{"id":89, "title":"Pictures of You", "uploader":"The Cure", "kind":"audio", "duration_s":288.0}]}}
+
+→ {"id":10, "cmd":"queue_playlist", "playlist_id":12}
+← {"id":10, "ok":true, "result":{"playlist_id":12, "name":"Road Tripping", "count":22}}
+
+→ {"id":11, "cmd":"play", "media_id":89}
+← {"id":11, "ok":true, "result":{"media_id":89, "title":"Pictures of You"}}
+```
+
+- `playlists` lists every playlist, smart ones too (`smart: true`). `count` is what can play now: a track on a drive that is not plugged in is not counted.
+- `search` matches every word of `q` against title and artist, blind to case and accents, exactly as the library's search box does. It returns at most 50 tracks, newest first, with `total` for how many matched. An empty `q` is refused, and so is no `q`.
+- `queue_playlist` makes that list what plays, as playing a row from it in the library would, and starts it: from the top, or a fresh shuffle when shuffle is on.
+- `play` with a `media_id` plays that track, in the list that is playing if it is there, and otherwise in the whole library. A bare `play` is the transport's, as before.
+- A playlist that does not exist, one with nothing that can play now, a track that is not in the library, and a track on a drive that is out (D143) are all errors with a reason, never a silent nothing.
 
 **Video (D69, D70).** One thing plays at a time: starting a video pauses the track, starting a track pauses the video, and nothing resumes. `status` and `now_playing_changed` carry **`kind`**, `"audio"` or `"video"`, and describe whichever last started playing; a pause from the other side does not take the channel back. `play` `pause` `toggle` `stop` `seek` `volume` act on whatever is playing (`stop` on a video is pause-and-rewind; the window stays open on its first frame). `next` and `prev` step the library's list, which walks over videos and tracks alike. Closing the video window hands the channel back to the track: `status` describes the audio side again, paused or stopped, which is what a `play` would resume. `kind` is additive; absent means audio. The Main window's own buttons, seek bar and volume go through the same router as these commands (D81), so what a client sees and what the user sees never disagree.
 
