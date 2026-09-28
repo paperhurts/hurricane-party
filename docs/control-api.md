@@ -38,7 +38,7 @@ Why a separate pipe rather than interleaving on one: mixing framed binary with n
 
 Clients check `protocol_version` and refuse to proceed on mismatch. Server rejects unknown major versions rather than guessing.
 
-**As built**, `capabilities` is `["transport", "viz", "layout", "library"]`: `palette` arrives with `palette_changed` when it is built. A client should look for the capability, not the version, before it relies on one.
+**As built**, `capabilities` is `["transport", "viz", "layout", "library", "palette"]`. A client should look for the capability, not the version, before it relies on one.
 
 ### Transport
 
@@ -91,9 +91,18 @@ Full set: `play` `pause` `toggle` `next` `prev` `stop` `seek` `volume` `status` 
 {"event":"palette_changed", "viscolor":["#000000","#0f0f0f", "…24 entries…"]}
 ```
 
-**Built:** `now_playing_changed`, `state_changed` and `layout_changed` (#181). `palette_changed` was placed at v0.5 below, and v0.5 shipped without it, although skins and themes now change at runtime (the `.wsz` importer, the skin maker and Purricane all shipped); it is v1.0 now (#183).
+**Built:** all four: `now_playing_changed`, `state_changed`, `layout_changed` (#181) and `palette_changed` (#183). The last was placed at v0.5 below, and v0.5 shipped without it; it landed with v1.0.
 
 `palette_changed` is the one worth calling out. When you switch skins, the LED wall changes color scheme to match. That's a genuinely nice thing that costs almost nothing to ship, and it's the kind of detail that makes people want to build against your API. The payload is the same 24-entry `viscolor` array the skin manifest defines (`skin-manifest.md`) — one definition, three consumers: analyser, Cone backdrop, and this event.
+
+**As built (#183, D150).** `viscolor` is the ramp Main's analyser draws with at that moment: the theme's, or an imported or made skin's own when it brings one (D101). Purricane reports its base ramp, not the kaleidoscope's drifting hue. Always exactly 24 colours, each `#rrggbb` in lower case, darkest first. It is sent when the skin or the theme changes it, and not again while it stays the same. A client that connects later asks:
+
+```jsonc
+→ {"id":12, "cmd":"palette"}
+← {"id":12, "ok":true, "result":{"viscolor":["#04160b", "#06280f", …]}}
+```
+
+`viscolor` is empty only in the moment before Main has opened.
 
 ### `layout_changed` — required by the kittens, useful to everyone
 

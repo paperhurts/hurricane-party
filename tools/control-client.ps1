@@ -18,6 +18,7 @@
       tools\control-client.ps1 search "the cure"
       tools\control-client.ps1 queue_playlist 12
       tools\control-client.ps1 play 89         # one track, by an id from search
+      tools\control-client.ps1 palette         # the analyser's 24 colours (#183)
       tools\control-client.ps1 listen          # watch unsolicited events, layout_changed among them
 #>
 param([string]$Cmd = "status", [string]$Arg)

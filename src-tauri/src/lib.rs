@@ -581,6 +581,14 @@ fn report_state(app: AppHandle, state: hp_control::PlayerState) {
     control::update_state(&app, state);
 }
 
+/// Main reporting the analyser's ramp, which it resolves from the skin and
+/// the theme (#183, D101). The pipe's `palette` and `palette_changed` come
+/// from what Main last said.
+#[tauri::command]
+fn report_palette(app: AppHandle, viscolor: Vec<String>) -> Result<(), String> {
+    control::update_palette(&app, &viscolor)
+}
+
 /// Main's own buttons, seek bar and volume, through the same router as the
 /// pipe (D81): whatever is playing gets the command.
 #[tauri::command]
@@ -1833,6 +1841,7 @@ pub fn run() {
             open_video,
             video_ready,
             report_state,
+            report_palette,
             transport,
             transport_state,
             viz_frame,

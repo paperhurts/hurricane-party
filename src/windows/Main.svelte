@@ -40,6 +40,12 @@
   // (D101): `VISCOLOR.TXT` is read at import for this, and an imported skin
   // that brings a green-on-black ramp should not draw Eyewall's radar.
   let palette = $state(viscolor("eyewall"));
+  // The pipe's `palette_changed` (#183): Rust hears the ramp drawn here, on
+  // mount and whenever a skin or a theme changes it, and tells clients when
+  // it differs. Purricane's is its base ramp, not the kaleidoscope's drift.
+  $effect(() => {
+    invoke("report_palette", { viscolor: $state.snapshot(palette) }).catch(() => {});
+  });
   // What draws in the bars' place, and in which colours (#147): the theme's
   // analyser for a skin that wears the theme, Purricane's kaleidoscope among
   // them, and the skin's own for a skin with its own colours.
