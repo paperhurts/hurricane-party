@@ -688,7 +688,8 @@
         const t = queue.find((x) => x.id === e.payload);
         // Playing from the playlist window fixes the queue it shows (D120).
         if (queueFrom === undefined) adoptShowingAsQueue();
-        if (t) play(t);
+        // A double-click on a row is a person's press, like a row's button.
+        if (t) play(t, true);
       }),
       // The playlist window edits the list it shows, which is the queue, not
       // whatever the library happens to be showing (D120).
@@ -1238,10 +1239,17 @@
   /** A row's own play button: play it, and make its list the queue (D120). */
   function playFromView(t: MediaRow) {
     adoptShowingAsQueue();
-    play(t);
+    play(t, true);
   }
 
-  function play(t: MediaRow) {
+  /**
+   * Start a track or a video. `raise` is true only when the person pressed
+   * play on that row (here, or a double-click in the playlist window): then
+   * Main, or the video window, may come forward, without taking focus. A
+   * track ending, Next, a standing start, the tray and the pipe never raise,
+   * and nothing ever brings back a window the person minimised (#191, D152).
+   */
+  function play(t: MediaRow, raise = false) {
     // A new attempt clears the last verdict, whichever kind it was. Clearing
     // only inside the video branch left a video failure sitting over a later
     // audio play that worked.
@@ -1264,13 +1272,13 @@
       // Resolves when the window confirms the switch, rejects when it does
       // not (D68). Before this the call could not fail (D67), so a dead
       // window read as success.
-      invoke("open_video", { id: t.id }).catch((e) => (error = String(e)));
+      invoke("open_video", { id: t.id, raise }).catch((e) => (error = String(e)));
       // One transport (D69): a video starting pauses the audio. It does not
       // resume when the video ends or closes; the user restarts it.
       emitTo("main", "player:pause").catch(() => {});
       return;
     }
-    emitTo("main", "player:load", t).catch((e) => (error = String(e)));
+    emitTo("main", "player:load", { ...t, raise }).catch((e) => (error = String(e)));
   }
 
   // The row that is playing toggles instead of restarting.

@@ -113,7 +113,8 @@ fn install(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "toggle" => {
-                if let Err(e) = crate::control::route(app, "toggle", None) {
+                // The windows are hidden in the tray; a toggle from it stays out of sight (#191).
+                if let Err(e) = crate::control::route(app, "toggle", None, false) {
                     eprintln!("tray: play/pause: {e}");
                 }
             }
