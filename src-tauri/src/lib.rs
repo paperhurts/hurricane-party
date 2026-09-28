@@ -11,6 +11,7 @@ mod layout;
 mod library;
 mod localimport;
 mod packs;
+mod painted;
 mod pipeline;
 pub mod platform;
 mod playlist;
@@ -1709,6 +1710,42 @@ fn import_companion(app: AppHandle, path: String) -> Result<packs::PackInfo, Str
     }
 }
 
+/// Start a companion to paint (D163): a new folder inside the one the person
+/// chose, remembered as the only place `write_companion_template_file` may
+/// write.
+#[tauri::command]
+fn start_companion_template(app: AppHandle, parent: String) -> Result<String, String> {
+    let dir = skins::start_template(std::path::Path::new(&parent), "my-companion")
+        .map_err(|e| e.to_string())?;
+    *app.state::<packs::TemplateDir>().0.lock().unwrap() = Some(dir.clone());
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// One of the companion template's files, as a raw body with its name in a
+/// header.
+#[tauri::command]
+fn write_companion_template_file(
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("write_companion_template_file: expected a raw body".into());
+    };
+    let name = request
+        .headers()
+        .get("x-hp-name")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("write_companion_template_file: no x-hp-name")?;
+    let dir = app
+        .state::<packs::TemplateDir>()
+        .0
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("no companion template has been started")?;
+    packs::write_template_file(&dir, name, bytes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Focus is a group property (v0.4-brief): when any bonded window has focus, all
 /// of them render active.
@@ -1821,6 +1858,7 @@ pub fn run() {
         .manage(video::SwitchAcks::default())
         .manage(video::OpenLock::default())
         .manage(skins::TemplateDir::default())
+        .manage(packs::TemplateDir::default())
         .manage(radar::Wake::default())
         // Any window that moves, resizes or closes may change what the pipe's
         // `layout_changed` says (#181). A ping only: this runs on the UI
@@ -2037,7 +2075,9 @@ pub fn run() {
             list_companions,
             get_companion_pick,
             set_companion_pick,
-            import_companion
+            import_companion,
+            start_companion_template,
+            write_companion_template_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

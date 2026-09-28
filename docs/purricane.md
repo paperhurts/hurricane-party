@@ -210,6 +210,8 @@ A pack may carry its sheet at twice the size beside it: `sheet@2x.png` for `shee
 
 **A person's own pack** comes in through **Import companion…** in the library: its `companion.json`, or a zip holding one. Exactly three files are copied into the app's `companions/` folder: the manifest, its sheet and the sheet's `@2x` twin. The companion's own loader checks the pack first (`hp-companion --check --pack <folder>`), and a pack it refuses is taken out again, with the reason on screen. The picker beside the Cap'n Capy box chooses which companion the box starts (D162).
 
+**A companion to paint** comes from **Paint a companion…** beside it: a folder with a blank `sheet.png` in this layout at 64 px a cell, a `guide.png` naming every row, a `companion.json` that says `"painted": true`, and a README. Import companion… on that `companion.json` reads the painted cells off the sheet, left to right in each row, and installs a finished pack with both sheets (D163).
+
 How the art for a pack comes into existence, with an image model or a pencil, and the script that packs the frames into this shape: `companion-art.md`.
 
 ### Validation and failure

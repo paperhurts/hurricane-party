@@ -105,6 +105,14 @@ pub fn import(src: &Path, dir: &Path) -> Result<String, String> {
     } else {
         return Err("pick a companion's companion.json, or a zip of one".into());
     };
+    // A painted template (D163) becomes a pack here, before it is installed.
+    let first = String::from_utf8_lossy(&files[0].1).into_owned();
+    let files = if crate::painted::is_painted(&first) {
+        let sheet = &files.get(1).ok_or("the painted sheet is missing")?.1;
+        crate::painted::finish(&first, sheet)?
+    } else {
+        files
+    };
     let json = String::from_utf8(files[0].1.clone()).map_err(|_| "companion.json is not text")?;
     let name = manifest_name(&json).unwrap_or_else(|| "companion".into());
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -246,6 +254,28 @@ fn slug_for(dir: &Path, name: &str) -> String {
         .map(|n| format!("{base}-{n}"))
         .find(|c| !taken(c))
         .unwrap_or_else(|| format!("{base}-x"))
+}
+
+// ---- a companion to paint (D163) ----
+
+/// The folder `start_companion_template` made this session, and the only
+/// place `write_companion_template_file` writes, as with a skin's template.
+#[derive(Default)]
+pub struct TemplateDir(pub std::sync::Mutex<Option<PathBuf>>);
+
+/// What a companion template is: the manifest, the sheet to paint, the guide
+/// under it, and a note on how.
+const TEMPLATE_FILES: [&str; 4] = [MANIFEST, "sheet.png", "guide.png", "README.txt"];
+
+/// Write one of a companion template's four files into its folder.
+pub fn write_template_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    if !TEMPLATE_FILES.contains(&name) {
+        return Err(format!("{name:?} is not part of a companion template"));
+    }
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(format!("{name} is too big"));
+    }
+    fs::write(dir.join(name), bytes).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

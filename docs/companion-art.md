@@ -174,6 +174,12 @@ State: pet. 1 frame: eyes closed, leaning into an unseen hand from above, conten
 State: carry. 2 frames, looping. The subject is lifted from above by the scruff: the top of the figure touches row 0, and the feet dangle clear of the ground. 0: limbs hanging, unimpressed. 1: legs kicking. No hand drawn; the mouse pointer is the hand.
 ```
 
+## Painting one by hand (D163)
+
+For a person with a pixel editor rather than a bot: **Paint a companion…** in the library writes a template into a new folder. `sheet.png` is this page's sheet, blank: 512 x 448, eight 64 px cells across, one row per state. `guide.png` is the same size with the rows named, the suggested number of cells shaded, and the ground line (each cell's row 63) and the middle (x = 32) marked; it goes under the painting as a layer and is never read. In Aseprite: open `sheet.png`, set the grid to 64 x 64 and snap to it, add `guide.png` with Layer > New > New Reference Layer from File, and draw at 1:1.
+
+The rules are this page's: face right, feet on row 63, centred, a transparent background. The frames are counted, not declared: a row's frames are its painted cells from the left, so a row is painted left to right with no gap, only idle is required, and an empty row falls back to idle. Import companion… on the folder's `companion.json` does the rest (`src-tauri/src/painted.rs`): the manifest with the format's timings, and the `@2x` twin by doubling each pixel. A sheet painted at twice the size, 1024 x 896, is taken too, and then the 1x is made from it by halving.
+
 ## Not this: the chrome sheet
 
 The Eyewall skin's sprite sheet (#3, D73) is a different job and a generator is the wrong tool for it. Those sprites are **shapes** at one and two pixels of stroke: title bar, buttons in their four states, slider tracks and thumbs, drawn as alpha masks the renderer tints from the palette and glows from `--accent`. The session produces it, derived from the CSS chrome that already ships so the look is the one already accepted (D90), from the rectangles `skin-manifest.md` fixes, and it goes under `skins/eyewall/`. Nobody draws it by hand; "hand-drawn" in #37 and D73 only ever meant committed PNGs rather than a build-time script. The companion is the one that gets to be an illustration.
