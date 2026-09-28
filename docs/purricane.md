@@ -206,6 +206,8 @@ Three fields carry most of the design:
 - **`"syncTo": "beat"`** makes `dance` advance on beat flags from the viz stream rather than on a frame rate. That's the difference between dancing and merely animating, and it's one field
 - **`palette`** decides whether the companion drifts hue with the kaleidoscope or keeps its own colors. Kittens want `theme`. Unicorns emphatically want `fixed`
 
+A pack may carry its sheet at twice the size beside it: `sheet@2x.png` for `sheet.png`, exactly twice as wide and tall, with the same cells in the same places. It is drawn whenever the companion is at an even zoom, beside 2x chrome, and without it the 1x frames are doubled, which comes out soft. It is the same `@2x` convention the skins' chrome uses (D76, D160). No key in `companion.json` names it, so an older loader simply ignores it.
+
 How the art for a pack comes into existence, with an image model or a pencil, and the script that packs the frames into this shape: `companion-art.md`.
 
 ### Validation and failure

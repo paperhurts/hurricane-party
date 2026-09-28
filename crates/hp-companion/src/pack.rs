@@ -87,21 +87,44 @@ pub struct Pack {
     states: BTreeMap<String, State>,
     /// Every cell some state uses, by its index on the sheet.
     cells: BTreeMap<u32, Rgba>,
+    /// The same cells at twice the size, from `<sheet>@2x.png` when the pack
+    /// has one (D160), for drawing beside 2x chrome from real detail.
+    cells2x: Option<BTreeMap<u32, Rgba>>,
 }
 
 impl Pack {
-    /// Load a pack folder: `companion.json` and the sheet it names, beside it.
+    /// Load a pack folder: `companion.json`, the sheet it names beside it,
+    /// and that sheet's `@2x` twin if there is one (`sheet.png` and
+    /// `sheet@2x.png`, the convention the skins' chrome already uses, D76).
     pub fn load(dir: &Path) -> Result<Pack, String> {
         let json = std::fs::read_to_string(dir.join("companion.json"))
             .map_err(|e| format!("{}: no companion.json ({e})", dir.display()))?;
         let sprite = sprite_name(&json)?;
         let sheet = std::fs::read(dir.join(&sprite))
             .map_err(|e| format!("{}: the sheet {sprite} would not open ({e})", dir.display()))?;
-        Pack::parse(&json, &sheet)
+        let stem = &sprite[..sprite.len() - ".png".len()];
+        let twin = dir.join(format!("{stem}@2x.png"));
+        let sheet2x = if twin.is_file() {
+            Some(std::fs::read(&twin).map_err(|e| format!("{}: {e}", twin.display()))?)
+        } else {
+            None
+        };
+        Pack::parse_with_2x(&json, &sheet, sheet2x.as_deref())
     }
 
     /// Check a manifest against its sheet and cut the cells out. Pure, for tests.
+    #[cfg(test)]
     pub fn parse(json: &str, sheet_png: &[u8]) -> Result<Pack, String> {
+        Pack::parse_with_2x(json, sheet_png, None)
+    }
+
+    /// As `parse`, with the sheet's `@2x` twin when there is one. The twin must
+    /// be exactly twice the sheet, or the pack is refused, not half-loaded.
+    pub fn parse_with_2x(
+        json: &str,
+        sheet_png: &[u8],
+        sheet2x_png: Option<&[u8]>,
+    ) -> Result<Pack, String> {
         let m: Manifest = serde_json::from_str(json).map_err(|e| format!("companion.json: {e}"))?;
         if m.format != FORMAT {
             return Err(format!("not an {FORMAT} pack (format is {:?})", m.format));
@@ -135,7 +158,7 @@ impl Pack {
             return Err("no idle frames: idle is the one state a pack cannot go without".into());
         }
 
-        let sheet = decode(sheet_png)?;
+        let sheet = decode(sheet_png, MAX_SHEET_SIDE)?;
         let cols = sheet.w / fw;
         let rows = sheet.h / fh;
         let mut cells = BTreeMap::new();
@@ -151,6 +174,24 @@ impl Pack {
                     .or_insert_with(|| cut(&sheet, (i % cols) * fw, (i / cols) * fh, fw, fh));
             }
         }
+        let cells2x = match sheet2x_png {
+            None => None,
+            Some(bytes) => {
+                let big = decode(bytes, 2 * MAX_SHEET_SIDE)?;
+                if (big.w, big.h) != (2 * sheet.w, 2 * sheet.h) {
+                    return Err(format!(
+                        "the @2x sheet is {}x{}; it must be twice the sheet, {}x{}",
+                        big.w,
+                        big.h,
+                        2 * sheet.w,
+                        2 * sheet.h
+                    ));
+                }
+                let (w2, h2) = (2 * fw, 2 * fh);
+                let cut2 = |i: u32| cut(&big, (i % cols) * w2, (i / cols) * h2, w2, h2);
+                Some(cells.keys().map(|&i| (i, cut2(i))).collect())
+            }
+        };
         Ok(Pack {
             name: m.name,
             frame: (fw, fh),
@@ -159,6 +200,7 @@ impl Pack {
             default_count: m.default_count.max(1),
             states,
             cells,
+            cells2x,
         })
     }
 
@@ -168,8 +210,20 @@ impl Pack {
     }
 
     /// A cell by its sheet index. Every index a state names was cut at load.
+    #[cfg(test)]
     pub fn cell(&self, index: u32) -> &Rgba {
         &self.cells[&index]
+    }
+
+    /// The cell to draw at a whole-number `scale`, and the whole number to
+    /// scale it by: at an even scale, the `@2x` cell at half (drawn from real
+    /// detail), and otherwise the 1x cell as it is scaled (D160).
+    pub fn cell_for(&self, index: u32, scale: u32) -> (&Rgba, u32) {
+        let scale = scale.max(1);
+        match &self.cells2x {
+            Some(big) if scale.is_multiple_of(2) => (&big[&index], scale / 2),
+            _ => (&self.cells[&index], scale),
+        }
     }
 }
 
@@ -225,8 +279,8 @@ fn check_state(name: &str, s: &State) -> Result<(), String> {
     Ok(())
 }
 
-/// Decode a PNG to straight RGBA8, refusing an oversized one before it is read.
-fn decode(bytes: &[u8]) -> Result<Rgba, String> {
+/// Decode a PNG to straight RGBA8, refusing one over `max` a side before it is read.
+fn decode(bytes: &[u8], max: u32) -> Result<Rgba, String> {
     let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
     dec.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = dec
@@ -236,10 +290,8 @@ fn decode(bytes: &[u8]) -> Result<Rgba, String> {
         let info = reader.info();
         (info.width, info.height)
     };
-    if w > MAX_SHEET_SIDE || h > MAX_SHEET_SIDE {
-        return Err(format!(
-            "the sheet is {w}x{h}; the limit is {MAX_SHEET_SIDE} a side"
-        ));
+    if w > max || h > max {
+        return Err(format!("the sheet is {w}x{h}; the limit is {max} a side"));
     }
     let mut buf = vec![
         0;
@@ -325,6 +377,40 @@ pub(crate) mod tests {
             idle.px[3], 0,
             "the corner is transparent: the frames were keyed"
         );
+        let (big, by) = p.cell_for(p.state("idle").frames[0], 2);
+        assert_eq!(
+            (big.w, by),
+            (128, 1),
+            "beside 2x chrome, drawn from sheet@2x.png"
+        );
+    }
+
+    #[test]
+    fn an_even_scale_draws_the_2x_cell_and_an_odd_one_the_1x() {
+        let p =
+            Pack::parse_with_2x(&manifest(IDLE), &sheet(8, 1, 4), Some(&sheet(8, 1, 8))).unwrap();
+        let w = |scale| {
+            let (c, by) = p.cell_for(0, scale);
+            (c.w, by)
+        };
+        assert_eq!(w(1), (4, 1));
+        assert_eq!(w(2), (8, 1));
+        assert_eq!(w(3), (4, 3), "an odd scale has no 2x cell to halve");
+        assert_eq!(w(4), (8, 2));
+        assert_eq!(p.cell_for(1, 2).0.px[0], 1, "the 2x twin of the same cell");
+    }
+
+    #[test]
+    fn without_a_2x_sheet_the_1x_cell_is_doubled() {
+        let p = Pack::parse(&manifest(IDLE), &sheet(8, 1, 4)).unwrap();
+        let (c, by) = p.cell_for(0, 2);
+        assert_eq!((c.w, by), (4, 2));
+    }
+
+    #[test]
+    fn a_2x_sheet_that_is_not_twice_the_sheet_refuses_the_pack() {
+        let e = Pack::parse_with_2x(&manifest(IDLE), &sheet(8, 1, 4), Some(&sheet(8, 1, 6)));
+        assert!(e.unwrap_err().contains("twice the sheet"));
     }
 
     #[test]

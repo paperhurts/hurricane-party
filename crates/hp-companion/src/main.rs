@@ -244,7 +244,10 @@ impl Captain {
         let img = self
             .frames
             .entry((pose.cell, scale, pose.flip))
-            .or_insert_with(|| sprite::render(pack.cell(pose.cell), scale, pose.flip));
+            .or_insert_with(|| {
+                let (cell, by) = pack.cell_for(pose.cell, scale);
+                sprite::render(cell, by, pose.flip)
+            });
         match surface.present(img, x, y) {
             Ok(()) => {
                 self.drawn = Some(now);
