@@ -2073,7 +2073,7 @@
 <main>
   <header>
     <h1>hurricane-party</h1>
-    <span class="ver">v0.6 — the week before the storm: plan the party, watch the cone, keep what you have</span>
+    <span class="ver">v1.0 — the pipe holds still: bring your lights, your buttons, your capybara</span>
     <!-- Prep mode (#163, D140): its own window, from here or the tray. -->
     <button class="prepbtn" onclick={() => invoke("open_prep").catch((e) => (error = String(e)))} title="Paste every link you want before a storm, see whether it fits, and save it all with one press">
       Hurricane Party Planning
