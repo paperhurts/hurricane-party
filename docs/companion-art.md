@@ -75,7 +75,17 @@ A friend with a pencil follows the same list with the same poses and skips the p
 
 The second way, tried after the first dance frames came back uneven (D158): a tool that draws true pixel art at 64 x 64 rather than a painting to be shrunk. It is set up once with the instructions below and then given one short action prompt per request, with the reference image attached. Nothing in the instructions is about the captain: the bot measures whatever reference it is given and holds every frame to it within a pixel, so the kittens use the same text. Rule 4, the size lock, is the one the first dance frames broke.
 
-The captain's reference is his idle frame cut from the sheet with every pixel made fully opaque or fully transparent (64 x 64, and an exact 8x copy at 512 x 512 for tools that want a bigger picture). Frames that come back at native size skip `keyout.ps1`; they still go through `sheet.ps1`, with `-Filter nearest`.
+The captain's reference is his idle frame cut from the sheet with every pixel made fully opaque or fully transparent (64 x 64, and an exact 8x copy at 512 x 512 for tools that want a bigger picture). **What came back, and how it went in (2026-09-28, D159).** The owner ran the instructions through Cursor twice. Both sets came back as crisp pixel art, but large (about 4 image pixels per art pixel), facing left, and with the figure a hair short of opaque. Neither was 64 px. The size lock mostly held: measured by the seagull, the one rigid part, the disco set drifted up to 5% between frames and the break set was drawn at one scale. So a set goes in as ready cells:
+
+1. Split a strip into its figures at the gaps between them.
+2. Mirror each figure to face right, as every frame of his does; the app mirrors him itself when he walks left.
+3. Make every pixel fully opaque or fully transparent.
+4. Even out any drift using the seagull's white area; a pose change is not drift, so the bounce stays.
+5. Scale the whole set by one factor, so its standing pose is as tall as his standing frames (63 rows), and check the widest pose still fits.
+6. Box-filter down to 64 px, feet on the bottom row, each pose centred on its own width.
+7. Save the results as `design/sprites/captain/cells/<state>-<n>.png`, and pack with `sheet.ps1 -Cells design\sprites\captain\cells`, which places a ready cell pixel for pixel and leaves every other state as it was.
+
+The break dance (toprock, drop, sweep, freeze) is his dance. The disco set (fist pump, tuck, point, tuck) is kept beside it as `cells/disco-*.png`, which the packer ignores, and the bot's originals for both are in `design/sprites/captain/pixel/`.
 
 ### The instructions, set once
 

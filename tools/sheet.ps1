@@ -39,7 +39,13 @@ param(
     # averaging over the area each cell pixel covers is even across frames and
     # keeps the outline. bicubic: painted sources.
     [ValidateSet("nearest", "area", "bicubic")][string]$Filter = "area",
-    [switch]$Smooth
+    [switch]$Smooth,
+    # Ready-made cells: <state>-<n>.png at exactly -Frame x -Frame, placed as
+    # they are, pixel for pixel. A state with any here takes all its frames
+    # from here and none from -In, so its poses neither get rescaled nor sway
+    # the one factor the rest share. For true pixel art drawn at the cell size
+    # (docs/companion-art.md, "A pixel-art bot, at native size").
+    [string]$Cells = ""
 )
 if ($Smooth) { $Filter = "bicubic" }
 
@@ -62,19 +68,29 @@ $Timing = @{
 
 # ---- gather the frames ----------------------------------------------------------
 
-$frames = @()   # @{ state; index; path; bmp; box }
-foreach ($state in $States) {
-    $files = Get-ChildItem -Path $In -Filter "$state-*.png" -File -ErrorAction SilentlyContinue |
+function Get-StateFiles([string]$dir, [string]$state) {
+    if (-not $dir) { return @() }
+    @(Get-ChildItem -LiteralPath $dir -Filter "$state-*.png" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.BaseName -match "^$state-(\d+)$" } |
-        Sort-Object { [int]($_.BaseName -replace "^$state-", "") }
+        Sort-Object { [int]($_.BaseName -replace "^$state-", "") })
+}
+
+$frames = @()   # @{ state; index; path; bmp; box; ready }
+foreach ($state in $States) {
+    $files = Get-StateFiles $Cells $state
+    $ready = $files.Count -gt 0
+    if (-not $ready) { $files = Get-StateFiles $In $state }
     if ($files.Count -gt $Columns) { throw "$state has $($files.Count) frames; the sheet holds $Columns per state" }
     $i = 0
     foreach ($f in $files) {
         $bmp = [System.Drawing.Bitmap]::FromFile($f.FullName)
+        if ($ready -and ($bmp.Width -ne $Frame -or $bmp.Height -ne $Frame)) {
+            throw "$($f.FullName) is $($bmp.Width)x$($bmp.Height); a ready cell must be exactly ${Frame}x${Frame}"
+        }
         # Objects, not hashtables: Where-Object and Group-Object resolve a
         # property, and Windows PowerShell 5.1 does not read a hashtable's
         # keys as properties there.
-        $frames += [pscustomobject]@{ state = $state; index = $i; path = $f.FullName; bmp = $bmp; box = $null }
+        $frames += [pscustomobject]@{ state = $state; index = $i; path = $f.FullName; bmp = $bmp; box = $null; ready = $ready }
         $i++
     }
 }
@@ -103,7 +119,7 @@ function Get-OpaqueBox([System.Drawing.Bitmap]$b) {
 }
 
 $maxW = 0; $maxH = 0
-foreach ($fr in $frames) {
+foreach ($fr in ($frames | Where-Object { -not $_.ready })) {
     $box = Get-OpaqueBox $fr.bmp
     if ($null -eq $box) { throw "$($fr.path) is fully transparent" }
     $fr.box = $box
@@ -141,8 +157,18 @@ try {
     }
     $g.Clear([System.Drawing.Color]::Transparent)
 
+    $scaled = $g.InterpolationMode
     foreach ($fr in $frames) {
         $row = [Array]::IndexOf($States, $fr.state)
+        if ($fr.ready) {
+            # As it is: same size in and out, nearest, so no pixel is resampled.
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+            $cell = New-Object System.Drawing.Rectangle ($fr.index * $Frame), ($row * $Frame), $Frame, $Frame
+            $all = New-Object System.Drawing.Rectangle 0, 0, $Frame, $Frame
+            $g.DrawImage($fr.bmp, $cell, $all, [System.Drawing.GraphicsUnit]::Pixel)
+            $g.InterpolationMode = $scaled
+            continue
+        }
         $w = [Math]::Max(1, [int][Math]::Round($fr.box.Width * $factor))
         $h = [Math]::Max(1, [int][Math]::Round($fr.box.Height * $factor))
         # Centred on the pose's own width, feet on the bottom edge.
@@ -165,16 +191,16 @@ foreach ($state in $States) {
     $mine = @($frames | Where-Object { $_.state -eq $state })
     if ($mine.Count -eq 0) { continue }
     $row = [Array]::IndexOf($States, $state)
-    $cells = @($mine | ForEach-Object { $row * $Columns + $_.index })
-    if ($state -eq "idle" -and $cells.Count -gt 1) {
+    $slots = @($mine | ForEach-Object { $row * $Columns + $_.index })
+    if ($state -eq "idle" -and $slots.Count -gt 1) {
         # idle-0 is the pose; each later idle frame (the blink, a small shift,
         # docs/companion-art.md) is a moment, not half the loop. Hold the pose
         # eleven ticks, then the moment for one: at 4 fps, a blink every 3 s.
         $held = @()
-        foreach ($c in $cells[1..($cells.Count - 1)]) { $held += @($cells[0]) * 11; $held += $c }
-        $cells = $held
+        foreach ($c in $slots[1..($slots.Count - 1)]) { $held += @($slots[0]) * 11; $held += $c }
+        $slots = $held
     }
-    $entry = [ordered]@{ frames = $cells }
+    $entry = [ordered]@{ frames = $slots }
     foreach ($k in @("fps", "syncTo", "loop", "then")) {
         if ($Timing[$state].ContainsKey($k)) { $entry[$k] = $Timing[$state][$k] }
     }
@@ -196,5 +222,8 @@ $manifest = [ordered]@{
 $json = $manifest | ConvertTo-Json -Depth 6
 [System.IO.File]::WriteAllText((Join-Path $Out "companion.json"), $json, (New-Object System.Text.UTF8Encoding $false))
 
-$placed = ($frames | Group-Object state | ForEach-Object { "$($_.Name) $($_.Count)" }) -join ", "
+$placed = ($frames | Group-Object state | ForEach-Object {
+        $tag = if ($_.Group[0].ready) { " (ready)" } else { "" }
+        "$($_.Name) $($_.Count)$tag"
+    }) -join ", "
 Write-Host ("sheet.png {0}x{1}, {2} px cells, scale {3:0.000}: {4}" -f ($Columns * $Frame), ($rows * $Frame), $Frame, $factor, $placed)
