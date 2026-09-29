@@ -418,10 +418,14 @@ impl Brain {
             Mode::Walk { .. } => ("walk", timed(pack, "walk", self.clock - self.since)),
             Mode::Sleep => ("sleep", timed(pack, "sleep", self.clock)),
         };
+        // He faces the way he went, but dancing and asleep he is shown as
+        // drawn: a shout's words and a sleeper's z's read the right way
+        // round, where a mirror spells them backwards (D167).
+        let as_drawn = matches!(self.mode, Mode::Dance | Mode::Sleep);
         Pose {
             state,
             cell,
-            flip: self.left,
+            flip: self.left && !as_drawn,
             feet: self.feet(),
         }
     }
@@ -703,6 +707,33 @@ mod tests {
             s.brain.pose(&captain()).flip,
             "the frames face right; left is a mirror"
         );
+    }
+
+    #[test]
+    fn dancing_and_asleep_he_is_shown_as_drawn_so_words_read_the_right_way_round() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        s.brain.left = true;
+        s.brain.set(Mode::Idle { until: 1e9 });
+        assert!(
+            s.brain.pose(&captain()).flip,
+            "standing, he faces the way he went"
+        );
+        s.brain.set(Mode::Dance);
+        s.brain.last_beat = s.brain.clock;
+        let dancing = s.brain.pose(&captain());
+        assert_eq!(dancing.state, "dance");
+        assert!(
+            !dancing.flip,
+            "a shout in a speech bubble is not spelt backwards"
+        );
+        s.brain.last_beat = -1e9;
+        assert!(
+            !s.brain.pose(&captain()).flip,
+            "nor between beats, so he does not turn on each one"
+        );
+        s.brain.set(Mode::Sleep);
+        assert!(!s.brain.pose(&captain()).flip, "nor a sleeper's z's");
     }
 
     #[test]
