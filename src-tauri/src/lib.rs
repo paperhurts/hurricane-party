@@ -209,6 +209,32 @@ pub(crate) fn show_prep(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ---- the settings window (#233, D173) ----------------------------------------
+
+/// The settings window, opened from the library's ⚙ Settings and brought
+/// forward if it is open: the set-once things that crowded the library's
+/// header, in a decorated window of their own like prep mode (O5).
+#[tauri::command]
+async fn open_settings(app: AppHandle) -> Result<(), String> {
+    const LABEL: &str = "settings";
+    if let Some(w) = app.get_webview_window(LABEL) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        layout::ping(&app);
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, LABEL, tauri::WebviewUrl::App("settings.html".into()))
+        .title("hurricane-party — settings")
+        .inner_size(680.0, 540.0)
+        .min_inner_size(380.0, 360.0)
+        .resizable(true)
+        .decorations(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ---- the visuals window (#167, D169) -----------------------------------------
 
 const VISUALS: &str = "visuals";
@@ -2118,6 +2144,7 @@ pub fn run() {
             set_storage_ceiling,
             make_audio_only,
             open_prep,
+            open_settings,
             open_visuals,
             visuals_subscribe,
             visuals_fullscreen,
