@@ -19,6 +19,9 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Msg {
+    /// The player's process id, from its end of the pipe: its windows are
+    /// the ones he stands on (D166).
+    Player(u32),
     Layout(LayoutInfo),
     Playing(bool),
     /// A beat just started (the flag's rising edge; the player holds it 200 ms).
@@ -77,6 +80,7 @@ fn session(tx: &Sender<Msg>, connected: &mut bool) -> Result<(), String> {
         .write(true)
         .open(PIPE_NAME)
         .map_err(|e| e.to_string())?;
+    let player = crate::platform::pipe_server(&pipe);
     let mut out = pipe.try_clone().map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(pipe);
 
@@ -86,6 +90,11 @@ fn session(tx: &Sender<Msg>, connected: &mut bool) -> Result<(), String> {
     check_hello(&reply)?;
     *connected = true;
     eprintln!("hp-companion: connected to the player");
+    if let Some(pid) = player {
+        if tx.send(Msg::Player(pid)).is_err() {
+            return Ok(());
+        }
+    }
 
     out.write_all(asks().as_bytes())
         .map_err(|e| e.to_string())?;
