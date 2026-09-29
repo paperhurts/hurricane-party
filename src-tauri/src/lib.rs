@@ -209,6 +209,63 @@ pub(crate) fn show_prep(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ---- the visuals window (#167, D169) -----------------------------------------
+
+const VISUALS: &str = "visuals";
+
+/// The visuals window, opened by Main's VIS button and brought forward if it
+/// is open. Decorated and outside the bond group, like the video window (D13).
+#[tauri::command]
+async fn open_visuals(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(VISUALS) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        layout::ping(&app);
+        return Ok(());
+    }
+    let w = tauri::WebviewWindowBuilder::new(
+        &app,
+        VISUALS,
+        tauri::WebviewUrl::App("visuals.html".into()),
+    )
+    .title("hurricane-party — visuals")
+    .inner_size(960.0, 540.0)
+    .min_inner_size(320.0, 180.0)
+    .resizable(true)
+    .decorations(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    w.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            viz::visuals_gone(&handle);
+        }
+    });
+    Ok(())
+}
+
+/// The visuals page listens here for its frames: sixty a second while the
+/// window is open, from the analyser Main already has (D169).
+#[tauri::command]
+fn visuals_subscribe(app: AppHandle, frames: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>) {
+    viz::subscribe_visuals(&app, frames);
+}
+
+/// Full screen on or off (`None` toggles). Returns what it is now.
+#[tauri::command]
+fn visuals_fullscreen(app: AppHandle, on: Option<bool>) -> Result<bool, String> {
+    let w = app
+        .get_webview_window(VISUALS)
+        .ok_or("the visuals window is not open")?;
+    let now = w.is_fullscreen().map_err(|e| e.to_string())?;
+    let want = on.unwrap_or(!now);
+    if want != now {
+        w.set_fullscreen(want).map_err(|e| e.to_string())?;
+    }
+    Ok(want)
+}
+
 #[tauri::command]
 fn prep_lines(app: AppHandle, text: String) -> Vec<prep::Line> {
     let state = app.state::<Db>();
@@ -2043,6 +2100,9 @@ pub fn run() {
             set_storage_ceiling,
             make_audio_only,
             open_prep,
+            open_visuals,
+            visuals_subscribe,
+            visuals_fullscreen,
             prep_lines,
             prep_read,
             prep_go,

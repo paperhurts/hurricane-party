@@ -24,7 +24,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::http::HeaderMap;
-use tauri::ipc::InvokeBody;
+use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
@@ -54,6 +54,9 @@ pub struct Demand {
 pub struct SourceFrame<'a> {
     /// `getByteFrequencyData` of the stream analyser: linear bins, 0..255.
     pub bins: &'a [u8],
+    /// The waveform after the bins, bytes around 128, for the visuals window
+    /// (D169). Empty from a source that sends none. No pipe frame carries it.
+    pub wave: &'a [u8],
     pub sample_rate: u32,
     /// Microseconds since the epoch on the webview's clock, when read.
     pub timestamp_us: u64,
@@ -90,8 +93,23 @@ struct Sub {
     out: Vec<u8>,
 }
 
+/// The visuals window's feed (#167, D169): sixty frames a second over a Tauri
+/// channel rather than a pipe, each under the 1 KB a channel hands the page
+/// directly instead of fetching.
+pub const VISUALS_RATE: u32 = 60;
+pub const VISUALS_BANDS: usize = 64;
+pub const VISUALS_WAVE: usize = 256;
+
+struct Visuals {
+    channel: Channel<InvokeResponseBody>,
+    edges: Option<(SourceShape, Edges)>,
+    scratch: Vec<f32>,
+}
+
 struct Inner {
     subs: Vec<Sub>,
+    /// The visuals window, while it is open and listening.
+    visuals: Option<Visuals>,
     next_id: u32,
     tick: u64,
     demand: Demand,
@@ -106,6 +124,7 @@ impl Default for VizHub {
     fn default() -> Self {
         Self(Arc::new(Mutex::new(Inner {
             subs: Vec::new(),
+            visuals: None,
             next_id: 1,
             tick: 0,
             demand: Demand::default(),
@@ -118,15 +137,62 @@ impl Default for VizHub {
 }
 
 fn compute_demand(inner: &Inner) -> Demand {
+    demand_for(
+        inner.subs.iter().map(|s| s.params.rate_hz),
+        inner.visuals.is_some(),
+    )
+}
+
+/// Capture while anyone listens, a pipe or the visuals window, at the
+/// fastest rate asked for.
+fn demand_for(rates: impl Iterator<Item = u32>, visuals: bool) -> Demand {
+    let pipes = rates.max();
+    let visuals = visuals.then_some(VISUALS_RATE);
     Demand {
-        active: !inner.subs.is_empty(),
-        rate_hz: inner
-            .subs
-            .iter()
-            .map(|s| s.params.rate_hz)
-            .max()
-            .unwrap_or(0),
+        active: pipes.is_some() || visuals.is_some(),
+        rate_hz: pipes.max(visuals).unwrap_or(0),
     }
+}
+
+/// The visuals window listens on `channel`, in place of any earlier one (a
+/// reload of its page), and Main captures while it does.
+pub fn subscribe_visuals(app: &AppHandle, channel: Channel<InvokeResponseBody>) {
+    let hub = app.state::<VizHub>().0.clone();
+    hub.lock().unwrap().visuals = Some(Visuals {
+        channel,
+        edges: None,
+        scratch: Vec::new(),
+    });
+    notify_demand(app, &hub);
+    eprintln!("hp-viz: the visuals window is listening");
+}
+
+/// The visuals window closed: stop feeding it, and stop capturing if it was
+/// the only one listening.
+pub fn visuals_gone(app: &AppHandle) {
+    let hub = app.state::<VizHub>().0.clone();
+    let had = hub.lock().unwrap().visuals.take().is_some();
+    if had {
+        notify_demand(app, &hub);
+    }
+}
+
+/// One frame for the visuals window: a flags byte (bit 0, a beat), the peak
+/// and RMS levels, a spare byte, the bands as bytes, then the waveform at
+/// `VISUALS_WAVE` samples, 128 at rest.
+pub fn visuals_frame(beat: bool, peak: u8, rms: u8, bands: &[f32], wave: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + bands.len() + VISUALS_WAVE);
+    out.extend_from_slice(&[beat as u8, peak, rms, 0]);
+    out.extend(
+        bands
+            .iter()
+            .map(|b| (b.clamp(0.0, 1.0) * 255.0).round() as u8),
+    );
+    out.extend((0..VISUALS_WAVE).map(|i| match wave.len() {
+        0 => 128,
+        n => wave[i * n / VISUALS_WAVE],
+    }));
+    out
 }
 
 /// Re-derive demand from the subscriber list and tell Main if it changed.
@@ -237,15 +303,19 @@ pub fn on_request(app: &AppHandle, req: &tauri::ipc::Request<'_>) -> Result<(), 
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| format!("viz_frame: bad or missing header {name}"))
     }
-    let bins = match req.body() {
+    let body = match req.body() {
         InvokeBody::Raw(b) => b.as_slice(),
         InvokeBody::Json(_) => return Err("viz_frame: expected a raw body".into()),
     };
     let h = req.headers();
+    // The bins, then `x-hp-wave` bytes of waveform.
+    let wave_len: usize = hdr(h, "x-hp-wave").unwrap_or(0).min(body.len());
+    let (bins, wave) = body.split_at(body.len() - wave_len);
     on_frame(
         app,
         SourceFrame {
             bins,
+            wave,
             sample_rate: hdr(h, "x-hp-rate")?,
             timestamp_us: hdr(h, "x-hp-ts")?,
             level_peak: hdr(h, "x-hp-peak")?,
@@ -268,8 +338,8 @@ pub fn on_request(app: &AppHandle, req: &tauri::ipc::Request<'_>) -> Result<(), 
 /// One source frame in; one encoded frame out to every subscriber due one.
 pub fn on_frame(app: &AppHandle, src: SourceFrame<'_>) {
     let hub = app.state::<VizHub>();
-    let mut g = hub.0.lock().unwrap();
-    let g = &mut *g;
+    let mut guard = hub.0.lock().unwrap();
+    let g = &mut *guard;
     if !g.demand.active {
         // The tail of a loop that has already been told to stop.
         return;
@@ -321,6 +391,38 @@ pub fn on_frame(app: &AppHandle, src: SourceFrame<'_>) {
         frame.encode_into(&mut s.out);
         s.scratch = frame.spectrum;
         s.tx.send_replace(Arc::new(s.out.clone()));
+    }
+
+    // The visuals window: the same beat and levels, its own bands, and the
+    // waveform the pipe never carries.
+    let mut gone = false;
+    if let Some(v) = &mut g.visuals {
+        let every = (source_rate / VISUALS_RATE).max(1) as u64;
+        if tick % every == 0 {
+            let key = (src.bins.len(), src.sample_rate);
+            if v.edges.as_ref().map(|(k, _)| *k != key).unwrap_or(true) {
+                v.edges = band_edges(
+                    VISUALS_BANDS,
+                    src.bins.len(),
+                    src.sample_rate as f64,
+                    F_MIN,
+                    F_MAX,
+                )
+                .ok()
+                .map(|e| (key, e));
+            }
+            match &v.edges {
+                Some((_, edges)) => reduce_bands(src.bins, edges, &mut v.scratch),
+                None => v.scratch.clear(),
+            }
+            let frame = visuals_frame(beat, src.level_peak, src.level_rms, &v.scratch, src.wave);
+            gone = v.channel.send(InvokeResponseBody::Raw(frame)).is_err();
+        }
+    }
+    if gone {
+        g.visuals = None;
+        drop(guard);
+        notify_demand(app, &hub.0);
     }
 }
 
@@ -638,6 +740,47 @@ mod tests {
         assert!(low_energy(&bins, 48000) > 0.0);
         assert_eq!(low_energy(&[], 48000), 0.0);
         assert_eq!(low_energy(&bins, 0), 0.0);
+    }
+
+    #[test]
+    fn a_visuals_frame_is_flags_levels_bands_then_the_wave_and_fits_a_direct_send() {
+        let bands = vec![0.0, 0.5, 1.0, 2.0];
+        let wave: Vec<u8> = (0..512).map(|i| (i / 2) as u8).collect();
+        let f = visuals_frame(true, 200, 100, &bands, &wave);
+        assert_eq!(&f[..4], &[1, 200, 100, 0]);
+        assert_eq!(&f[4..8], &[0, 128, 255, 255], "bands as bytes, clamped");
+        assert_eq!(f.len(), 4 + 4 + VISUALS_WAVE);
+        assert_eq!(
+            (f[8], f[9], f[8 + 255]),
+            (0, 1, 255),
+            "the wave resampled to 256"
+        );
+        let full = visuals_frame(false, 0, 0, &vec![0.0; VISUALS_BANDS], &[]);
+        assert!(full.len() < 1024, "under a channel's direct-send limit");
+        assert!(
+            full[4 + VISUALS_BANDS..].iter().all(|&b| b == 128),
+            "no wave is a flat line"
+        );
+    }
+
+    #[test]
+    fn the_visuals_window_alone_keeps_main_capturing_at_60_hz() {
+        assert_eq!(
+            demand_for([].into_iter(), false),
+            Demand {
+                active: false,
+                rate_hz: 0
+            }
+        );
+        assert_eq!(
+            demand_for([].into_iter(), true),
+            Demand {
+                active: true,
+                rate_hz: VISUALS_RATE
+            }
+        );
+        assert_eq!(demand_for([15, 30].into_iter(), true).rate_hz, 60);
+        assert_eq!(demand_for([15].into_iter(), false).rate_hz, 15);
     }
 
     #[test]

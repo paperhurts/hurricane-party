@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { levelBytes, VizCapture, wallMicros, type VizSource } from "./vizstream";
+import { levelBytes, VizCapture, WAVE_SAMPLES, wallMicros, waveBytes, type VizSource } from "./vizstream";
 
 function fakeSource(bins = 16, fftSize = 32, sampleRate = 48000, fill = 100): VizSource {
   return {
@@ -119,24 +119,35 @@ describe("VizCapture", () => {
     cap.source = fakeSource(8, 16, 44100, 200);
     cap.tick();
     expect(send).toHaveBeenCalledTimes(1);
-    const [bins, headers] = send.mock.calls[0] as unknown as [Uint8Array, Record<string, string>];
-    expect(bins.length).toBe(8);
-    expect(bins[0]).toBe(200);
+    const [body, headers] = send.mock.calls[0] as unknown as [Uint8Array, Record<string, string>];
+    // The bins, then the waveform for the visuals window (D169).
+    expect(headers["x-hp-wave"]).toBe(String(WAVE_SAMPLES));
+    expect(body.length).toBe(8 + WAVE_SAMPLES);
+    expect(body[0]).toBe(200);
     expect(headers["x-hp-ts"]).toBe("1234");
     expect(headers["x-hp-rate"]).toBe("44100");
-    // 0.5 everywhere: peak and rms both 128.
+    // 0.5 everywhere: peak and rms both 128, and the wave sits at +0.5.
     expect(headers["x-hp-peak"]).toBe("128");
     expect(headers["x-hp-rms"]).toBe("128");
+    expect(body[8]).toBe(192);
   });
 
   it("sends silence, not nothing, before the graph exists", () => {
     const send = vi.fn(() => Promise.resolve());
     const cap = new VizCapture(send, () => "1");
     cap.tick();
-    const [bins, headers] = send.mock.calls[0] as unknown as [Uint8Array, Record<string, string>];
-    expect(bins.length).toBe(1024);
-    expect(bins.every((b) => b === 0)).toBe(true);
+    const [body, headers] = send.mock.calls[0] as unknown as [Uint8Array, Record<string, string>];
+    expect(body.length).toBe(1024 + WAVE_SAMPLES);
+    expect(body.subarray(0, 1024).every((b) => b === 0)).toBe(true);
+    // A flat line, not the floor.
+    expect(body.subarray(1024).every((b) => b === 128)).toBe(true);
     expect(headers["x-hp-peak"]).toBe("0");
+  });
+
+  it("samples the waveform evenly into bytes around 128", () => {
+    const out = new Uint8Array(4);
+    waveBytes([1, 1, -1, -1, 0, 0, 2, 2], out);
+    expect([...out]).toEqual([255, 1, 128, 255]);
   });
 
   /// A tick while the last send is still out is dropped, not queued.

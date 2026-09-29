@@ -25,6 +25,7 @@ export default defineConfig({
         playlist: resolve(import.meta.dirname, "playlist.html"),
         video: resolve(import.meta.dirname, "video.html"),
         prep: resolve(import.meta.dirname, "prep.html"),
+        visuals: resolve(import.meta.dirname, "visuals.html"),
         root: resolve(import.meta.dirname, "root.html"),
       },
     },

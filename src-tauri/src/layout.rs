@@ -29,7 +29,7 @@ const EVERY: Duration = Duration::from_millis(50);
 
 /// The decorated windows a companion may also stand on (#181, the owner's
 /// call). Listed while they exist; never bonded.
-const DECORATED: [&str; 3] = ["library", "video", "prep"];
+const DECORATED: [&str; 4] = ["library", "video", "prep", "visuals"];
 
 /// A decorated window as the OS reports it.
 #[derive(Debug, Clone, PartialEq)]
