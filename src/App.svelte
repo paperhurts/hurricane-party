@@ -2169,7 +2169,7 @@
 <main>
   <header>
     <h1>hurricane-party</h1>
-    <span class="ver">v1.2 — Wee Man comes aboard, and your own companion can too: paint one, or bring frames</span>
+    <span class="ver">v1.3 — press VIS: the music as light, in flowing trails or a turning fractal</span>
     <!-- Prep mode (#163, D140): its own window, from here or the tray. -->
     <button class="prepbtn" onclick={() => invoke("open_prep").catch((e) => (error = String(e)))} title="Paste every link you want before a storm, see whether it fits, and save it all with one press">
       Hurricane Party Planning
