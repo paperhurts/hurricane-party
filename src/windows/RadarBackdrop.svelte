@@ -5,7 +5,8 @@
   // they read as one map with the radar in the middle.
   //
   // Drawn on a canvas under every sprite. The frames are Rust's, already in
-  // the analyser's ramp; this draws them softened, rings the radar's reach,
+  // the analyser's ramp; this draws them softened, rings the distance from
+  // the centre (the radar's reach, or from you around a ZIP code, #161),
   // lays the window's ground over them so the chrome stays readable, and, when
   // the loop is stale or the fetch failed, draws them grey and dim. That is a
   // canvas filter, inside the canvas: no CSS filter touches anything here, and
@@ -103,7 +104,9 @@
       ctx.drawImage(img, 0, top * perLogical, fw, (H / scale) * perLogical, 0, 0, W, H);
       ctx.restore();
     }
-    // The radar's reach, 75, 150 and 230 km, and where it stands.
+    // 75, 150 and 230 km from the centre: the radar's reach, or distance
+    // from you around a ZIP code (#161). The square is where it stands, or
+    // where you are, unlabelled.
     const siteY = (status?.site_y ?? 188) - top;
     const kmPerLogical = 0.84 * perLogical;
     const accent = token("accent");
@@ -120,7 +123,7 @@
       ctx.arc(137.5 * scale, siteY * scale, (km / kmPerLogical) * scale, 0, 2 * Math.PI);
       ctx.stroke();
     }
-    if (status?.site) {
+    if (status?.centre) {
       ctx.globalAlpha = 0.9;
       ctx.fillStyle = token("alert");
       ctx.shadowColor = token("alert");

@@ -181,7 +181,7 @@
     invoke<RadarStatus>("get_radar")
       .then((r) => {
         radar = r;
-        if (!r.site) invoke<RadarSite[]>("radar_sites").then((s) => (sites = s));
+        if (!r.centre) invoke<RadarSite[]>("radar_sites").then((s) => (sites = s));
       })
       .catch(() => {});
 
@@ -315,7 +315,7 @@
     <p class="warn say">The download folder is not there: downloads wait until it is back.</p>
   {/if}
 
-  {#if radar && !radar.site && sites.length}
+  {#if radar && !radar.centre && sites.length}
     <!-- Optional, and never in the way of the button (the owner's call on #163). -->
     <label class="radar">
       <span class="dim">Radar loop: not saved for the outage.</span>
@@ -330,8 +330,8 @@
         {/each}
       </select>
     </label>
-  {:else if radar?.site}
-    <p class="dim radar">Radar loop: {radar.site.id} fills while this runs, whatever the theme.</p>
+  {:else if radar?.centre}
+    <p class="dim radar">Radar loop: {radar.centre.label} fills while this runs, whatever the theme.</p>
   {/if}
 
   <div class="press">

@@ -1,4 +1,4 @@
-// Cone's radar (#85, D135), the half that needs no DOM: what the windows say
+// Cone's radar (#85, D135, #161), the half that needs no DOM: what the windows say
 // about the loop's age, which frame is showing, and where each window sits
 // in the one picture behind all three. Rust fetches and redraws the frames
 // (`radar.rs`); the backdrop draws them (`RadarBackdrop.svelte`).
@@ -12,6 +12,18 @@ import tokens from "../../design/tokens.json";
 import type { WindowName } from "./skin";
 
 export type RadarSite = { id: string; name: string; state: string; lat: number; lon: number; region: string };
+/** What the loop is centred on: a radar picked, or a ZIP code typed (#161).
+ * Exactly one of `site` and `zip` is set; `label` is what the windows say,
+ * `KJAX` or `ZIP 32207`. */
+export type RadarCentre = {
+  label: string;
+  site: string | null;
+  zip: string | null;
+  lat: number;
+  lon: number;
+  region: string;
+  state: string | null;
+};
 export type RadarFrame = { time_ms: number; path: string };
 export type RadarAlert = {
   event: string;
@@ -21,7 +33,7 @@ export type RadarAlert = {
   expires: string | null;
 };
 export type RadarStatus = {
-  site: RadarSite | null;
+  centre: RadarCentre | null;
   frames: RadarFrame[];
   last_attempt_ms: number | null;
   last_ok_ms: number | null;
@@ -41,7 +53,8 @@ export type RadarState = "live" | "stale" | "offline" | "none";
 
 export type Readout = {
   state: RadarState;
-  /** The line for a title bar: `RADAR · KJAX · 14:32 EDT · 4h 12m old · OFFLINE`. */
+  /** The line for a title bar: `RADAR · KJAX · 14:32 EDT · 4h 12m old · OFFLINE`,
+   * or `RADAR · ZIP 32207 · …` when it is centred on a ZIP code. */
   text: string;
   /** For the windowshade strip: `4h 12m OLD`. */
   short: string;
@@ -71,10 +84,10 @@ export function clock(ms: number, timeZone?: string): string {
 
 /** What a window says about the radar at `now`. */
 export function readout(status: RadarStatus | null, now: number, timeZone?: string): Readout {
-  if (!status?.site) {
+  if (!status?.centre) {
     return { state: "none", text: "RADAR · PICK YOUR RADAR IN THE LIBRARY", short: "NO RADAR", warn: false };
   }
-  const id = status.site.id;
+  const id = status.centre.label;
   const failed = !!status.last_error && (status.last_attempt_ms ?? 0) >= (status.last_ok_ms ?? 0);
   const newest = status.frames.length ? status.frames[status.frames.length - 1].time_ms : null;
   if (newest === null) {

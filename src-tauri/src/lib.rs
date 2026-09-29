@@ -1559,20 +1559,38 @@ fn get_radar(app: AppHandle) -> radar::Status {
 
 /// Pick a radar by its id, or "" for none. The windows hear `radar:updated`
 /// with the new one's cache straight away, and the timer fetches for it.
+/// A radar clears the ZIP code, so the loop is centred on one thing (#161).
 #[tauri::command]
 fn set_radar_site(app: AppHandle, id: String) -> Result<radar::Status, String> {
     let id = id.trim();
     if !id.is_empty() && radar::site(id).is_none() {
         return Err(format!("{id} is not a radar this app knows"));
     }
+    set_radar_centre(&app, id, "")
+}
+
+/// Centre the loop on a ZIP code instead (#161), or "" for none. Refused,
+/// with the reason, when it is not five digits, not in the Census Bureau's
+/// table, or beyond every radar's reach. A ZIP code clears the radar.
+#[tauri::command]
+fn set_radar_zip(app: AppHandle, zip: String) -> Result<radar::Status, String> {
+    let code = match zip.trim() {
+        "" => String::new(),
+        typed => radar::Centre::of_zip(typed)?.zip.unwrap_or_default(),
+    };
+    set_radar_centre(&app, "", &code)
+}
+
+fn set_radar_centre(app: &AppHandle, site: &str, zip: &str) -> Result<radar::Status, String> {
     {
         let state = app.state::<Db>();
         let conn = state.0.lock().unwrap();
-        db::set_setting(&conn, radar::SITE_SETTING, id).map_err(|e| e.to_string())?;
+        db::set_setting(&conn, radar::SITE_SETTING, site).map_err(|e| e.to_string())?;
+        db::set_setting(&conn, radar::ZIP_SETTING, zip).map_err(|e| e.to_string())?;
     }
-    let status = radar::status(&app);
+    let status = radar::status(app);
     let _ = app.emit("radar:updated", &status);
-    radar::wake(&app);
+    radar::wake(app);
     Ok(status)
 }
 
@@ -2118,6 +2136,7 @@ pub fn run() {
             radar_sites,
             get_radar,
             set_radar_site,
+            set_radar_zip,
             get_cookies_from,
             set_cookies_file,
             show_library,
