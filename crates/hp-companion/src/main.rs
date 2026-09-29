@@ -9,7 +9,9 @@
 //! ledge down when the window under him moves, shades or goes. He is always on
 //! top, so when another window comes in front of the one he stands on, he is
 //! standing on nothing and falls to the floor; when it is minimised, so is he,
-//! until it is back (D166). He goes when the player's windows do. Click him
+//! until it is back (D166). Standing on them, he goes when the player's
+//! windows all do; on the floor he is detached, and stays out front until he
+//! is put back on a window (D168). Click him
 //! and he leans into the pet; drag him and he hangs by his scruff, kicking,
 //! until he is dropped (D156).
 //!
