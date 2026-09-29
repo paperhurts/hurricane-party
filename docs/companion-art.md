@@ -190,9 +190,19 @@ The rules are this page's: face right, feet on row 63, centred, a transparent ba
 **Import companion…** packs frames in the app, by this page's rules, so neither script is needed to make a companion of your own:
 
 - **A folder of frames**: name them `<state>-<n>.png` (`idle-0.png`, `idle-1.png`, `walk-0.png` …), any size, one pose each on transparency, and pick any one of them. The companion is named after the folder.
-- **An Aseprite export**: File > Export Sprite Sheet, with JSON Data ticked (Hash or Array) and Tags listed, and one tag per state named `idle`, `walk`, `dance`, `sleep`, `startle`, `pet` or `carry`. Pick the `.json`; its sheet is read from beside it. A tag with another name is left out; a reverse tag plays reversed. The companion is named after the `.json`.
+- **An Aseprite export**: File > Export Sprite Sheet, with JSON Data ticked (Hash or Array) and Tags listed, and one tag per state named `idle`, `walk`, `dance`, `sleep`, `startle`, `pet` or `carry`. Pick the `.json`; its sheet is read from beside it. A tag with another name is left out; a reverse tag plays reversed. A frame with nothing drawn in it is left out too, so a tag not drawn yet falls back to idle; only idle needs something drawn. The companion is named after the `.json`.
 
-Either way each pose is cut to what is drawn, one factor sizes them all so the tallest and widest fit the 64 px cell, and each pose's weight sits in the middle of its cell with its feet on the bottom edge, as `sheet.ps1 -Centre mass` does. Art drawn smaller than the cell is scaled up by a whole number and never stretched to fill it, so pixel art stays crisp: a 32 px kitten comes out 64 px at 1x and 128 at 2x. Idle's first frame is the pose and the rest its moments. The timings are the format's; Aseprite's frame durations are not read.
+Either way each pose is cut to what is drawn, one factor sizes them all so the tallest and widest fit the 64 px cell, and each pose's weight sits in the middle of its cell with its feet on the bottom edge, as `sheet.ps1 -Centre mass` does. Art drawn smaller than the cell is scaled up by a whole number and never stretched to fill it, so pixel art stays crisp: a 32 px kitten comes out 64 px at 1x and 128 at 2x. Idle's first frame is the pose and the rest its moments. The timings are the format's; Aseprite's frame durations are not read. Where the pose sits on its canvas does not matter, since each is cut to what is drawn; what matters is drawing every frame at the same size.
+
+### In Aseprite, from nothing
+
+1. **New sprite**: File > New. Width and height 64 (or 32 for a smaller, quicker kitten), Color Mode RGBA, Background Transparent.
+2. **Frames**: the timeline along the bottom has one column per frame. Frame > New Frame copies the current one, which is the quick way to animate: copy, then change a little. Seventeen frames make a whole companion: idle 2, walk 4, dance 4, sleep 2, startle 2, pet 1, carry 2. Turn on Onion Skin in the timeline to see the frame before faintly while drawing the next.
+3. **Draw**: the Pencil (B) draws one pixel at a time and the Eraser (E) takes it away; pick colours from the palette on the left, and zoom with the mouse wheel. Face right, and draw every frame at the same size.
+4. **Tags**: click the first frame's number in the timeline, Shift-click the last of a state's frames, then Frame > Tags > New Tag and name it `idle` (then `walk`, and so on). A tag shows as a coloured band above its frames. Enter plays the animation to check it.
+5. **Save** the `.aseprite` (File > Save) to keep working on it later; its name becomes the companion's.
+6. **Export**: File > Export Sprite Sheet. Under Output, tick Output File and JSON Data, and under JSON Data tick Tags. Export writes a `.png` and a `.json` beside the `.aseprite`.
+7. **Import**: in hurricane-party's library, Import companion…, and pick the `.json`.
 
 ## Not this: the chrome sheet
 
