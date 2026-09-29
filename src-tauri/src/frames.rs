@@ -206,13 +206,29 @@ pub fn from_aseprite(data: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
             if f.rotated {
                 return Err("the sheet has rotated frames; export it without rotation".into());
             }
-            let label = format!("the {} tag's frame {}", STATES[row], k + 1);
-            states[row].push((label, crop_rect(&sheet, &f.frame)?));
+            // A frame with nothing drawn in it is one not drawn yet, and is
+            // left out: a tag not drawn yet falls back to idle, as an empty
+            // row of the painted template does (D163). Trimmed, such a frame
+            // can come out with no size at all.
+            if f.frame.w == 0 || f.frame.h == 0 {
+                continue;
+            }
+            let img = crop_rect(&sheet, &f.frame)?;
+            if img.px.chunks_exact(4).any(|p| p[3] > 8) {
+                let label = format!("the {} tag's frame {}", STATES[row], k + 1);
+                states[row].push((label, img));
+            }
         }
     }
     if !seen[0] {
         return Err(
             "no tag is named idle: tag the frames idle, walk, dance, sleep, startle, pet and carry"
+                .into(),
+        );
+    }
+    if states[0].is_empty() {
+        return Err(
+            "nothing is drawn in the idle tag: its first frame is the one a companion cannot go without"
                 .into(),
         );
     }
@@ -658,6 +674,48 @@ mod tests {
         assert!(!is_aseprite(
             r#"{"format":"hp-companion/1","sprite":"sheet.png"}"#
         ));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn frames_not_drawn_yet_are_left_out_and_an_undrawn_tag_falls_back_to_idle() {
+        let dir = tmp("ase-empty");
+        // Frame 0 drawn, frame 1 empty; frame 2 as a trimmed export gives an
+        // empty one, with no size.
+        put(&dir, "sheet.png", &block(32, 16, 4, 4, 8, 12));
+        let empty = serde_json::json!({ "frame": { "x": 0, "y": 0, "w": 0, "h": 0 } });
+        let data = |tags: serde_json::Value| {
+            serde_json::json!({
+                "frames": [frame(0), frame(1), empty],
+                "meta": { "image": "sheet.png", "frameTags": tags },
+            })
+            .to_string()
+        };
+        let path = dir.join("starter.json");
+        fs::write(
+            &path,
+            data(serde_json::json!([
+                { "name": "idle", "from": 0, "to": 1 },
+                { "name": "walk", "from": 1, "to": 2 },
+            ])),
+        )
+        .unwrap();
+        let (m, _, _) = sheets(&from_aseprite(&path).unwrap());
+        assert_eq!(m["states"]["idle"]["frames"], serde_json::json!([0]));
+        assert!(
+            m["states"].get("walk").is_none(),
+            "nothing drawn: idle instead"
+        );
+        fs::write(
+            &path,
+            data(serde_json::json!([{ "name": "idle", "from": 1, "to": 2 }])),
+        )
+        .unwrap();
+        let refused = from_aseprite(&path).err().unwrap_or_default();
+        assert!(
+            refused.contains("nothing is drawn in the idle tag"),
+            "{refused}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
