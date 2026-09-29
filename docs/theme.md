@@ -56,7 +56,7 @@ Chrome stays cyan/magenta. Radar ramp is visualizer-only. Both are instrument-di
 
 Charter and Crimson Pro are lovely and wrong here — serifs at 11px on dark with a glow halo turn to mush. Save them for doc-md.
 
-*As built:* each theme names its faces in `design/tokens.json` (`type.chrome`, `type.ui`) and the app asks for them by name. **No font file ships**: a CDN font is ruled out (D29) and none is bundled. A machine with Iosevka installed gets it, and every other one gets the stack's fallback, Cascadia Mono then Consolas (`src/app.css`).
+*As built:* each theme names its faces in `design/tokens.json` (`type.chrome`, `type.ui`) and the app asks for them by name. **No font file ships**: a CDN font is ruled out (D29) and none is bundled. A machine with Iosevka installed gets it, and every other one gets the stack's fallback, Cascadia Mono then Consolas (`src/app.css`). The library and the settings window are set in Iosevka Aile, named outright, with Iosevka for their numbers (D173, D174); without Aile they fall back to Segoe UI.
 
 ---
 
