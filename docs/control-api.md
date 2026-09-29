@@ -133,7 +133,7 @@ Where the windows are, for anything that wants to put something on them.
 ```
 
 - Coordinates are **physical pixels** on the virtual desktop, the player's own convention, so nothing has to guess a scale factor. They can be negative on a display left of or above the primary.
-- `main`, `eq` and `playlist` are the classic windows, `group: true`. `library`, `video` and `prep` are the decorated windows, listed while they exist, always `group: false`, and never in `bonds`.
+- `main`, `eq` and `playlist` are the classic windows, `group: true`. `library`, `video`, `prep` and `visuals` (#167) are the decorated windows, listed while they exist, always `group: false`, and never in `bonds`.
 - `shaded`: collapsed to the windowshade strip; `h` is the strip's.
 - `visible`: shown and not minimised, as the operating system reports it. A window that is not visible keeps its last rectangle, which is where it will come back.
 - A bond's `edge` is the side of `a` that `b` sits against, always `right` or `bottom`; `span` is the shared stretch along it.

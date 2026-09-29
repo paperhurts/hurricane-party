@@ -81,6 +81,8 @@ export const ACTIONS = [
   "calm",
   "segments6",
   "segments8",
+  // Main's VIS: the visuals window, full size (#167, D169).
+  "visuals",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -1109,6 +1111,8 @@ export function actionTitle(action: Action | null, on: boolean): string {
       return "Six segments";
     case "segments8":
       return "Eight segments";
+    case "visuals":
+      return "Visuals: the music as light, in a window of its own";
     case null:
       return "";
   }

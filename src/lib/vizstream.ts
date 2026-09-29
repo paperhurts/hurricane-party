@@ -67,6 +67,23 @@ export function wallMicros(now = performance.now(), origin = performance.timeOri
   return String(Math.round((origin + now) * 1000));
 }
 
+/**
+ * Waveform samples sent after the bins, for the visuals window (#167, D169):
+ * the flow draws the music as a line, which bins alone cannot. Bytes, 128 at
+ * rest, like `getByteTimeDomainData`. The pipe's frames never carry them.
+ */
+export const WAVE_SAMPLES = 256;
+
+/** `WAVE_SAMPLES` evenly spaced samples of a block, as bytes around 128. */
+export function waveBytes(samples: ArrayLike<number>, out: Uint8Array): void {
+  const n = out.length;
+  const step = samples.length / n;
+  for (let i = 0; i < n; i++) {
+    const v = samples.length ? samples[Math.floor(i * step)] : 0;
+    out[i] = Math.max(0, Math.min(255, Math.round(128 + Math.max(-1, Math.min(1, v)) * 127)));
+  }
+}
+
 /** Bins to assume before the graph exists, so a rig sees a live (silent) stream at launch. */
 const DEFAULT_BINS = 1024;
 const DEFAULT_RATE = 48000;
@@ -94,6 +111,7 @@ export class VizCapture {
   private periodMs = 0;
   private nextAt = 0;
   private inflight = false;
+  private body: Uint8Array<ArrayBuffer> | null = null;
   private bins: Uint8Array<ArrayBuffer> | null = null;
   private samples: Float32Array<ArrayBuffer> | null = null;
 
@@ -160,22 +178,31 @@ export class VizCapture {
     }
     const src = this.source;
     const n = src ? src.frequencyBinCount : DEFAULT_BINS;
-    if (!this.bins || this.bins.length !== n) this.bins = new Uint8Array(n);
+    // One body: the bins, then the waveform (`x-hp-wave` says how many).
+    if (!this.body || this.body.length !== n + WAVE_SAMPLES) {
+      this.body = new Uint8Array(n + WAVE_SAMPLES);
+      this.bins = this.body.subarray(0, n);
+    }
+    const body = this.body;
+    const bins = this.bins!;
+    const wave = body.subarray(n);
     let peak = 0;
     let rms = 0;
     let rate = DEFAULT_RATE;
     let outLat = 0;
     if (src) {
-      src.getByteFrequencyData(this.bins);
+      src.getByteFrequencyData(bins);
       if (!this.samples || this.samples.length !== src.fftSize) {
         this.samples = new Float32Array(src.fftSize);
       }
       src.getFloatTimeDomainData(this.samples);
       ({ peak, rms } = levelBytes(this.samples));
+      waveBytes(this.samples, wave);
       rate = src.sampleRate;
       outLat = src.outputLatencyMs();
     } else {
-      this.bins.fill(0);
+      bins.fill(0);
+      wave.fill(128);
     }
     const headers = {
       "x-hp-ts": this.clock(),
@@ -183,6 +210,7 @@ export class VizCapture {
       "x-hp-peak": String(peak),
       "x-hp-rms": String(rms),
       "x-hp-outlat": outLat.toFixed(1),
+      "x-hp-wave": String(WAVE_SAMPLES),
       // Diagnostics for HP_VIZ_TRACE: the source's own view of its cadence.
       "x-hp-seq": String(++this.seq),
       "x-hp-dropped": String(this.dropped),
@@ -191,7 +219,7 @@ export class VizCapture {
       "x-hp-err": this.lastError,
     };
     this.inflight = true;
-    this.send(this.bins, headers)
+    this.send(body, headers)
       .catch((e) => {
         this.failed++;
         this.lastError = String(e).replace(/[^\x20-\x7e]/g, " ").slice(0, 120);

@@ -522,6 +522,8 @@
     // The classic's eject opened files. This app's files come from the
     // library, which is what the playlist's own LOAD LIST button says too.
     else if (name === "eject") invoke("show_library").catch(() => {});
+    // The visuals window, or it forward if it is open (#167, D169).
+    else if (name === "visuals") invoke("open_visuals").catch(() => {});
     // Saved, and said to every window that shows it (D132): the library's
     // calm box moves with this pill.
     else if (name === "calm") {
