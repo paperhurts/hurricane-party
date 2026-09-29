@@ -9,13 +9,18 @@
   import { applyTheme, isWearable, rampWorn, type ThemeName } from "./lib/theme";
   import { currentSkin } from "./lib/skins";
   import { Flow } from "./lib/flow";
+  import { Fractal } from "./lib/fractal";
+  import type { Visual } from "./lib/gl";
   import { parseVisualsFrame, silentFrame, type VisualsFrame } from "./lib/visualsframe";
 
   const LABEL = "visuals";
   const target = { target: { kind: "WebviewWindow" as const, label: LABEL } };
 
   /** The styles to pick from, in the order the bar shows them. */
-  const STYLES = [{ id: "flow", name: "Flow" }] as const;
+  const STYLES = [
+    { id: "flow", name: "Flow" },
+    { id: "fractal", name: "Fractal" },
+  ] as const;
   type StyleId = (typeof STYLES)[number]["id"];
   const STYLE_KEY = "hp.visuals.style";
 
@@ -33,10 +38,11 @@
   let style = $state<StyleId>(savedStyle());
   let full = $state(false);
   let bar = $state(true);
-  let broken = $state("");
+  /** Why a style could not start, by style: shown while it is picked. */
+  let broken = $state<Partial<Record<StyleId, string>>>({});
 
   let frame: VisualsFrame = silentFrame();
-  let flow: Flow | null = null;
+  const visuals: Partial<Record<StyleId, Visual>> = {};
   let calmSetting = false;
   let reduced = false;
 
@@ -50,7 +56,7 @@
   }
 
   function applyCalm() {
-    if (flow) flow.calm = calmSetting || reduced;
+    for (const v of Object.values(visuals)) v.calm = calmSetting || reduced;
   }
 
   async function toggleFull(on?: boolean) {
@@ -84,15 +90,24 @@
     Promise.all([currentSkin(), asked]).then(([w, t]) => {
       const theme: ThemeName = isWearable(t) ? t : "eyewall";
       applyTheme(theme);
-      flow?.setRamp(rampWorn(w.skin, theme));
+      const ramp = rampWorn(w.skin, theme);
+      for (const v of Object.values(visuals)) v.setRamp(ramp);
     });
   }
 
   onMount(() => {
-    try {
-      flow = new Flow(canvas);
-    } catch (e) {
-      broken = e instanceof Error ? e.message : String(e);
+    // Every style shares the canvas's one context; one that cannot start
+    // says why when it is picked, and the others still work.
+    const makers: Record<StyleId, (c: HTMLCanvasElement) => Visual> = {
+      flow: (c) => new Flow(c),
+      fractal: (c) => new Fractal(c),
+    };
+    for (const { id } of STYLES) {
+      try {
+        visuals[id] = makers[id](canvas);
+      } catch (e) {
+        broken[id] = e instanceof Error ? e.message : String(e);
+      }
     }
     loadColours();
     invoke<boolean>("get_calm").then((c) => {
@@ -118,9 +133,11 @@
     const sizer = new ResizeObserver((entries) => {
       const e = entries[0];
       const box = e.devicePixelContentBoxSize?.[0];
-      const w = box ? box.inlineSize : e.contentRect.width * devicePixelRatio;
-      const h = box ? box.blockSize : e.contentRect.height * devicePixelRatio;
-      flow?.resize(w, h);
+      const w = Math.max(1, Math.round(box ? box.inlineSize : e.contentRect.width * devicePixelRatio));
+      const h = Math.max(1, Math.round(box ? box.blockSize : e.contentRect.height * devicePixelRatio));
+      canvas.width = w;
+      canvas.height = h;
+      for (const v of Object.values(visuals)) v.resize(w, h);
     });
     try {
       sizer.observe(canvas, { box: "device-pixel-content-box" });
@@ -133,7 +150,7 @@
     const loop = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
-      if (style === "flow") flow?.render(frame, now / 1000, dt);
+      visuals[style]?.render(frame, now / 1000, dt);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -153,7 +170,7 @@
       sizer.disconnect();
       motion.removeEventListener("change", onMotion);
       subs.forEach((s) => s.then((un) => un()));
-      flow?.dispose();
+      for (const v of Object.values(visuals)) v.dispose();
     };
   });
 </script>
@@ -162,8 +179,8 @@
 
 <main class:rest={!bar}>
   <canvas bind:this={canvas} ondblclick={() => toggleFull()}></canvas>
-  {#if broken}
-    <p class="broken">The visuals need WebGL 2, which this machine's graphics would not give: {broken}</p>
+  {#if broken[style]}
+    <p class="broken">This style would not start on this machine's graphics: {broken[style]}</p>
   {/if}
   <nav class:hidden={!bar} aria-label="Visuals">
     {#each STYLES as s (s.id)}
