@@ -2185,7 +2185,7 @@
 <main>
   <header>
     <h1>hurricane-party</h1>
-    <span class="ver">v1.3 — press VIS: the music as light, in flowing trails or a turning fractal</span>
+    <span class="ver">v1.4 — the radar over your own house: type your ZIP code</span>
     <!-- Prep mode (#163, D140): its own window, from here or the tray. -->
     <button class="prepbtn" onclick={() => invoke("open_prep").catch((e) => (error = String(e)))} title="Paste every link you want before a storm, see whether it fits, and save it all with one press">
       Hurricane Party Planning
