@@ -108,16 +108,40 @@ impl Rule {
     }
 }
 
+/// Letters that are letters in their own right, with no mark to drop, and
+/// what a person types for them on an English keyboard (#194). Lowercase:
+/// they are looked up after the case is lowered, so Ø and ẞ come too.
+const LETTERS: [(char, &str); 9] = [
+    ('ø', "o"),
+    ('æ', "ae"),
+    ('œ', "oe"),
+    ('ß', "ss"),
+    ('ł', "l"),
+    ('đ', "d"),
+    ('ð', "d"),
+    ('þ', "th"),
+    ('ı', "i"),
+];
+
 /// Blind to case and accents, as the library's search box is: decompose,
-/// drop every mark, lowercase. "Beyoncé" is "beyonce".
+/// drop every mark, lowercase, then spell out the letters with no mark to
+/// drop. "Beyoncé" is "beyonce" and "Eivør" is "eivor".
 pub fn fold(s: &str) -> String {
     let marks = CodePointMapData::<GeneralCategory>::new();
-    DecomposingNormalizerBorrowed::new_nfd()
+    let lowered = DecomposingNormalizerBorrowed::new_nfd()
         .normalize(s)
         .chars()
         .filter(|c| !GeneralCategoryGroup::Mark.contains(marks.get(*c)))
         .collect::<String>()
-        .to_lowercase()
+        .to_lowercase();
+    let mut out = String::with_capacity(lowered.len());
+    for c in lowered.chars() {
+        match LETTERS.iter().find(|(l, _)| *l == c) {
+            Some((_, typed)) => out.push_str(typed),
+            None => out.push(c),
+        }
+    }
+    out
 }
 
 /// A row, with the one thing the list query adds that the player does not
