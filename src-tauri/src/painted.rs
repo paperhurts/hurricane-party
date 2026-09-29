@@ -25,10 +25,10 @@ pub fn is_painted(json: &str) -> bool {
 }
 
 /// Straight RGBA8, top-down.
-struct Image {
-    w: u32,
-    h: u32,
-    px: Vec<u8>,
+pub(crate) struct Image {
+    pub(crate) w: u32,
+    pub(crate) h: u32,
+    pub(crate) px: Vec<u8>,
 }
 
 /// The painted pack's three files: its manifest, the 1x sheet and the twin.
@@ -100,7 +100,7 @@ fn cell_painted(sheet: &Image, c: u32, r: u32) -> bool {
 /// The manifest, with the format's timings. Idle's first frame is the pose
 /// and each later one a moment in it, as `tools/sheet.ps1` writes it: the
 /// pose held eleven frames, the moment once (a blink every 3 s at 4 fps).
-fn manifest(name: &str, counts: &[u32]) -> String {
+pub(crate) fn manifest(name: &str, counts: &[u32]) -> String {
     let mut states = serde_json::Map::new();
     for (r, (state, &n)) in STATES.iter().zip(counts).enumerate() {
         if n == 0 {
@@ -184,24 +184,33 @@ fn halve(src: &Image) -> Image {
 }
 
 fn decode(bytes: &[u8]) -> Result<Image, String> {
+    decode_named(bytes, "the sheet")
+}
+
+/// A PNG as straight RGBA8, refused before anything is allocated when it is
+/// bigger than a companion could want (`purricane.md`: a 16k x 16k PNG is a
+/// denial of service dressed as a unicorn). `what` names it in the errors.
+pub(crate) fn decode_named(bytes: &[u8], what: &str) -> Result<Image, String> {
     let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
     dec.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = dec
         .read_info()
-        .map_err(|e| format!("the sheet is not a PNG: {e}"))?;
+        .map_err(|e| format!("{what} is not a PNG: {e}"))?;
+    // What costs memory is the pixels, not the length of a side: an Aseprite
+    // strip of nineteen 256 px frames is 4864 px long and harmless (D165).
     let (w, h) = (reader.info().width, reader.info().height);
-    if w > 4096 || h > 4096 {
-        return Err(format!("the sheet is {w}x{h}; too big to be a companion"));
+    if w > 16384 || h > 16384 || w as u64 * h as u64 > 4096 * 4096 {
+        return Err(format!("{what} is {w}x{h}; too big to be a companion"));
     }
     let mut buf = vec![
         0;
         reader
             .output_buffer_size()
-            .ok_or("the sheet is too large")?
+            .ok_or_else(|| format!("{what} is too large"))?
     ];
     let info = reader
         .next_frame(&mut buf)
-        .map_err(|e| format!("the sheet would not decode: {e}"))?;
+        .map_err(|e| format!("{what} would not decode: {e}"))?;
     let n = (w * h) as usize;
     let px = match info.color_type {
         png::ColorType::Rgba => buf[..n * 4].to_vec(),
@@ -214,12 +223,12 @@ fn decode(bytes: &[u8]) -> Result<Image, String> {
             .flat_map(|p| [p[0], p[0], p[0], p[1]])
             .collect(),
         png::ColorType::Grayscale => buf[..n].iter().flat_map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err("the sheet's palette did not expand".into()),
+        png::ColorType::Indexed => return Err(format!("{what}'s palette did not expand")),
     };
     Ok(Image { w, h, px })
 }
 
-fn encode(img: &Image) -> Result<Vec<u8>, String> {
+pub(crate) fn encode(img: &Image) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, img.w, img.h);

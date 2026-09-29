@@ -5,6 +5,7 @@ mod db;
 mod drives;
 mod egress;
 mod eq_presets;
+mod frames;
 mod integrity;
 mod jobs;
 mod layout;

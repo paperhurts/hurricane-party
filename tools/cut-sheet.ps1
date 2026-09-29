@@ -16,7 +16,13 @@
     body lying mostly over another in its row (a hand drawn apart from the
     head) joins that pose. Marks that stick out past the body's sides move in
     over it, all together, so a "z Z" keeps its shape and never makes its
-    pose the widest one, which would shrink every frame.
+    pose the widest one, which would shrink every frame. A mark already over
+    the body stays where it was drawn, so a shout's lines by the mouth do not
+    follow its speech bubble across the face.
+
+    A sheet on a flat colour, not transparency, is keyed first: see
+    docs/companion-art.md (keyout.ps1). A dark outline on a black ground is
+    the case keyout cannot tell apart, since the outline touches the ground.
 
     Without -Map it writes every pose as row<r>-<n>.png and prints the rows it
     found, to see which is which. -Map names them: "<state>=<row>.<n> ..." in
@@ -151,24 +157,26 @@ public static class CutSheet {
         foreach (var p in all) Tuck(p);
     }
 
-    // Move the marks that stick out past the body's sides back over it, all
-    // by the same step, so they keep their places relative to each other.
+    // Move the marks that stick out past the body's sides back over it, those
+    // all by the same step, so a "z Z" keeps its shape. A mark already over
+    // the body stays where it was drawn: a shout's lines by the mouth do not
+    // follow its speech bubble across the face.
     static void Tuck(CutPose pose) {
         int bx0 = int.MaxValue, bx1 = int.MinValue;
         foreach (int id in pose.Bodies) { bx0 = Math.Min(bx0, Parts[id - 1].X0); bx1 = Math.Max(bx1, Parts[id - 1].X1); }
         pose.X0 = bx0; pose.X1 = bx1;
         foreach (int id in pose.Bodies) Grow(pose, Parts[id - 1]);
-        if (pose.Marks.Count == 0) return;
+        var outside = pose.Marks.FindAll(id => Parts[id - 1].X1 > bx1 || Parts[id - 1].X0 < bx0);
         int mx0 = int.MaxValue, mx1 = int.MinValue;
-        foreach (int id in pose.Marks) { mx0 = Math.Min(mx0, Parts[id - 1].X0); mx1 = Math.Max(mx1, Parts[id - 1].X1); }
-        int shift = mx1 > bx1 ? bx1 - mx1 : (mx0 < bx0 ? bx0 - mx0 : 0);
+        foreach (int id in outside) { mx0 = Math.Min(mx0, Parts[id - 1].X0); mx1 = Math.Max(mx1, Parts[id - 1].X1); }
+        int shift = outside.Count == 0 ? 0 : (mx1 > bx1 ? bx1 - mx1 : (mx0 < bx0 ? bx0 - mx0 : 0));
         if (shift != 0) {
             // Lift every mark first, then put them all down, so one never
             // lands on another that has yet to move.
             var pixels = new List<int>();
             var owners = new List<int>();
             var colours = new List<byte[]>();
-            foreach (int id in pose.Marks) {
+            foreach (int id in outside) {
                 var m = Parts[id - 1];
                 for (int y = m.Y0; y < m.Y1; y++)
                     for (int x = m.X0; x < m.X1; x++) {

@@ -119,23 +119,31 @@ fn wanted(json: &str) -> Result<Vec<String>, String> {
     ])
 }
 
-/// Bring a finished pack in, from its `companion.json` (the folder beside
-/// it) or from a zip holding one, into a new folder in `dir`. Returns the new
-/// folder's id; the caller checks the pack and removes it if it is refused.
+/// Bring a companion in, into a new folder in `dir`: a finished pack from its
+/// `companion.json` (the folder beside it) or a zip holding one, or frames
+/// packed here (D165) from one frame of a folder of `<state>-<n>.png` or an
+/// Aseprite export's data file. Returns the new folder's id; the caller
+/// checks the pack and removes it if it is refused.
 pub fn import(src: &Path, dir: &Path) -> Result<String, String> {
     let is = |ext: &str| {
         src.extension()
             .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(ext))
     };
-    let named_manifest = src
+    let file_name = src
         .file_name()
-        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(MANIFEST));
-    let files = if named_manifest {
-        from_folder(src.parent().ok_or("that file has no folder")?)?
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let folder = || src.parent().ok_or("that file has no folder");
+    let files = if file_name.eq_ignore_ascii_case(MANIFEST) {
+        from_folder(folder()?)?
     } else if is("zip") {
         from_zip(src)?
+    } else if crate::frames::is_frame_name(&file_name) {
+        crate::frames::from_folder(folder()?)?
+    } else if is("json") && fs::read_to_string(src).is_ok_and(|j| crate::frames::is_aseprite(&j)) {
+        crate::frames::from_aseprite(src)?
     } else {
-        return Err("pick a companion's companion.json, or a zip of one".into());
+        return Err("pick a companion's companion.json or a zip of one, one frame of a folder of frames (idle-0.png), or an Aseprite export's .json".into());
     };
     // A painted template (D163) becomes a pack here, before it is installed.
     let first = String::from_utf8_lossy(&files[0].1).into_owned();
