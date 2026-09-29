@@ -143,7 +143,10 @@ struct Tag {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Meta {
-    image: String,
+    /// Absent when the sheet was not saved: Export Sprite Sheet with Output
+    /// File unticked opens it in a new tab instead, and writes only the data.
+    #[serde(default)]
+    image: Option<String>,
     #[serde(default)]
     frame_tags: Vec<Tag>,
 }
@@ -175,12 +178,24 @@ pub fn from_aseprite(data: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
     let ase: AseData = serde_json::from_str(&text)
         .map_err(|e| format!("that is not Aseprite's sprite-sheet data: {e}"))?;
     // The sheet beside the data file, by its own name only: nothing is read
-    // from anywhere else.
-    let image = Path::new(&ase.meta.image)
-        .file_name()
-        .ok_or("the Aseprite data names no sheet")?;
+    // from anywhere else. With no name in the data, the one Aseprite would
+    // have given it, the data file's name as a .png, if it is there.
     let dir = data.parent().ok_or("that file has no folder")?;
-    let sheet = painted::decode_named(&read(&dir.join(image))?, "the Aseprite sheet")?;
+    let sheet_path = match &ase.meta.image {
+        Some(image) => dir.join(
+            Path::new(image)
+                .file_name()
+                .ok_or("the Aseprite data names no sheet")?,
+        ),
+        None => data.with_extension("png"),
+    };
+    if !sheet_path.is_file() {
+        return Err(format!(
+            "the sheet {} is not beside the data: in Export Sprite Sheet, tick Output File as well as JSON Data",
+            sheet_path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+    }
+    let sheet = painted::decode_named(&read(&sheet_path)?, "the Aseprite sheet")?;
     let mut states: Vec<Poses> = STATES.iter().map(|_| Vec::new()).collect();
     let mut seen = [false; 7];
     for tag in &ase.meta.frame_tags {
@@ -674,6 +689,28 @@ mod tests {
         assert!(!is_aseprite(
             r#"{"format":"hp-companion/1","sprite":"sheet.png"}"#
         ));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn data_naming_no_sheet_takes_its_own_name_as_a_png_or_says_what_to_tick() {
+        // Output File unticked: Aseprite writes the data with no "image".
+        let dir = tmp("ase-noimage");
+        let data = serde_json::json!({
+            "frames": [frame(0)],
+            "meta": { "app": "https://www.aseprite.org/", "frameTags": [{ "name": "idle", "from": 0, "to": 0 }] },
+        });
+        let path = dir.join("Squeak.json");
+        fs::write(&path, data.to_string()).unwrap();
+        let refused = from_aseprite(&path).err().unwrap_or_default();
+        assert!(
+            refused.contains("Squeak.png") && refused.contains("tick Output File"),
+            "{refused}"
+        );
+        aseprite_sheet(&dir);
+        fs::rename(dir.join("sheet.png"), dir.join("Squeak.png")).unwrap();
+        let (m, _, _) = sheets(&from_aseprite(&path).unwrap());
+        assert_eq!(m["name"], "Squeak");
         let _ = fs::remove_dir_all(dir);
     }
 

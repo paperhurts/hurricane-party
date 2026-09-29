@@ -201,7 +201,7 @@ Either way each pose is cut to what is drawn, one factor sizes them all so the t
 3. **Draw**: the Pencil (B) draws one pixel at a time and the Eraser (E) takes it away; pick colours from the palette on the left, and zoom with the mouse wheel. Face right, and draw every frame at the same size.
 4. **Tags**: click the first frame's number in the timeline, Shift-click the last of a state's frames, then Frame > Tags > New Tag and name it `idle` (then `walk`, and so on). A tag shows as a coloured band above its frames. Enter plays the animation to check it.
 5. **Save** the `.aseprite` (File > Save) to keep working on it later; its name becomes the companion's.
-6. **Export**: File > Export Sprite Sheet. Under Output, tick Output File and JSON Data, and under JSON Data tick Tags. Export writes a `.png` and a `.json` beside the `.aseprite`.
+6. **Export**: File > Export Sprite Sheet. Under Output, tick Output File and JSON Data, and under JSON Data tick Tags. Export writes a `.png` and a `.json` beside the `.aseprite`. With Output File unticked Aseprite opens the sheet in a new tab instead of saving it and writes only the `.json`; the app then looks for the `.json`'s name as a `.png` beside it, so saving that tab there works too.
 7. **Import**: in hurricane-party's library, Import companion…, and pick the `.json`.
 
 ## Not this: the chrome sheet
