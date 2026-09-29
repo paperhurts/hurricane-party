@@ -10,6 +10,7 @@ How a list of poses becomes a sprite sheet the app can load, whether the frames 
 - **One row per state, eight cells per row**, in the format's order: `idle`, `sleep`, `dance`, `walk`, `startle`, `pet`, `carry`. A frame's index is `row × 8 + column`, which is why the example manifest counts `0`, `8`, `16`, `24`, `32`, `40`, `48`.
 - **Feet on the cell's bottom edge**, character centred. `anchor` is that point; it is how a 64 px captain and a 32 px kitten both perch on a bond seam.
 - The character's own colours, drawn in (`"palette": "fixed"`). Only a pack that wants to drift with the kaleidoscope's hue draws in greys for `"theme"`.
+- **Every frame faces right.** The app mirrors him to walk left, and he keeps facing that way while he stands; dancing and asleep he is shown as drawn, so words in a speech bubble and a sleeper's z's belong there and read the right way round (D167).
 
 Seven states, and the frames each one wants. Fewer is fine; a state with no frames falls back to `idle`, and `idle` is the only one the app refuses to go without.
 
