@@ -25,12 +25,22 @@ export type Rule = {
   limit?: number;
 };
 
+/** Letters with no mark to drop, and what a person types for them (#194).
+ * `smart::LETTERS`, the same table. */
+const LETTERS: Record<string, string> = { ø: "o", æ: "ae", œ: "oe", ß: "ss", ł: "l", đ: "d", ð: "d", þ: "th", ı: "i" };
+
 /**
- * Case- and accent-blind, so "beyonce" finds "Beyoncé" (D121). The same steps
- * as `smart::fold`, and the two are tested on the same cases
- * (`fold.cases.json`), so a saved search matches what the typed one did.
+ * Case- and accent-blind, so "beyonce" finds "Beyoncé" (D121) and "eivor"
+ * finds "Eivør" (#194). The same steps as `smart::fold`, and the two are
+ * tested on the same cases (`fold.cases.json`), so a saved search matches
+ * what the typed one did.
  */
-export const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+export const fold = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[øæœßłđðþı]/gu, (c) => LETTERS[c]);
 
 /** What the find bar is showing, as a rule: its words, its type, its order. */
 export function ruleFromFind(search: string, kind: "all" | Kind, sort: Sort): Rule {

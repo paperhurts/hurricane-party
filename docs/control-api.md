@@ -155,7 +155,7 @@ Where the windows are, for anything that wants to put something on them.
 ```
 
 - `playlists`: every playlist. `smart` marks one that fills itself from a rule. `count` is what can play now; a track on a drive that is not plugged in is not counted.
-- `search`: every word of `q` must appear in the title or the artist, blind to case and accents, as the library's search box matches. At most 50 tracks, newest first, and `total` for how many matched. An empty or missing `q` is refused.
+- `search`: every word of `q` must appear in the title or the artist, blind to case and accents, as the library's search box matches; since v1.5 a letter like ø, æ or ß also matches what a person types for it, so `eivor` finds "Eivør" (D172). At most 50 tracks, newest first, and `total` for how many matched. An empty or missing `q` is refused.
 - `queue_playlist`: that list becomes what plays, and it starts, from the top or on a fresh shuffle.
 - `play` with a `media_id` plays that track: in the list that is playing if it is there, otherwise in the whole library. `play` without one is the transport's.
 - A playlist that does not exist, one with nothing that can play now, a track that is not in the library, and a track on a drive that is not plugged in are each refused with the reason.
