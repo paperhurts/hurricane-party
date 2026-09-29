@@ -1,6 +1,7 @@
 //! Cone's radar (#85, D19, D135): the last four hours of NOAA reflectivity
-//! around a person's radar, cached on disk and drawn behind the classic
-//! windows, with the Weather Service's active alerts for its state.
+//! around a person's radar, or around their ZIP code (#161), cached on disk
+//! and drawn behind the classic windows, with the Weather Service's active
+//! alerts for the radar's state or for the ZIP code's point.
 //!
 //! The network rules are the theme's, and they are strict. It fetches on a
 //! ten-minute timer, only while Cone is the theme and a radar is picked,
@@ -25,6 +26,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Which radar a person picked, by its id (`KJAX`). Unset until they pick.
 pub const SITE_SETTING: &str = "radar.site";
+/// Or the ZIP code they typed instead (#161). Setting either clears the
+/// other, so there is one answer to what the loop is centred on.
+pub const ZIP_SETTING: &str = "radar.zip";
 
 /// `design/tokens.json` → `themes.cone.radar`: how often to fetch, and how
 /// many frames make the loop. A test holds these to the tokens.
@@ -50,6 +54,11 @@ pub const SITE_Y: f64 = 188.0;
 /// Ground distance per frame pixel: a frame is about 460 km across, twice
 /// the radar's own reach.
 const KM_PER_PX: f64 = 0.84;
+
+/// The farthest a WSR-88D sees, its long-range reflectivity. A ZIP code
+/// farther than this from every radar has no mosaic over it, and an empty
+/// loop there would read as a dry sky.
+const REACH_KM: f64 = 460.0;
 
 /// Reflectivity below which nothing is drawn, and at which the ramp tops out.
 const FLOOR_DBZ: f32 = 15.0;
@@ -83,12 +92,135 @@ pub fn site(id: &str) -> Option<Site> {
     sites().into_iter().find(|s| s.id == id)
 }
 
+/// Every ZIP code the Census Bureau gives a point for: its ZIP Code
+/// Tabulation Areas, trimmed by `tools/zip-points.ps1` to the code and the
+/// area's internal point, sorted. No place names; the file has none. It
+/// leaves out a ZIP code that is only post office boxes, having no area.
+const ZIPS: &str = include_str!("radar_zips.txt");
+
+fn zip_rows() -> impl Iterator<Item = &'static str> {
+    ZIPS.lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
+/// A ZIP code's point, or None when the table does not have it.
+fn zip_point(code: &str) -> Option<(f64, f64)> {
+    zip_rows().find_map(|l| {
+        let mut f = l.split_ascii_whitespace();
+        if f.next()? != code {
+            return None;
+        }
+        Some((f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+    })
+}
+
+/// Great-circle distance, in kilometres.
+fn distance_km(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (la, lb) = (a.0.to_radians(), b.0.to_radians());
+    let h = ((lb - la) / 2.0).sin().powi(2)
+        + la.cos() * lb.cos() * ((b.1 - a.1).to_radians() / 2.0).sin().powi(2);
+    2.0 * 6371.0 * h.sqrt().asin()
+}
+
+/// What the loop is centred on: a radar a person picked, or the point of
+/// the ZIP code they typed (#161). The windows get it with every status.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Centre {
+    /// What the windows call it: `KJAX`, or `ZIP 32207`.
+    pub label: String,
+    /// The radar picked, when it is one.
+    pub site: Option<String>,
+    /// The ZIP code typed, when it is one.
+    pub zip: Option<String>,
+    pub lat: f64,
+    pub lon: f64,
+    /// Which of the service's mosaics covers it: a ZIP code's is its
+    /// nearest radar's.
+    pub region: String,
+    /// A radar's alerts are its state's, as they always were; a ZIP code's
+    /// (None here) are the ones whose areas hold its point, the county and
+    /// the zone.
+    pub state: Option<String>,
+}
+
+impl Centre {
+    pub fn of_site(s: &Site) -> Centre {
+        Centre {
+            label: s.id.clone(),
+            site: Some(s.id.clone()),
+            zip: None,
+            lat: s.lat,
+            lon: s.lon,
+            region: s.region.clone(),
+            state: Some(s.state.clone()),
+        }
+    }
+
+    /// A ZIP code as typed, `32207` or `32207-1234`, or why it is refused:
+    /// not five digits, not in the table (never guessed), or beyond every
+    /// radar's reach.
+    pub fn of_zip(typed: &str) -> Result<Centre, String> {
+        let typed = typed.trim();
+        let code = match typed.split_once('-') {
+            Some((five, four)) if four.len() == 4 && four.bytes().all(|b| b.is_ascii_digit()) => {
+                five
+            }
+            _ => typed,
+        };
+        if code.len() != 5 || !code.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!(
+                "\"{typed}\" is not a ZIP code, which is five digits"
+            ));
+        }
+        let (lat, lon) = zip_point(code).ok_or_else(|| {
+            format!(
+                "{code} is not a ZIP code this app knows. Its list is the Census Bureau's, which \
+                 leaves out ZIP codes that are only post office boxes, so try the one where you \
+                 live"
+            )
+        })?;
+        let (nearest, km) = sites()
+            .into_iter()
+            .map(|s| {
+                let km = distance_km((lat, lon), (s.lat, s.lon));
+                (s, km)
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("there are radars");
+        if km > REACH_KM {
+            return Err(format!(
+                "no radar reaches {code}. The nearest, {}, is {} km away",
+                nearest.id,
+                km.round()
+            ));
+        }
+        Ok(Centre {
+            label: format!("ZIP {code}"),
+            site: None,
+            zip: Some(code.to_string()),
+            lat,
+            lon,
+            region: nearest.region,
+            state: None,
+        })
+    }
+
+    /// The folder its loop is cached in, under the app's `radar` folder: a
+    /// radar's id, as before, or `zip-32207`.
+    fn dir_name(&self) -> String {
+        match &self.zip {
+            Some(z) => format!("zip-{z}"),
+            None => self.label.clone(),
+        }
+    }
+}
+
 /// The frame's box in Web Mercator metres, `[xmin, ymin, xmax, ymax]`: the
-/// radar centred across, `SITE_Y` down the stack.
-pub fn bbox(site: &Site) -> [f64; 4] {
+/// point centred across, `SITE_Y` down the stack.
+pub fn bbox(lat: f64, lon: f64) -> [f64; 4] {
     const R: f64 = 6_378_137.0;
-    let lat = site.lat.to_radians();
-    let x = R * site.lon.to_radians();
+    let x = R * lon.to_radians();
+    let lat = lat.to_radians();
     let y = R * (std::f64::consts::FRAC_PI_4 + lat / 2.0).tan().ln();
     // Mercator stretches distance by 1/cos(latitude).
     let per_px = KM_PER_PX * 1000.0 / lat.cos();
@@ -109,19 +241,28 @@ fn catalog_url(region: &str) -> String {
     )
 }
 
-fn frame_url(site: &Site, time_ms: i64) -> String {
-    let [a, b, c, d] = bbox(site);
+fn frame_url(centre: &Centre, time_ms: i64) -> String {
+    let [a, b, c, d] = bbox(centre.lat, centre.lon);
     format!(
         "{SERVICE}/exportImage?bbox={a:.0},{b:.0},{c:.0},{d:.0}&bboxSR=3857&imageSR=3857&size={FRAME_W},{FRAME_H}\
          &format=png32&transparent=true&time={time_ms}&interpolation=RSP_NearestNeighbor&f=image"
     )
 }
 
-fn alerts_url(state: &str) -> String {
-    format!(
-        "https://api.weather.gov/alerts/active?area={}",
-        encode(state)
-    )
+/// A radar's state, or a ZIP code's point to four places, the most the
+/// service takes: the one thing about where a person lives that leaves the
+/// machine.
+fn alerts_url(centre: &Centre) -> String {
+    match &centre.state {
+        Some(state) => format!(
+            "https://api.weather.gov/alerts/active?area={}",
+            encode(state)
+        ),
+        None => format!(
+            "https://api.weather.gov/alerts/active?point={:.4},{:.4}",
+            centre.lat, centre.lon
+        ),
+    }
 }
 
 /// The frame times the service has for a mosaic, oldest first.
@@ -363,8 +504,8 @@ fn root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("no app data dir: {e}"))
 }
 
-fn site_dir(app: &AppHandle, site: &Site) -> Result<PathBuf, String> {
-    let dir = root(app)?.join(&site.id);
+fn site_dir(app: &AppHandle, centre: &Centre) -> Result<PathBuf, String> {
+    let dir = root(app)?.join(centre.dir_name());
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not make the radar folder: {e}"))?;
     Ok(dir)
 }
@@ -395,20 +536,20 @@ struct Record {
     alerts: Vec<Alert>,
 }
 
-fn record_path(app: &AppHandle, site: &Site) -> Result<PathBuf, String> {
-    Ok(site_dir(app, site)?.join("record.json"))
+fn record_path(app: &AppHandle, centre: &Centre) -> Result<PathBuf, String> {
+    Ok(site_dir(app, centre)?.join("record.json"))
 }
 
-fn read_record(app: &AppHandle, site: &Site) -> Record {
-    record_path(app, site)
+fn read_record(app: &AppHandle, centre: &Centre) -> Record {
+    record_path(app, centre)
         .ok()
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
 }
 
-fn write_record(app: &AppHandle, site: &Site, r: &Record) {
-    if let (Ok(p), Ok(json)) = (record_path(app, site), serde_json::to_vec_pretty(r)) {
+fn write_record(app: &AppHandle, centre: &Centre, r: &Record) {
+    if let (Ok(p), Ok(json)) = (record_path(app, centre), serde_json::to_vec_pretty(r)) {
         let tmp = p.with_extension("json.tmp");
         if std::fs::write(&tmp, json).is_ok() {
             let _ = std::fs::rename(&tmp, &p);
@@ -435,7 +576,7 @@ pub struct Frame {
 /// Everything a window needs to draw Cone and say how old it is.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
-    pub site: Option<Site>,
+    pub centre: Option<Centre>,
     pub frames: Vec<Frame>,
     pub last_attempt_ms: Option<i64>,
     pub last_ok_ms: Option<i64>,
@@ -446,18 +587,27 @@ pub struct Status {
     pub site_y: f64,
 }
 
-pub fn current_site(app: &AppHandle) -> Option<Site> {
-    let state = app.state::<crate::Db>();
-    let id = {
+/// The ZIP code when one is set, else the radar, else nothing. A ZIP code
+/// the table no longer knows centres nothing, rather than falling back to a
+/// radar that was cleared when it was typed.
+pub fn current_centre(app: &AppHandle) -> Option<Centre> {
+    let (zip, id) = {
+        let state = app.state::<crate::Db>();
         let conn = state.0.lock().unwrap();
-        crate::db::get_setting(&conn, SITE_SETTING)
-    }?;
-    site(&id)
+        (
+            crate::db::get_setting(&conn, ZIP_SETTING),
+            crate::db::get_setting(&conn, SITE_SETTING),
+        )
+    };
+    match zip.filter(|z| !z.is_empty()) {
+        Some(z) => Centre::of_zip(&z).ok(),
+        None => site(&id?).map(|s| Centre::of_site(&s)),
+    }
 }
 
 pub fn status(app: &AppHandle) -> Status {
-    let site = current_site(app);
-    let (frames, rec) = match &site {
+    let centre = current_centre(app);
+    let (frames, rec) = match &centre {
         Some(s) => {
             let dir = site_dir(app, s).ok();
             let frames = dir
@@ -477,7 +627,7 @@ pub fn status(app: &AppHandle) -> Status {
         None => (Vec::new(), Record::default()),
     };
     Status {
-        site,
+        centre,
         frames,
         last_attempt_ms: rec.last_attempt_ms,
         last_ok_ms: rec.last_ok_ms,
@@ -494,9 +644,9 @@ pub fn status(app: &AppHandle) -> Status {
 /// One refresh: the frames the loop is missing, the old ones dropped, then
 /// the alerts. Written to a scratch name and renamed, so a window never
 /// reads half a frame.
-async fn refresh(app: &AppHandle, site: &Site) -> Result<(), String> {
-    let dir = site_dir(app, site)?;
-    let catalog = egress::get(&catalog_url(&site.region)).await?;
+async fn refresh(app: &AppHandle, centre: &Centre) -> Result<(), String> {
+    let dir = site_dir(app, centre)?;
+    let catalog = egress::get(&catalog_url(&centre.region)).await?;
     let available = times_from(
         &serde_json::from_slice(&catalog)
             .map_err(|e| format!("the radar service's list was not JSON: {e}"))?,
@@ -504,7 +654,7 @@ async fn refresh(app: &AppHandle, site: &Site) -> Result<(), String> {
     let wanted = pick_frames(&available, &cached_times(&dir));
     let mut recolour = Recolour::new();
     for t in wanted {
-        let bytes = egress::get(&frame_url(site, t)).await?;
+        let bytes = egress::get(&frame_url(centre, t)).await?;
         if !bytes.starts_with(b"\x89PNG") {
             return Err("the radar service sent something other than a picture".into());
         }
@@ -520,14 +670,15 @@ async fn refresh(app: &AppHandle, site: &Site) -> Result<(), String> {
     Ok(())
 }
 
-async fn refresh_alerts(site: &Site) -> Result<Vec<Alert>, String> {
-    let body = egress::get(&alerts_url(&site.state)).await?;
+async fn refresh_alerts(centre: &Centre) -> Result<Vec<Alert>, String> {
+    let body = egress::get(&alerts_url(centre)).await?;
     let v: serde_json::Value =
         serde_json::from_slice(&body).map_err(|e| format!("the alerts were not JSON: {e}"))?;
     Ok(alerts_from(&v))
 }
 
-/// Wakes the timer early: a radar was picked, or Cone was put on.
+/// Wakes the timer early: a radar was picked or a ZIP code typed, or Cone
+/// was put on.
 #[derive(Default)]
 pub struct Wake(pub Arc<tokio::sync::Notify>);
 
@@ -535,7 +686,7 @@ pub fn wake(app: &AppHandle) {
     app.state::<Wake>().0.notify_one();
 }
 
-fn wanted(app: &AppHandle) -> Option<Site> {
+fn wanted(app: &AppHandle) -> Option<Centre> {
     let (theme, precaching) = {
         let state = app.state::<crate::Db>();
         let conn = state.0.lock().unwrap();
@@ -545,14 +696,14 @@ fn wanted(app: &AppHandle) -> Option<Site> {
     // lights go out (#163, D140). Still only with a radar picked, still on
     // the ten-minute timer, still through `egress::get` (D29).
     if theme == "cone" || precaching {
-        current_site(app)
+        current_centre(app)
     } else {
         None
     }
 }
 
 /// The timer. Started once the windows are up; does nothing at all while
-/// another theme is on or no radar is picked.
+/// another theme is on or neither a radar nor a ZIP code is picked.
 pub fn spawn(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let wake = app.state::<Wake>().0.clone();
@@ -560,21 +711,21 @@ pub fn spawn(app: AppHandle) {
         // they have had a moment to come up.
         tokio::time::sleep(Duration::from_secs(3)).await;
         loop {
-            if let Some(site) = wanted(&app) {
-                let mut rec = read_record(&app, &site);
+            if let Some(centre) = wanted(&app) {
+                let mut rec = read_record(&app, &centre);
                 rec.last_attempt_ms = Some(now_ms());
-                match refresh(&app, &site).await {
+                match refresh(&app, &centre).await {
                     Ok(()) => {
                         rec.last_ok_ms = rec.last_attempt_ms;
                         rec.last_error = None;
                     }
                     Err(e) => rec.last_error = Some(e),
                 }
-                if let Ok(alerts) = refresh_alerts(&site).await {
+                if let Ok(alerts) = refresh_alerts(&centre).await {
                     rec.alerts = alerts;
                     rec.alerts_ms = Some(now_ms());
                 }
-                write_record(&app, &site, &rec);
+                write_record(&app, &centre, &rec);
                 let _ = app.emit("radar:updated", status(&app));
             }
             tokio::select! {
@@ -625,7 +776,7 @@ mod tests {
     #[test]
     fn the_frame_is_about_460_km_across_with_the_radar_in_view() {
         let jax = site("KJAX").unwrap();
-        let [x0, y0, x1, y1] = bbox(&jax);
+        let [x0, y0, x1, y1] = bbox(jax.lat, jax.lon);
         let across_km = (x1 - x0) * jax.lat.to_radians().cos() / 1000.0;
         assert!((across_km - 462.0).abs() < 1.0, "{across_km}");
         // The radar is SITE_Y logical (2x pixels) from the top.
@@ -768,7 +919,13 @@ mod tests {
     #[ignore]
     fn live_frame() {
         tauri::async_runtime::block_on(async {
-            let site = site(&std::env::var("HP_RADAR").unwrap_or_else(|_| "KJAX".into())).unwrap();
+            // HP_RADAR_ZIP centres it on a ZIP code instead (#161).
+            let site = match std::env::var("HP_RADAR_ZIP") {
+                Ok(z) => Centre::of_zip(&z).unwrap(),
+                Err(_) => Centre::of_site(
+                    &site(&std::env::var("HP_RADAR").unwrap_or_else(|_| "KJAX".into())).unwrap(),
+                ),
+            };
             let catalog = egress::get(&catalog_url(&site.region)).await.unwrap();
             let times = times_from(&serde_json::from_slice(&catalog).unwrap());
             assert!(times.len() > 5, "{} frames listed", times.len());
@@ -792,7 +949,7 @@ mod tests {
                     .unwrap();
                 }
             }
-            let alerts = egress::get(&alerts_url(&site.state)).await.unwrap();
+            let alerts = egress::get(&alerts_url(&site)).await.unwrap();
             let alerts = alerts_from(&serde_json::from_slice(&alerts).unwrap());
             eprintln!(
                 "{} frames to fetch of {}, {} alerts, written to {}",
@@ -806,14 +963,93 @@ mod tests {
 
     #[test]
     fn the_urls_go_only_where_egress_allows() {
-        let jax = site("KJAX").unwrap();
+        let jax = Centre::of_site(&site("KJAX").unwrap());
+        let zip = Centre::of_zip("32207").unwrap();
         for u in [
             catalog_url("CONUS"),
             frame_url(&jax, 1_789_316_528_000),
-            alerts_url("FL"),
+            frame_url(&zip, 1_789_316_528_000),
+            alerts_url(&jax),
+            alerts_url(&zip),
         ] {
             assert!(egress::allowed(&u).is_ok(), "{u}");
         }
         assert!(catalog_url("CONUS").contains("name+LIKE+%27CONUS%25%27"));
+        // A radar's alerts are still its state's; a ZIP code's, its point's.
+        assert!(alerts_url(&jax).ends_with("?area=FL"));
+        assert!(alerts_url(&zip).ends_with("?point=30.2896,-81.6410"));
+    }
+
+    #[test]
+    fn the_zip_table_is_every_zcta_once_in_order() {
+        let rows: Vec<&str> = zip_rows().collect();
+        assert!(rows.len() > 33_000, "{}", rows.len());
+        let mut last = "";
+        for r in &rows {
+            let f: Vec<&str> = r.split(' ').collect();
+            assert_eq!(f.len(), 3, "{r}");
+            assert!(
+                f[0].len() == 5 && f[0].bytes().all(|b| b.is_ascii_digit()),
+                "{r}"
+            );
+            assert!(f[0] > last, "sorted and unique at {r}");
+            last = f[0];
+            let (lat, lon): (f64, f64) = (f[1].parse().unwrap(), f[2].parse().unwrap());
+            assert!(
+                (-90.0..90.0).contains(&lat) && (-180.0..180.0).contains(&lon),
+                "{r}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zip_code_centres_on_its_point_in_its_nearest_radars_mosaic() {
+        let jax = Centre::of_zip("32207").unwrap();
+        assert_eq!(jax.label, "ZIP 32207");
+        assert_eq!(
+            (jax.site.as_deref(), jax.zip.as_deref()),
+            (None, Some("32207"))
+        );
+        assert_eq!((jax.lat, jax.lon), (30.2896, -81.641));
+        assert_eq!(jax.region, "CONUS");
+        assert_eq!(jax.state, None, "alerts by point, not by state");
+        assert_eq!(jax.dir_name(), "zip-32207");
+        // ZIP+4 is the same ZIP code; a leading zero is kept.
+        assert_eq!(Centre::of_zip(" 32207-1234 ").unwrap(), jax);
+        assert_eq!(Centre::of_zip("00601").unwrap().region, "CARIB");
+        assert_eq!(Centre::of_zip("99501").unwrap().region, "ALASKA");
+        assert_eq!(Centre::of_zip("96813").unwrap().region, "HAWAII");
+        assert_eq!(Centre::of_zip("96910").unwrap().region, "GUAM");
+        // Marfa, Texas: over 300 km from a radar, between them, which is
+        // what a ZIP code is for. Still in reach.
+        assert!(Centre::of_zip("79843").is_ok());
+    }
+
+    #[test]
+    fn a_zip_code_is_refused_with_the_reason_never_guessed() {
+        for typed in ["", "3220", "322077", "32207-12", "ABCDE", "32 07"] {
+            let e = Centre::of_zip(typed).unwrap_err();
+            assert!(e.contains("five digits"), "{typed}: {e}");
+        }
+        // Five digits, but not a ZIP code with an area.
+        let e = Centre::of_zip("00000").unwrap_err();
+        assert!(e.contains("not a ZIP code this app knows"), "{e}");
+        // Adak, in the Aleutians: no radar sees the sky over it.
+        let e = Centre::of_zip("99546").unwrap_err();
+        assert!(
+            e.starts_with("no radar reaches 99546. The nearest, PABC,"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn a_radar_centres_where_it_always_did() {
+        let s = site("KJAX").unwrap();
+        let c = Centre::of_site(&s);
+        assert_eq!(c.label, "KJAX");
+        assert_eq!(c.dir_name(), "KJAX", "its cache is where it was");
+        assert_eq!((c.lat, c.lon, c.region.as_str()), (s.lat, s.lon, "CONUS"));
+        assert_eq!(c.state.as_deref(), Some("FL"));
+        assert!((distance_km((30.2896, -81.641), (s.lat, s.lon)) - 22.0).abs() < 2.0);
     }
 }

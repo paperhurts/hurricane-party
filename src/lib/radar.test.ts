@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { age, alertsStale, frameAt, issued, readout, STALE_MS, stackTop, type RadarStatus } from "./radar";
 
-const site = { id: "KJAX", name: "Jacksonville", state: "FL", lat: 30.48, lon: -81.7, region: "CONUS" };
+const centre = { label: "KJAX", site: "KJAX", zip: null, lat: 30.48, lon: -81.7, region: "CONUS", state: "FL" };
 const at = Date.parse("2026-09-13T18:44:00Z");
 const status = (over: Partial<RadarStatus>): RadarStatus => ({
-  site,
+  centre,
   frames: [],
   last_attempt_ms: null,
   last_ok_ms: null,
@@ -45,6 +45,13 @@ describe("the radar readout never lets cached data look current (#85)", () => {
     expect(r.state).toBe("offline");
     expect(r.text).toMatch(/· OFFLINE$/);
     expect(r.warn).toBe(true);
+  });
+
+  it("says the ZIP code when the loop is centred on one (#161)", () => {
+    const zip = { label: "ZIP 32207", site: null, zip: "32207", lat: 30.2896, lon: -81.641, region: "CONUS", state: null };
+    const r = readout(status({ centre: zip, frames: [{ time_ms: at - 2 * 60000, path: "a" }], last_attempt_ms: at, last_ok_ms: at }), at, tz);
+    expect(r.text).toBe("RADAR · ZIP 32207 · 14:42 EDT · 2m old · LIVE");
+    expect(readout(status({ centre: zip }), at).text).toBe("RADAR · ZIP 32207 · NO DATA · FETCHING");
   });
 
   it("says what is missing when there is nothing to draw", () => {

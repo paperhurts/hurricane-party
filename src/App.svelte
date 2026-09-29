@@ -1712,19 +1712,35 @@
   let radarSaid = $derived(theme === "cone" ? readout(radar, radarNow) : null);
   let alertsOld = $derived(alertsStale(radar, radarNow));
 
-  async function setRadar(id: string) {
+  // Which control the header shows (#161). It follows what the loop is
+  // centred on, and a flip on its own changes nothing until a radar is
+  // picked or a ZIP code entered.
+  let centreBy = $state<"radar" | "zip">("radar");
+
+  function heard(s: RadarStatus) {
+    radar = s;
+    if (s.centre) centreBy = s.centre.zip ? "zip" : "radar";
+  }
+
+  // A refusal says why on the notice line until a later pick is accepted.
+  let refusal: string | null = null;
+
+  async function centreOn(cmd: "set_radar_site" | "set_radar_zip", args: Record<string, string>, what: string) {
     try {
-      radar = await invoke<RadarStatus>("set_radar_site", { id });
+      heard(await invoke<RadarStatus>(cmd, args));
+      if (notice === refusal) notice = null;
     } catch (e) {
-      notice = `That radar was refused: ${e instanceof Error ? e.message : String(e)}`;
+      notice = refusal = `That ${what} was refused: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
+  const setRadar = (id: string) => centreOn("set_radar_site", { id }, "radar");
+  const setZip = (zip: string) => centreOn("set_radar_zip", { zip }, "ZIP code");
 
   $effect(() => {
     if (theme !== "cone") return;
     if (!radarSites.length) invoke<RadarSite[]>("radar_sites").then((s) => (radarSites = s)).catch(() => {});
-    invoke<RadarStatus>("get_radar").then((s) => (radar = s)).catch(() => {});
-    const sub = listen<RadarStatus>("radar:updated", (e) => (radar = e.payload), {
+    invoke<RadarStatus>("get_radar").then(heard).catch(() => {});
+    const sub = listen<RadarStatus>("radar:updated", (e) => heard(e.payload), {
       target: { kind: "WebviewWindow", label: "library" },
     });
     const tick = setInterval(() => (radarNow = Date.now()), 20000);
@@ -2248,19 +2264,52 @@
       </select>
     </label>
     {#if theme === "cone"}
-      <label class="conc skinpick" title="The NWS radar nearest you. Only its name is kept, on this PC">
-        radar
-        <select value={radar?.site?.id ?? ""} onchange={(e) => setRadar(e.currentTarget.value)}>
-          <option value="">Pick…</option>
-          {#each radarStates as st (st)}
-            <optgroup label={st}>
-              {#each radarSites.filter((s) => s.state === st) as s (s.id)}
-                <option value={s.id}>{s.id} — {s.name}</option>
-              {/each}
-            </optgroup>
+      <!-- What the loop is centred on (#161): a radar, or your ZIP code. The
+           toggle only shows the other control; picking a radar or entering a
+           ZIP code is what changes it, and each clears the other. -->
+      <span class="conc skinpick cookiectl">
+        <span class="centreby" role="group" aria-label="Centre the radar loop on">
+          {#each [["radar", "Radar"], ["zip", "My ZIP"]] as [k, label] (k)}
+            <button
+              class="mini"
+              class:sel={centreBy === k}
+              aria-pressed={centreBy === k}
+              onclick={() => (centreBy = k as "radar" | "zip")}
+            >{label}</button>
           {/each}
-        </select>
-      </label>
+        </span>
+        {#if centreBy === "radar"}
+          <select
+            aria-label="Radar"
+            title="The NWS radar nearest you. Only its name is kept, on this PC"
+            value={radar?.centre?.site ?? ""}
+            onchange={(e) => setRadar(e.currentTarget.value)}
+          >
+            <option value="">Pick…</option>
+            {#each radarStates as st (st)}
+              <optgroup label={st}>
+                {#each radarSites.filter((s) => s.state === st) as s (s.id)}
+                  <option value={s.id}>{s.id} — {s.name}</option>
+                {/each}
+              </optgroup>
+            {/each}
+          </select>
+        {:else}
+          <input
+            class="zip"
+            aria-label="ZIP code"
+            placeholder="ZIP code"
+            inputmode="numeric"
+            maxlength="10"
+            title="The loop centres on your ZIP code, the rings are distance from you, and the alerts are the ones for where you are. It is kept only on this PC, and leaves it only as the point the Weather Service is asked for alerts at"
+            value={radar?.centre?.zip ?? ""}
+            onchange={(e) => setZip(e.currentTarget.value)}
+            onkeydown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        {/if}
+      </span>
     {/if}
     {#if themeVisualizer(theme) === "kaleidoscope"}
       <label class="glow" title="A still kaleidoscope: no turning, no bloom, one colour, and only its size answers the music">
@@ -2400,8 +2449,9 @@
 {/if}
 
   {#if radarSaid}
-    <!-- Cone's readout and the Weather Service's alerts for the radar's state
-         (#85). Each alert carries its issue time, and all of them are struck
+    <!-- Cone's readout and the Weather Service's alerts for the radar's state,
+         or for the ZIP code's point (#85, #161). Each alert carries its issue
+         time, and all of them are struck
          through once the fetch behind them is old: never a current-conditions
          claim (theme.md). -->
     <div class="radarline" class:warn={radarSaid.warn}>
@@ -3058,6 +3108,10 @@
   select.frombrowser { font-size: 10px; padding: 1px 4px; }
   /* Kept on one line: the button and the picker are one setting. */
   .cookiectl { display: inline-flex; align-items: center; gap: 4px; }
+  .centreby { display: inline-flex; gap: 2px; }
+  .centreby .sel { border-color: var(--accent); color: var(--accent); }
+  /* Wide enough for its placeholder and a ZIP+4 once the padding is paid. */
+  .zip { width: 12ch; font-size: 11px; padding: 2px 4px; }
   /* The list a person pasted, waiting to be picked from (#137). It sits where
      the eye already is, under the URL field that produced it. */
   .listpick { margin: 10px 0 0; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);

@@ -23,6 +23,14 @@ The Windows zip carries three programs beside `hurricane-party.exe`. hurricane-p
 
 A person can point hurricane-party at an ffmpeg of their own instead (the **ffmpeg…** button in the library). That copy is theirs, under whatever licence it came with.
 
+## Data inside the program
+
+| Data | Source | Terms |
+|---|---|---|
+| The ZIP code table the Cone radar centres on (`src-tauri/src/radar_zips.txt`): each ZIP code and its point, nothing else | U.S. Census Bureau, 2025 Gazetteer Files, ZIP Code Tabulation Areas national file: <https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2025_Gazetteer/2025_Gaz_zcta_national.zip>, trimmed by `tools/zip-points.ps1` | A work of the U.S. government, in the public domain |
+
+It is read from inside the program and never fetched: the app asks no one where a ZIP code is.
+
 ---
 
 *For whoever bumps a pin in `tools/fetch-sidecars.ps1`: update the version and the links above, and replace the matching licence text, in the same pull request (D133).*
