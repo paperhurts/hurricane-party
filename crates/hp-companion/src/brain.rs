@@ -327,8 +327,11 @@ impl Brain {
                 return;
             }
         }
-        // None of the player's windows showing: he goes with them (D154).
-        if perch::shown(w.layout).next().is_none() {
+        // None of the player's windows showing: standing on them, he goes
+        // with them (D154). On the floor he is detached from them, and stays
+        // out front until he is put back on a window (D168); falling or held,
+        // he is on his way there.
+        if perch::shown(w.layout).next().is_none() && (!self.placed || self.under.is_some()) {
             self.leave();
             return;
         }
@@ -1033,6 +1036,41 @@ mod tests {
         assert!(s.brain.is_shown(), "on the floor he is his own");
         assert_ne!(s.brain.state(), "startle");
         assert_eq!(s.brain.feet(), (137, 1032));
+    }
+
+    #[test]
+    fn on_the_floor_he_stays_out_front_with_every_window_down_until_put_back_on_one() {
+        let mut s = Sim::new(layout(vec![win("main", 0, 0, 275, 116)]));
+        s.run(0.1, None);
+        assert_eq!(s.brain.feet(), (137, 1032), "on the floor");
+        let mut main = win("main", 0, 0, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main]);
+        s.run(2.0, None);
+        assert!(s.brain.is_shown(), "detached, he stays out front (D168)");
+        assert_eq!(s.brain.feet().1, 1032, "and on the floor");
+        // The player comes back: he stays where he is, on the floor.
+        s.layout = layout(vec![win("main", 0, 0, 275, 116)]);
+        s.run(0.5, None);
+        assert_eq!(s.brain.feet().1, 1032, "not whisked back onto a window");
+    }
+
+    #[test]
+    fn falling_to_the_floor_as_every_window_goes_he_lands_and_stays() {
+        let mut s = Sim::new(one_window());
+        s.run(0.1, None);
+        // Main closes under him: he jumps and falls, with nothing left showing.
+        let mut main = win("main", 500, 400, 275, 116);
+        main.visible = false;
+        s.layout = layout(vec![main]);
+        s.brain.set(Mode::Air {
+            vy: 0.0,
+            floor: true,
+        });
+        s.brain.under = None;
+        s.run(2.0, None);
+        assert!(s.brain.is_shown(), "he lands, and stays");
+        assert_eq!(s.brain.feet().1, 1032);
     }
 
     #[test]
