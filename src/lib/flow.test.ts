@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { autoGain, rampAt } from "./flow";
+import { rampAt } from "./flow";
+import { autoGain } from "./visualsframe";
 
 describe("the flow's arithmetic (D169)", () => {
   it("lifts a quiet waveform toward full size, up to sixteen times", () => {

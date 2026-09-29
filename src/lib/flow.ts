@@ -4,15 +4,8 @@
 // played a moment ago streams outward in trails. Drawn on the GPU in the
 // skin's analyser ramp (D36), so it wears what Main wears.
 
-import { bassOf, Pulse, rgbOf, type VisualsFrame } from "./visualsframe";
-
-const FULL_VS = `#version 300 es
-in vec2 pos;
-out vec2 uv;
-void main() {
-  uv = pos * 0.5 + 0.5;
-  gl_Position = vec4(pos, 0.0, 1.0);
-}`;
+import { compile, drawFull, FULL_VS, fullTriangle, glOf, type Visual } from "./gl";
+import { autoGain, bassOf, Pulse, rgbOf, type VisualsFrame } from "./visualsframe";
 
 // The last frame drawn back in: zoomed, turned, swirled, softened and
 // faded. The fade subtracts a hair as well as multiplying, because eight
@@ -75,33 +68,8 @@ void main() {
   color = vec4(vcol * alpha, 1.0);
 }`;
 
-function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
-  const shader = (type: number, src: string) => {
-    const s = gl.createShader(type)!;
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
-    return s;
-  };
-  const p = gl.createProgram()!;
-  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
-  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? "program");
-  return p;
-}
-
 type Target = { tex: WebGLTexture; fb: WebGLFramebuffer };
 
-/**
- * How much to lift the waveform so its loudest moment nears full size,
- * whatever the volume: the analyser hears the music after the volume, and
- * at a tenth of it the peak is under two percent. Up to sixteen times;
- * digital silence is exactly 128 and stays flat at any gain.
- */
-export function autoGain(peak: number): number {
-  return Math.min(16, 0.8 / Math.max(peak, 1e-3));
-}
 
 /** Where the ring's colours come from along its length: the ramp, cycling. */
 export function rampAt(ramp: [number, number, number][], x: number): [number, number, number] {
@@ -115,7 +83,7 @@ export function rampAt(ramp: [number, number, number][], x: number): [number, nu
   return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 }
 
-export class Flow {
+export class Flow implements Visual {
   private gl: WebGL2RenderingContext;
   private warp: WebGLProgram;
   private copy: WebGLProgram;
@@ -136,16 +104,13 @@ export class Flow {
   /** Gentle: short trails, slow turns, no pulses (reduced motion, calm). */
   calm = false;
 
-  constructor(private canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, preserveDrawingBuffer: false });
-    if (!gl) throw new Error("WebGL2 is not available");
+  constructor(canvas: HTMLCanvasElement) {
+    const gl = glOf(canvas);
     this.gl = gl;
     this.warp = compile(gl, FULL_VS, WARP_FS);
     this.copy = compile(gl, FULL_VS, COPY_FS);
     this.ring = compile(gl, RING_VS, RING_FS);
-    this.quad = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    this.quad = fullTriangle(gl);
     this.ringBuf = gl.createBuffer()!;
   }
 
@@ -155,15 +120,13 @@ export class Flow {
     this.ramp = ramp.length ? ramp : [[1, 1, 1]];
   }
 
-  /** The drawing buffer's size in physical pixels. */
+  /** The canvas's drawing buffer is now this size, in physical pixels. */
   resize(w: number, h: number): void {
     w = Math.max(1, Math.round(w));
     h = Math.max(1, Math.round(h));
     if (w === this.w && h === this.h) return;
     this.w = w;
     this.h = h;
-    this.canvas.width = w;
-    this.canvas.height = h;
     const gl = this.gl;
     for (const t of this.targets ?? []) {
       gl.deleteTexture(t.tex);
@@ -186,16 +149,6 @@ export class Flow {
     };
     this.targets = [make(), make()];
     this.cur = 0;
-  }
-
-  private fullscreen(program: WebGLProgram): void {
-    const gl = this.gl;
-    const loc = gl.getAttribLocation(program, "pos");
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.disableVertexAttribArray(loc);
   }
 
   /** One frame at `t` seconds, `dt` since the last, from the newest audio frame. */
@@ -236,7 +189,7 @@ export class Flow {
     gl.uniform1f(u("swirl"), (this.calm ? 0.0005 : 0.0015 + 0.002 * energy) * k);
     gl.uniform2f(u("aspect"), aspect[0], aspect[1]);
     gl.uniform2f(u("texel"), 1 / this.w, 1 / this.h);
-    this.fullscreen(this.warp);
+    drawFull(gl, this.warp, this.quad);
 
     // 2. The music, as a ring of its waveform, added on top.
     this.drawRing(f, bass, energy, p);
@@ -248,7 +201,7 @@ export class Flow {
     gl.useProgram(this.copy);
     gl.bindTexture(gl.TEXTURE_2D, to.tex);
     gl.uniform1i(gl.getUniformLocation(this.copy, "src"), 0);
-    this.fullscreen(this.copy);
+    drawFull(gl, this.copy, this.quad);
     this.cur = 1 - this.cur;
   }
 

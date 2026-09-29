@@ -83,3 +83,13 @@ export function rgbOf(hex: string): [number, number, number] {
   if (!m) return [0, 0, 0];
   return [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255];
 }
+
+/**
+ * How much to lift the waveform so its loudest moment nears full size,
+ * whatever the volume: the analyser hears the music after the volume, and
+ * at a tenth of it the peak is under two percent. Up to sixteen times;
+ * digital silence is exactly 128 and stays flat at any gain.
+ */
+export function autoGain(peak: number): number {
+  return Math.min(16, 0.8 / Math.max(peak, 1e-3));
+}
