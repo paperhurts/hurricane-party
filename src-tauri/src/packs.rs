@@ -29,6 +29,8 @@ const MAX_ENTRIES: usize = 256;
 pub struct PackInfo {
     pub id: String,
     pub name: String,
+    /// One of `SHIPPED`, which a person cannot remove (#223).
+    pub shipped: bool,
 }
 
 /// The companions that ship, from the folder they ship in (`None` when it
@@ -47,10 +49,12 @@ pub fn shipped(dir: Option<&Path>) -> Vec<PackInfo> {
                 Some(name) => Some(PackInfo {
                     id: id.into(),
                     name,
+                    shipped: true,
                 }),
                 None if id == CAPTAIN => Some(PackInfo {
                     id: id.into(),
                     name: "Cap'n Capy".into(),
+                    shipped: true,
                 }),
                 None => None,
             }
@@ -73,7 +77,11 @@ pub fn list(dir: &Path) -> Vec<PackInfo> {
                 .ok()
                 .and_then(|j| manifest_name(&j))
                 .unwrap_or_else(|| id.clone());
-            PackInfo { id, name }
+            PackInfo {
+                id,
+                name,
+                shipped: false,
+            }
         })
         .collect();
     out.sort_by_key(|p| p.name.to_lowercase());
@@ -168,8 +176,13 @@ pub fn import(src: &Path, dir: &Path) -> Result<String, String> {
     Ok(id)
 }
 
-/// Take an installed pack out again (a refused one, or one a person removes).
+/// Take an installed pack out again (a refused one, or one a person removes,
+/// #223). The companions that ship are never removed: no import takes their
+/// ids, and they live beside the player, not here.
 pub fn remove(dir: &Path, id: &str) -> Result<(), String> {
+    if SHIPPED.contains(&id) {
+        return Err("that companion ships with the app and stays".into());
+    }
     let p = folder(dir, id).ok_or("no such companion")?;
     fs::remove_dir_all(p).map_err(|e| e.to_string())
 }
@@ -360,10 +373,35 @@ mod tests {
             list(&dir),
             vec![PackInfo {
                 id: "sir-waddles".into(),
-                name: "Sir Waddles".into()
+                name: "Sir Waddles".into(),
+                shipped: false,
             }]
         );
         assert!(folder(&dir, "sir-waddles").is_some());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_removed_pack_is_gone_and_a_shipped_one_cannot_be_removed() {
+        let root = tmp("remove");
+        let src = pack_folder(&root, true);
+        let dir = root.join("companions");
+        let id = import(&src.join(MANIFEST), &dir).unwrap();
+        remove(&dir, &id).unwrap();
+        assert!(!dir.join(&id).exists(), "its folder is deleted");
+        assert!(list(&dir).is_empty());
+        assert!(remove(&dir, &id).is_err(), "twice is no such companion");
+        assert!(
+            src.join(MANIFEST).is_file(),
+            "what it came from is left alone"
+        );
+        // Even a folder by a shipped name here is not the app's to delete.
+        fs::create_dir_all(dir.join("wee-man")).unwrap();
+        fs::write(dir.join("wee-man").join(MANIFEST), JSON).unwrap();
+        for id in SHIPPED {
+            assert!(remove(&dir, id).is_err(), "{id}");
+        }
+        assert!(dir.join("wee-man").join(MANIFEST).is_file());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -432,7 +470,8 @@ mod tests {
             shipped(None),
             [PackInfo {
                 id: CAPTAIN.into(),
-                name: "Cap'n Capy".into()
+                name: "Cap'n Capy".into(),
+                shipped: true,
             }]
         );
         let root = tmp("shadow");

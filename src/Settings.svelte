@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import {
     applyTheme,
     colorsFor,
@@ -335,9 +335,18 @@
   // Cap'n Capy's switch (#192, D157): the player starts his own little program.
   let capn = $state(false);
   // Which companion the box starts (#208, D162): one that ships (Cap'n Capy,
-  // Wee Man, D164), or one imported.
-  let companions = $state<{ id: string; name: string }[]>([{ id: "captain", name: "Cap'n Capy" }]);
+  // Wee Man, D164), or one imported, which can be removed again (#223).
+  type Pack = { id: string; name: string; shipped: boolean };
+  let companions = $state<Pack[]>([{ id: "captain", name: "Cap'n Capy", shipped: true }]);
   let companionPick = $state("captain");
+  let picked = $derived(companions.find((c) => c.id === companionPick));
+
+  /** The list and the pick as they are on disk: after a removal, and when the
+   * window comes forward, since a folder deleted by hand leaves the list. */
+  async function refreshCompanions() {
+    companions = await invoke<Pack[]>("list_companions");
+    companionPick = await invoke<string>("get_companion_pick");
+  }
   let paintingCompanion = $state(false);
 
   /** Start or stop the companion. The box follows what happened, not what was asked. */
@@ -379,11 +388,34 @@
     notice = null;
     try {
       const made = await invoke<{ id: string; name: string }>("import_companion", { path: picked });
-      companions = await invoke<{ id: string; name: string }[]>("list_companions");
+      companions = await invoke<Pack[]>("list_companions");
       await pickCompanion(made.id);
       notice = capn ? `${made.name} is here.` : `${made.name} is in. Tick the box to meet them.`;
     } catch (e) {
       notice = `That companion was refused: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  /**
+   * Remove the picked companion (#223): only one that was imported, and only
+   * after asking, since it deletes the app's copy of its files. Removing the
+   * pick brings Cap'n Capy back as the pick, on screen if the box is ticked.
+   */
+  async function removeCompanion() {
+    const c = picked;
+    if (!c || c.shipped) return;
+    const yes = await ask(
+      `Remove ${c.name}?\n\nThe app's copy of their files is deleted. Whatever you imported them from stays where it is.`,
+      { title: "Remove companion", kind: "warning", okLabel: "Remove", cancelLabel: "Keep" },
+    );
+    if (!yes) return;
+    try {
+      await invoke("remove_companion", { id: c.id });
+      await refreshCompanions();
+      notice = capn ? `${c.name} is gone, and Cap'n Capy is back.` : `${c.name} is gone.`;
+    } catch (e) {
+      notice = `${c.name} could not be removed: ${e instanceof Error ? e.message : String(e)}`;
+      await refreshCompanions().catch(() => {});
     }
   }
 
@@ -588,8 +620,7 @@
     invoke<RadarSite[]>("radar_sites").then((s) => (radarSites = s)).catch(() => {});
     invoke<RadarStatus>("get_radar").then(heard).catch(() => {});
     invoke<boolean>("get_companion").then((on) => (capn = on));
-    invoke<{ id: string; name: string }[]>("list_companions").then((l) => (companions = l));
-    invoke<string>("get_companion_pick").then((id) => (companionPick = id));
+    refreshCompanions().catch(() => {});
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     refreshDownloadDir();
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
@@ -616,7 +647,12 @@
       listen<RadarStatus>("radar:updated", (e) => heard(e.payload), target),
       listen("jobs-changed", refreshDownloadDir, target),
     ];
-    return () => subs.forEach((s) => s.then((off) => off()));
+    const onFocus = () => refreshCompanions().catch(() => {});
+    window.addEventListener("focus", onFocus);
+    return () => {
+      subs.forEach((s) => s.then((off) => off()));
+      window.removeEventListener("focus", onFocus);
+    };
   });
 </script>
 
@@ -731,12 +767,20 @@
           <input type="checkbox" checked={capn} onchange={(e) => setCapn(e.currentTarget.checked)} />
           On the desktop
         </label>
-        <label class="row">
+        <div class="row">
           <span class="k">Who</span>
-          <select value={companionPick} onchange={(e) => pickCompanion(e.currentTarget.value)}>
+          <select aria-label="Which companion" value={companionPick} onchange={(e) => pickCompanion(e.currentTarget.value)}>
             {#each companions as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
           </select>
-        </label>
+          <button
+            class="quiet"
+            onclick={removeCompanion}
+            disabled={!picked || picked.shipped}
+            title={!picked || picked.shipped
+              ? "Cap'n Capy and Wee Man ship with the app and stay; one you imported can be removed"
+              : `Delete ${picked.name} from the app. Asks first`}
+          >Remove…</button>
+        </div>
         <div class="acts">
           <button class="link" onclick={paintCompanion} disabled={paintingCompanion} title="A folder with a blank companion sheet to paint, 64 px a frame, and a guide to every row">
             {paintingCompanion ? "Writing…" : "Paint a companion…"}
@@ -857,7 +901,7 @@
   select, input { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 3px; background: var(--surface);
                   color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
   .zip { width: 12ch; }
-  button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 3px; }
+  button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 3px; white-space: nowrap; }
   button.quiet { border-color: transparent; color: color-mix(in srgb, var(--text) 58%, transparent); }
   button.quiet:hover:not(:disabled) { color: var(--text); }
   .acts { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: 8px 0 0 84px; }

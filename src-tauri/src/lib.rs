@@ -226,7 +226,7 @@ async fn open_settings(app: AppHandle) -> Result<(), String> {
     }
     tauri::WebviewWindowBuilder::new(&app, LABEL, tauri::WebviewUrl::App("settings.html".into()))
         .title("hurricane-party — settings")
-        .inner_size(680.0, 540.0)
+        .inner_size(780.0, 540.0)
         .min_inner_size(380.0, 360.0)
         .resizable(true)
         .decorations(true)
@@ -1801,12 +1801,48 @@ fn import_companion(app: AppHandle, path: String) -> Result<packs::PackInfo, Str
     let dir = companions_dir(&app);
     let id = packs::import(std::path::Path::new(&path), &dir)?;
     match companion::check(&dir.join(&id)) {
-        Ok(name) => Ok(packs::PackInfo { id, name }),
+        Ok(name) => Ok(packs::PackInfo {
+            id,
+            name,
+            shipped: false,
+        }),
         Err(e) => {
             let _ = packs::remove(&dir, &id);
             Err(e)
         }
     }
+}
+
+/// Take an imported companion out of the library (#223): its folder in the
+/// app's companions folder is deleted; whatever it was imported from stays
+/// where it was. The ones that ship cannot be. When it is the pick, Cap'n
+/// Capy is the pick again, and with the box ticked he comes in its place:
+/// the one on screen is sent off before its files go.
+#[tauri::command]
+fn remove_companion(app: AppHandle, id: String) -> Result<(), String> {
+    if packs::SHIPPED.contains(&id.as_str()) {
+        return Err("that companion ships with the app and stays".into());
+    }
+    let (picked, on) = {
+        let state = app.state::<Db>();
+        let conn = state.0.lock().unwrap();
+        (db::companion_pick(&conn) == id, db::companion_on(&conn))
+    };
+    if picked {
+        {
+            let state = app.state::<Db>();
+            let conn = state.0.lock().unwrap();
+            db::set_companion_pick(&conn, packs::CAPTAIN).map_err(|e| e.to_string())?;
+        }
+        if on {
+            companion::stop(&app);
+        }
+    }
+    packs::remove(&companions_dir(&app), &id)?;
+    if picked && on {
+        companion::restart(&app)?;
+    }
+    Ok(())
 }
 
 /// Start a companion to paint (D163): a new folder inside the one the person
@@ -2179,6 +2215,7 @@ pub fn run() {
             list_companions,
             get_companion_pick,
             set_companion_pick,
+            remove_companion,
             import_companion,
             start_companion_template,
             write_companion_template_file
