@@ -15,7 +15,7 @@ import purricaneManifest from "../../skins/purricane/manifest.json";
 import purricane1 from "../../skins/purricane/chrome.png";
 import purricane2 from "../../skins/purricane/chrome@2x.png";
 import { parseSkin, type Skin, type WindowName } from "./skin";
-import { wszManifest, WSZ_GENERATION } from "./wsz";
+import { blindToggles, wszManifest, WSZ_GENERATION, type Toggle } from "./wsz";
 import {
   canMove,
   PICTURE_H,
@@ -368,6 +368,27 @@ function picture(url: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error(`picture sheet failed to decode: ${url.slice(0, 64)}`));
     img.src = url;
   });
+}
+
+/**
+ * Which of Main's shuffle and repeat a classic skin cannot show the state of
+ * (#132): its SHUFREP.BMP read back and the on art held against the off. Read
+ * at import, so the notice can say so the once; nothing about the skin
+ * changes. None when the skin has no SHUFREP.BMP, or it will not decode.
+ */
+export async function blindTogglesIn(dir: string, files: string[]): Promise<Toggle[]> {
+  const f = files.find((n) => n.toLowerCase() === "shufrep.bmp");
+  if (!f) return [];
+  try {
+    const img = await picture(convertFileSrc(`${dir}/${f}`));
+    const c = new OffscreenCanvas(img.naturalWidth, img.naturalHeight);
+    const g = c.getContext("2d")!;
+    g.drawImage(img, 0, 0);
+    const { data, width, height } = g.getImageData(0, 0, img.naturalWidth, img.naturalHeight);
+    return blindToggles(data, width, height);
+  } catch {
+    return [];
+  }
 }
 
 /** Rows from the top of a 1x picture sheet to the last with any pixel in it. */

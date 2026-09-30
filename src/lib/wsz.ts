@@ -126,14 +126,71 @@ const PLAYPAUS_SP = {
   stopped: [18, 0, 9, 9] as Rect,
 };
 
+/** Main's shuffle and repeat buttons in SHUFREP.BMP, off and then on (#132). */
+export const TOGGLES = {
+  shuffle: [
+    [28, 0, 47, 15],
+    [28, 30, 47, 15],
+  ],
+  repeat: [
+    [0, 0, 28, 15],
+    [0, 30, 28, 15],
+  ],
+} satisfies Record<string, [Rect, Rect]>;
+export type Toggle = keyof typeof TOGGLES;
+
+/** Pixels a toggle's on art may differ from its off art by and still not
+ * show its state: a single dark pixel at 1x reads as nothing (#132). */
+export const NEAR = 2;
+
+/**
+ * The toggles whose on art cannot be told from their off art, in a
+ * SHUFREP.BMP's pixels (RGBA, `w` by `h`, as `getImageData` hands them over):
+ * the same, no more than `NEAR` pixels apart, or cut off because the sheet
+ * stops before the on row, which leaves the button drawn off either way. A
+ * sheet too small for even the off art has no such button to speak of.
+ */
+export function blindToggles(px: ArrayLike<number>, w: number, h: number): Toggle[] {
+  const inside = ([x, y, rw, rh]: Rect) => x + rw <= w && y + rh <= h;
+  const out: Toggle[] = [];
+  for (const name of Object.keys(TOGGLES) as Toggle[]) {
+    const [off, on] = TOGGLES[name] as [Rect, Rect];
+    if (!inside(off)) continue;
+    if (!inside(on)) {
+      out.push(name);
+      continue;
+    }
+    let differ = 0;
+    for (let dy = 0; dy < off[3]; dy++) {
+      for (let dx = 0; dx < off[2]; dx++) {
+        const a = ((off[1] + dy) * w + off[0] + dx) * 4;
+        const b = ((on[1] + dy) * w + on[0] + dx) * 4;
+        if (px[a] !== px[b] || px[a + 1] !== px[b + 1] || px[a + 2] !== px[b + 2]) differ++;
+      }
+    }
+    if (differ <= NEAR) out.push(name);
+  }
+  return out;
+}
+
+/** The import notice's sentence for them (#132): the art cannot say, and the
+ * button's tooltip can. Empty when both show their state. */
+export function sayBlind(blind: Toggle[]): string {
+  if (!blind.length) return "";
+  if (blind.length === 2) {
+    return "It draws shuffle and repeat the same whether they're on or off: hover a button and its tooltip says which.";
+  }
+  return `It draws ${blind[0]} the same whether it's on or off: hover the button and its tooltip says which.`;
+}
+
 const SHUFREP_SP = {
-  shuffle: [28, 0, 47, 15] as Rect,
+  shuffle: TOGGLES.shuffle[0] as Rect,
   shuffleDown: [28, 15, 47, 15] as Rect,
-  shuffleOn: [28, 30, 47, 15] as Rect,
+  shuffleOn: TOGGLES.shuffle[1] as Rect,
   shuffleOnDown: [28, 45, 47, 15] as Rect,
-  repeat: [0, 0, 28, 15] as Rect,
+  repeat: TOGGLES.repeat[0] as Rect,
   repeatDown: [0, 15, 28, 15] as Rect,
-  repeatOn: [0, 30, 28, 15] as Rect,
+  repeatOn: TOGGLES.repeat[1] as Rect,
   repeatOnDown: [0, 45, 28, 15] as Rect,
   eq: [0, 61, 23, 12] as Rect,
   eqOn: [0, 73, 23, 12] as Rect,

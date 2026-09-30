@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { elementsOf, parseSkin, placeRect, SkinError, type Element } from "./skin";
 import { colorsFor } from "./theme";
-import { parsePledit, parseViscolor, paletteFrom, wszManifest } from "./wsz";
+import { blindToggles, NEAR, parsePledit, parseViscolor, paletteFrom, sayBlind, TOGGLES, wszManifest } from "./wsz";
 
 /** The fixture skin's own colours: a made-up skin's PLEDIT.TXT, never the
  * theme's, which is the whole point of the tests below. */
@@ -375,5 +375,48 @@ describe("the two text files", () => {
 
   it("is not a ramp with no colours at all", () => {
     expect(parseViscolor("// just a comment\nand some words")).toBeNull();
+  });
+});
+
+describe("a skin that cannot show shuffle and repeat (#132)", () => {
+  // A SHUFREP.BMP as classic skins ship it: 92 x 85, RGBA as a canvas reads it.
+  const W = 92;
+  const H = 85;
+  const sheet = (h = H) => new Uint8ClampedArray(W * h * 4).fill(255);
+  const paint = (px: Uint8ClampedArray, [x, y, w, h]: number[], v: number, count = w * h) => {
+    let n = 0;
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        if (n++ >= count) return;
+        const i = ((y + dy) * W + x + dx) * 4;
+        px[i] = px[i + 1] = px[i + 2] = v;
+      }
+    }
+  };
+
+  it("says so when the on art is the same as the off, or a pixel or two off it", () => {
+    expect(blindToggles(sheet(), W, H)).toEqual(["shuffle", "repeat"]);
+    const px = sheet();
+    paint(px, TOGGLES.repeat[1], 0, NEAR);
+    expect(blindToggles(px, W, H), "a stray dark pixel reads as nothing").toEqual(["shuffle", "repeat"]);
+  });
+
+  it("is quiet about a toggle whose on art is drawn", () => {
+    const px = sheet();
+    paint(px, TOGGLES.shuffle[1], 40);
+    expect(blindToggles(px, W, H)).toEqual(["repeat"]);
+    paint(px, TOGGLES.repeat[1], 40);
+    expect(blindToggles(px, W, H)).toEqual([]);
+  });
+
+  it("counts on art the sheet stops short of as none, and no off art as no button", () => {
+    expect(blindToggles(sheet(30), W, 30), "cut off before the on row").toEqual(["shuffle", "repeat"]);
+    expect(blindToggles(new Uint8ClampedArray(20 * 10 * 4), 20, 10)).toEqual([]);
+  });
+
+  it("says where to look instead: the tooltip", () => {
+    expect(sayBlind([])).toBe("");
+    expect(sayBlind(["shuffle", "repeat"])).toMatch(/^It draws shuffle and repeat the same .* tooltip says which\.$/);
+    expect(sayBlind(["repeat"])).toMatch(/^It draws repeat the same whether it's on or off/);
   });
 });
