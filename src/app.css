@@ -30,3 +30,37 @@ input {
   padding: 7px 10px;
 }
 input:focus { outline: none; border-color: var(--accent); }
+/* A checkbox is drawn from the tokens, not by the system (D179): under
+   `color-scheme: dark` WebView2 paints its own dark box, a solid square on
+   Purricane's white, and accent-color only ever reached the ticked state. The
+   edge is the whole accent, the one colour the palette holds to edge contrast
+   on the ground (D130); a mix toward transparent falls short on Purricane. The
+   native box's 13 px, so the hit area stays where it was, and a ring of its
+   own for the keyboard, since input:focus above takes the outline away. */
+input[type="checkbox"] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+  cursor: pointer;
+}
+input[type="checkbox"]:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+input[type="checkbox"]::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+input[type="checkbox"]:checked::before { background: var(--accent); }
+input[type="checkbox"]:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+input[type="checkbox"]:disabled { opacity: 0.35; cursor: default; }
+/* High contrast forces colours to the system's and takes the tick's with
+   them; the system's own text colour keeps it. */
+@media (forced-colors: active) {
+  input[type="checkbox"]:checked::before { background: CanvasText; }
+}
