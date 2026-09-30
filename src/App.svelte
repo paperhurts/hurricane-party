@@ -1959,7 +1959,7 @@
            likely to fill by hand. -->
       {#if roots.length}
         <div class="roots">
-          <span class="rootlabel">Roots</span>
+          <span class="rootlabel">Folders</span>
           {#each roots as r (r.id)}
             <!-- A missing root is an unplugged drive, not a broken library (D28) -->
             <button
@@ -2156,7 +2156,7 @@
             <button class="play" onclick={() => playFromView(t)}>▶</button>
           {/if}
           <span class="title"
-            >{t.title}{#if byline(t)}<span class="by"> · {byline(t)}</span>{/if}</span
+            >{t.title}{#if byline(t)}<span class="by">{byline(t)}</span>{/if}</span
           >
           {#if t.integrity}
             <span class="tag bad" title={failureOf(t.id)?.note ?? ""}>{t.integrity}</span>
@@ -2275,7 +2275,16 @@
 <style>
   /* No max-width and a small gutter: the list is the point of this window, and
      a centred 900px box just put a margin on both sides of it (#48). */
-  main { margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
+  /* Iosevka Aile, the modern windows' register (theme.md, D174): the same
+     family as the player's Iosevka, proportional, so a list of titles reads
+     as a list and not a readout. Named outright, as D130 has the library
+     name its face. Numbers stay in Iosevka below, where columns line up. */
+  main { margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px;
+         font-family: "Iosevka Aile", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+  .n, .meta, .bytes, .root .size, footer .meter, footer code, .radarline, h1 {
+    font-family: Iosevka, "Iosevka Web", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
   header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   header .spacer { flex: 1 1 auto; }
   /* Quiet beside Planning: one click away, never louder than the music. */
@@ -2285,8 +2294,7 @@
   h1 { margin: 0; font-size: 19px; font-weight: 400; letter-spacing: 2px; text-transform: uppercase;
        color: var(--accent); text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent); }
   .queuehead { display: flex; align-items: baseline; gap: 10px; }
-  h2 { margin: 0 0 6px; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
-       color: color-mix(in srgb, var(--text) 45%, transparent); font-weight: 400; }
+  h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: color-mix(in srgb, var(--text) 60%, transparent); }
   .prepbtn { padding: 3px 10px; font-size: 12px; }
   .ver { font-size: 12px; color: color-mix(in srgb, var(--text) 45%, transparent); }
   .vid { font-size: 11px; display: flex; align-items: center; gap: 4px;
@@ -2312,8 +2320,7 @@
   .mini.danger:hover { background: color-mix(in srgb, var(--warn) 14%, transparent); border-color: var(--warn); }
   .roots { display: flex; flex-direction: column; gap: 2px; margin-top: 10px;
            padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--accent) 12%, transparent); }
-  .rootlabel { font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
-               color: color-mix(in srgb, var(--text) 30%, transparent); }
+  .rootlabel { font-size: 12px; padding: 0 8px 2px; color: color-mix(in srgb, var(--text) 40%, transparent); }
   .root { font-size: 11px; padding: 2px 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
           gap: 8px; text-align: left; color: color-mix(in srgb, var(--text) 70%, transparent); }
   .root .rl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2367,20 +2374,23 @@
   /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), and the track
      rows' nowrap titles make the list's minimum width the longest title, so the
      column grew past the window and the page scrolled sideways (#48). */
-  .body { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; align-items: start; }
+  .body { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 12px; align-items: start; }
   nav { display: flex; flex-direction: column; gap: 3px; }
   nav button { text-align: left; border-color: transparent; color: var(--text);
                padding: 5px 8px; font-size: 12px; display: flex; justify-content: space-between; gap: 6px; }
-  nav button.sel { border-color: var(--accent); color: var(--accent); }
+  nav button.sel { border-color: transparent; color: var(--accent);
+                   background: color-mix(in srgb, var(--accent) 12%, transparent); }
   nav button.new { color: color-mix(in srgb, var(--text) 45%, transparent); font-size: 11px; margin-top: 4px; }
   .n { font-size: 10px; color: color-mix(in srgb, var(--text) 35%, transparent); }
 
-  .tracks { list-style: none; margin: 0; padding: 0; background: var(--surface);
-            border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
-  .tracks li { display: flex; align-items: center; gap: 8px; padding: 6px 9px;
-               border-bottom: 1px solid color-mix(in srgb, var(--accent) 9%, transparent); }
+  .tracks { list-style: none; margin: 0; padding: 0; }
+  .tracks li { display: flex; align-items: center; gap: 10px; padding: 6px 9px;
+               border-bottom: 1px solid color-mix(in srgb, var(--accent) 8%, transparent); }
+  .tracks li:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
   .tracks li:last-child { border-bottom: none; }
+  .tracks li.current { background: color-mix(in srgb, var(--alert) 8%, transparent); }
   .tracks li.current .title { color: var(--alert); text-shadow: 0 0 8px color-mix(in srgb, var(--alert) 45%, transparent); }
+  .tracks li.current .play { color: var(--alert); }
   .tracks li.empty { color: color-mix(in srgb, var(--text) 45%, transparent); font-size: 13px; }
   /* The surfer's home. The image sits on the well; the words beside it. */
   .tracks li.hangten { gap: 22px; padding: 28px 24px; align-items: center; }
@@ -2388,8 +2398,12 @@
                            filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)); }
   .tracks li.hangten .say { display: flex; flex-direction: column; gap: 8px; max-width: 420px; line-height: 1.5; }
   .tracks li.hangten .big { font-size: 17px; color: var(--text); }
-  .play { padding: 1px 7px; font-size: 10px; }
-  .mini { padding: 1px 6px; font-size: 10px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  /* Play and + are glyphs, faint until the row is pointed at: a box on every
+     row was most of what made the list look like a control panel. */
+  .play { padding: 1px 5px; font-size: 11px; border-color: transparent;
+          color: color-mix(in srgb, var(--text) 40%, transparent); }
+  .tracks li:hover .play:not(:disabled) { color: var(--accent); }
+  .mini { padding: 1px 7px; font-size: 11px; border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
   .mini.ghost { border-color: transparent; color: color-mix(in srgb, var(--text) 55%, transparent); }
   .mini.open { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
   /* The list a person pasted, waiting to be picked from (#137). It sits where
@@ -2429,7 +2443,9 @@
                    background: var(--surface); color: var(--text);
                    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
   .findbar .find:focus { outline: none; border-color: var(--accent); }
-  .findbar .kinds { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+  .findbar .kinds { display: inline-flex; gap: 0; flex: 0 0 auto; }
+  .findbar .kinds .mini { border-radius: 0; }
+  .findbar .kinds .mini + .mini { border-left-color: transparent; }
   .findbar .kinds .sel { border-color: var(--accent); color: var(--accent); }
   .findbar .sort { flex: 0 0 auto; font-size: 11px; }
   /* A smart playlist's rule, edited above its rows (#165). */
@@ -2466,8 +2482,9 @@
   /* "+" opens a menu of playlists, anchored to the row. */
   .addwrap { position: relative; flex: 0 0 auto; }
   .add { width: 22px; height: 22px; padding: 0; display: grid; place-items: center;
-         font-size: 16px; line-height: 1; color: var(--accent);
-         border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: transparent; }
+         font-size: 16px; line-height: 1; color: color-mix(in srgb, var(--text) 35%, transparent);
+         border: 1px solid transparent; background: transparent; }
+  .tracks li:hover .add { color: var(--accent); }
   .add:hover, .add.open { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: var(--accent);
                           box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 35%, transparent); }
   .menu { position: absolute; right: 0; top: 26px; z-index: 5; min-width: 160px; padding: 4px 0;
@@ -2503,7 +2520,7 @@
   .plmenu { right: 0; top: 24px; min-width: 150px; }
   .menu .danger { color: var(--warn); }
   .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .title .by { color: color-mix(in srgb, var(--text) 50%, transparent); }
+  .title .by { margin-left: 10px; color: color-mix(in srgb, var(--text) 50%, transparent); }
   .meta { font-size: 11px; color: color-mix(in srgb, var(--text) 45%, transparent); flex: 0 0 auto; }
 
   footer { display: flex; gap: 8px; align-items: baseline; font-size: 11px;
