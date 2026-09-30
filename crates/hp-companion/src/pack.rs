@@ -406,6 +406,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn senor_bones_own_pack_loads() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skins/companions/senor-bones");
+        let p = Pack::load(&dir).expect("the shipped pack loads");
+        assert_eq!(p.name, "Señor Bones");
+        assert_eq!((p.frame, p.anchor), ((64, 64), (32, 63)));
+        assert_eq!(p.default_count, 1);
+        // His first row became idle's moments: the pose, then a blink, a
+        // strum and two verses sung, each after the pose held (D176).
+        let idle = &p.state("idle").frames;
+        assert_eq!(
+            (idle[0], idle[11], idle[23], idle[35], idle[47]),
+            (0, 1, 2, 3, 4)
+        );
+        assert_eq!(p.state("walk").frames.len(), 7);
+        assert_eq!(p.state("dance").frames.len(), 6);
+        assert_eq!(
+            p.state("startle").frames,
+            [32, 33],
+            "the jump, then landing dizzy"
+        );
+        // The sheet has no scruff pose: held up, he sits with his legs out.
+        assert_eq!(p.state("carry").frames, [48]);
+        assert_eq!(p.cell_for(p.state("walk").frames[0], 2).0.w, 128);
+    }
+
+    #[test]
     fn an_even_scale_draws_the_2x_cell_and_an_odd_one_the_1x() {
         let p =
             Pack::parse_with_2x(&manifest(IDLE), &sheet(8, 1, 4), Some(&sheet(8, 1, 8))).unwrap();
