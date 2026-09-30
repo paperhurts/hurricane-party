@@ -12,11 +12,18 @@
 
     Writes into .sid/ (gitignored, never referenced by code).
 
+      powershell -NoProfile -ExecutionPolicy Bypass -File tools\make-test-wsz.ps1 -Name blind-skin -BlindToggles
+
+    -BlindToggles draws SHUFREP.BMP's shuffle and repeat the same on as off,
+    as plenty of skins in the wild do, for the import notice that says so
+    (#132).
+
     Windows PowerShell 5.1, System.Drawing only.
 #>
 param(
     [string]$Out = ".sid",
-    [string]$Name = "test-skin"
+    [string]$Name = "test-skin",
+    [switch]$BlindToggles
 )
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -81,6 +88,13 @@ foreach ($file in $sheets.Keys) {
         $brush = New-Object System.Drawing.SolidBrush ((Hue-Color $hue 1.0))
         $g.DrawString($file.Replace(".BMP", ""), $font, $brush, 1, 1)
         $font.Dispose(); $brush.Dispose()
+        if ($BlindToggles -and $file -eq "SHUFREP.BMP") {
+            # Repeat and shuffle, off (rows 0-14), over their on row (30-44).
+            $off = $bmp.Clone((New-Object System.Drawing.Rectangle 0, 0, 75, 15), $bmp.PixelFormat)
+            $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+            $g.DrawImage($off, 0, 30, 75, 15)
+            $off.Dispose()
+        }
     } finally { $g.Dispose() }
     $bmp.Save((Join-Path $dir $file), [System.Drawing.Imaging.ImageFormat]::Bmp)
     $bmp.Dispose()

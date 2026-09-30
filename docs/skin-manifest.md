@@ -307,6 +307,8 @@ Classic skins set `resizable: false` on all three windows (except playlist), so 
 
 **What an imported skin does not get, and why it is said out loud** (D110). A classic skin also draws balance, mono/stereo, the playlist's own transport row, and its MISC menu (its SEL loads the list selected in the library, as Eyewall's does, D125). This app has one transport (D81), no balance and no menus, so in an imported skin those stay pictures. The importer writes what it could not use into the manifest as `notes` — an unknown key, ignored by the validator, beside `generator` (D107) — and the library repeats it every time that skin is picked, rather than once at import where a person reads it and forgets. The promise is that a skin wears and that anything making the app *unusable* is a bug; a control this app has no feature for is not.
 
+**A skin that cannot show shuffle and repeat** (#132, D177). Many classic skins draw `SHUFREP.BMP`'s on row the same as its off row, or a dark pixel apart, so Main's shuffle and repeat look the same either way. The importer reads that sheet back at import and holds each toggle's on art against its off (`blindToggles` in `wsz.ts`): the same, no more than two pixels apart, or cut off by a sheet that stops short. When one can't show, the import notice says so, the once, and points at the button's tooltip, which always says the true state. The skin's pixels are left alone: the app draws nothing over an author's art.
+
 ### `.wal` — partial, explicitly, and not v0.5 (D110)
 
 Parse the XML layout, map what corresponds to native concepts, render the PNGs, **ignore the `.maki` bytecode entirely** (D17, and `windows.md` argues it at length).

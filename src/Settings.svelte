@@ -20,8 +20,8 @@
     companionTemplateManifest,
     companionTemplateReadme,
   } from "./lib/companiontemplate";
-  import { eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
-  import { wszManifest } from "./lib/wsz";
+  import { blindTogglesIn, eyewallFile, measureSheets, placePicture, readyPicture, sheetSizes, skinNotes } from "./lib/skins";
+  import { sayBlind, wszManifest } from "./lib/wsz";
   import type { RadarSite, RadarStatus } from "./lib/radar";
   import {
     backdropPng,
@@ -222,6 +222,9 @@
       // stops a file short, and a manifest must not claim art that is not
       // there.
       const sizes = await measureSheets(unpacked.dir, unpacked.files);
+      // Shuffle and repeat drawn the same on and off (#132): said the once,
+      // here, since nothing about the skin changes and the tooltip tells.
+      const blind = await blindTogglesIn(unpacked.dir, unpacked.files);
       const built = wszManifest({
         files: unpacked.files,
         name: unpacked.name,
@@ -238,6 +241,7 @@
       // person sees once and never again.
       await setSkin(unpacked.id, unpacked.name);
       notice ??= `${unpacked.name} is on.`;
+      if (blind.length) notice = `${notice} ${sayBlind(blind)}`;
       pendingKeep = { id: unpacked.id, name: unpacked.name, was };
     } catch (e) {
       if (unpacked) await invoke("discard_skin", { id: unpacked.id }).catch(() => {});
