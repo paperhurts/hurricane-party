@@ -422,7 +422,7 @@
   .row { display: flex; align-items: center; gap: 8px; padding: 3px 8px; font-size: 12px; min-width: 0; }
   .row.off .what { color: color-mix(in srgb, var(--text) 45%, transparent); }
   .row.entry { padding-left: 42px; }
-  .row input { margin: 0; accent-color: var(--accent); }
+  .row input { margin: 0; }
   .num { font-size: 10px; color: color-mix(in srgb, var(--text) 40%, transparent); flex: 0 0 auto; }
   .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .note { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; flex: 0 0 auto; color: color-mix(in srgb, var(--accent) 80%, transparent); }

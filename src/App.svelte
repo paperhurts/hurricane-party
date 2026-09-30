@@ -2468,7 +2468,7 @@
             color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface));
             border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-bottom: none; }
   .selbar .count { flex: 1 1 auto; }
-  .tick { flex: 0 0 auto; width: 13px; height: 13px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .tick { flex: 0 0 auto; margin: 0; }
   /* Drag-to-reorder: the grip, the lifted row, and the insertion line. */
   .grip { flex: 0 0 auto; padding: 0 2px; font-size: 12px; letter-spacing: -3px; line-height: 1;
           color: color-mix(in srgb, var(--text) 30%, transparent); cursor: grab; user-select: none; touch-action: none; }

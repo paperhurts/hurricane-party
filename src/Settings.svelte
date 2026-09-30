@@ -897,12 +897,12 @@
   .row select { flex: 1 1 auto; min-width: 0; }
   .row select.narrow { flex: 0 0 64px; }
   .row.check { cursor: pointer; }
-  .row input[type="checkbox"] { margin: 0; accent-color: var(--accent); }
+  .row input[type="checkbox"] { margin: 0; }
   .val { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
          color: color-mix(in srgb, var(--text) 58%, transparent); }
   .val.warn, .note.warn { color: var(--warn); }
   .note { margin: 6px 0 0; font-size: 12px; color: color-mix(in srgb, var(--text) 40%, transparent); }
-  select, input { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 3px; background: var(--surface);
+  select, input:not([type="checkbox"]) { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 3px; background: var(--surface);
                   color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
   .zip { width: 12ch; }
   button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 3px; white-space: nowrap; }
