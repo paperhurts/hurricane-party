@@ -97,7 +97,7 @@ And the payoff: **when you double-click a seam to break a bond, any kitten sitti
 |---|---|
 | Idle | Default. Sit, blink, tail flick, occasional grooming |
 | Sleep | No audio playing for a while. Curls up, ideally on a window |
-| Dance | Playing. Beat flag from the viz stream drives the bounce |
+| Dance | Playing. Beat flag from the viz stream drives the bounce, and between beats the groove the last ones set, so the whole song is danced (D175) |
 | Walk | Periodic wander between perches |
 | Startle | Bond breaks under them, the window they're on moves, or another window comes in front of it where they stand (D166) |
 | Pet | Clicked. Purr animation, hearts, brief affection |
@@ -203,7 +203,7 @@ That last constraint is doing all the work. Let packs invent behaviors and they 
 Three fields carry most of the design:
 
 - **`anchor`** is the contact point, at the feet. It's what lets a 32px kitten and a 64px space marine both perch correctly on a bonded window seam without the app knowing anything about either
-- **`"syncTo": "beat"`** makes `dance` advance on beat flags from the viz stream rather than on a frame rate. That's the difference between dancing and merely animating, and it's one field
+- **`"syncTo": "beat"`** makes `dance` advance on beat flags from the viz stream rather than on a frame rate, and between flags at the tempo they set (D175). That's the difference between dancing and merely animating, and it's one field
 - **`palette`** decides whether the companion drifts hue with the kaleidoscope or keeps its own colors. Kittens want `theme`. Unicorns emphatically want `fixed`
 
 A pack may carry its sheet at twice the size beside it: `sheet@2x.png` for `sheet.png`, exactly twice as wide and tall, with the same cells in the same places. It is drawn whenever the companion is at an even zoom, beside 2x chrome, and without it the 1x frames are doubled, which comes out soft. It is the same `@2x` convention the skins' chrome uses (D76, D160). No key in `companion.json` names it, so an older loader simply ignores it.

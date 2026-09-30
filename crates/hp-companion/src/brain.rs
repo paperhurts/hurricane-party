@@ -7,7 +7,8 @@
 //! - **idle** by default, with a walk now and then to somewhere else on the
 //!   ledge he is on, across a seam if two windows sit side by side.
 //! - **dance** while music plays: a frame per beat from the viz stream, and
-//!   idle when the beats go quiet.
+//!   between beats the groove the last ones set, so a song with a soft kick
+//!   or none still gets him dancing (#222).
 //! - **sleep** once nothing has played for a while; music wakes him.
 //! - **startle**: when the window under him moves, shades, hides or goes, or
 //!   the stretch he stands on stops being a ledge, he jumps and falls to the
@@ -34,11 +35,21 @@ pub const SLEEP_AFTER: f32 = 30.0;
 pub const IDLE_FOR: (f32, f32) = (5.0, 14.0);
 /// A walk goes at least this far (1x pixels), or it is not worth the frames.
 pub const MIN_WALK: f32 = 48.0;
-/// Between beats he holds the pose the last one gave him; only this long
-/// without a beat (a break, or a track with no bass to find) and he stands.
-/// It was 1.5 s, and a sparse song flicked him between his dance frames and
-/// his idle one, which is drawn bigger (D158).
-pub const BEAT_STALE: f32 = 6.0;
+/// While music plays he dances the whole time (#222, D175). A beat the player
+/// finds is a step; between them he keeps the groove the last ones set, and
+/// until there are any, this one: a step every 0.55 s, about 110 a minute.
+pub const GROOVE: f32 = 0.55;
+/// The groove is folded into this range by halving and doubling, so a
+/// detector that hears only every other kick still gives him the right time,
+/// and a busy hi-hat does not make him frantic.
+pub const STEP_RANGE: (f32, f32) = (0.35, 0.9);
+/// A beat this soon after a step he took on his own is the same beat,
+/// arriving late: it moves his timing, not his feet, so he never steps twice.
+pub const SAME_BEAT: f32 = 0.2;
+/// The gaps between beats a groove is taken from, the newest this many.
+const GAPS: usize = 8;
+/// A gap outside this is a break or a stutter, not a tempo.
+const GAP_RANGE: (f32, f32) = (0.2, 2.0);
 /// Gravity and the startle's hop, in 1x pixels per second (squared).
 pub const GRAVITY: f32 = 2400.0;
 pub const HOP: f32 = 420.0;
@@ -155,8 +166,12 @@ pub struct Brain {
     since: f32,
     clock: f32,
     quiet_since: Option<f32>,
-    beats: u32,
+    /// Steps danced, which is the dance frame; when the last was taken; when
+    /// the player last found a beat; the gaps between its latest beats.
+    steps: u32,
+    last_step: f32,
     last_beat: f32,
+    gaps: Vec<f32>,
     /// `None` on a floor or in the air.
     under: Option<Under>,
     placed: bool,
@@ -184,8 +199,10 @@ impl Brain {
             since: 0.0,
             clock: 0.0,
             quiet_since: Some(0.0),
-            beats: 0,
+            steps: 0,
+            last_step: 0.0,
             last_beat: f32::NEG_INFINITY,
+            gaps: Vec::new(),
             under: None,
             placed: false,
             grab: None,
@@ -304,8 +321,7 @@ impl Brain {
     pub fn step(&mut self, dt: f32, w: &World) {
         self.clock += dt;
         if w.beat {
-            self.beats = self.beats.wrapping_add(1);
-            self.last_beat = self.clock;
+            self.heard_beat();
         }
         if w.playing {
             self.quiet_since = None;
@@ -370,8 +386,11 @@ impl Brain {
                 }
             }
             _ if w.playing => {
-                if self.mode != Mode::Dance {
+                if self.mode == Mode::Dance {
+                    self.keep_groove();
+                } else {
                     self.set(Mode::Dance);
+                    self.last_step = self.clock;
                 }
             }
             Mode::Dance => {
@@ -410,14 +429,12 @@ impl Brain {
             Mode::Landing { .. } => ("startle", last(pack, "startle")),
             Mode::Pet { .. } => ("pet", timed(pack, "pet", self.clock - self.since)),
             Mode::Carry => ("carry", timed(pack, "carry", self.clock - self.since)),
-            Mode::Dance if self.clock - self.last_beat <= BEAT_STALE => {
+            Mode::Dance => {
                 let d = &pack.state("dance").frames;
-                ("dance", d[self.beats as usize % d.len()])
+                ("dance", d[self.steps as usize % d.len()])
             }
             // Minimised he is not drawn; idle is a frame every pack has.
-            Mode::Dance | Mode::Idle { .. } | Mode::Minimised { .. } => {
-                ("idle", timed(pack, "idle", self.clock))
-            }
+            Mode::Idle { .. } | Mode::Minimised { .. } => ("idle", timed(pack, "idle", self.clock)),
             Mode::Walk { .. } => ("walk", timed(pack, "walk", self.clock - self.since)),
             Mode::Sleep => ("sleep", timed(pack, "sleep", self.clock)),
         };
@@ -436,6 +453,55 @@ impl Brain {
     fn set(&mut self, m: Mode) {
         self.mode = m;
         self.since = self.clock;
+    }
+
+    /// A beat from the player: a step, unless he has just taken this one on
+    /// his own, and a gap for the groove.
+    fn heard_beat(&mut self) {
+        let gap = self.clock - self.last_beat;
+        if (GAP_RANGE.0..=GAP_RANGE.1).contains(&gap) {
+            if self.gaps.len() == GAPS {
+                self.gaps.remove(0);
+            }
+            self.gaps.push(gap);
+        }
+        self.last_beat = self.clock;
+        if self.clock - self.last_step >= SAME_BEAT {
+            self.steps = self.steps.wrapping_add(1);
+        }
+        self.last_step = self.clock;
+    }
+
+    /// Dancing with no beat due yet: a step of his own when the groove says
+    /// one is. Timed from where the step belonged, not the tick that noticed,
+    /// so the groove does not drift.
+    fn keep_groove(&mut self) {
+        let every = self.groove();
+        if self.clock - self.last_step >= every {
+            self.steps = self.steps.wrapping_add(1);
+            self.last_step += every;
+            if self.clock - self.last_step >= every {
+                self.last_step = self.clock;
+            }
+        }
+    }
+
+    /// The time between steps: the middle of the latest gaps between beats,
+    /// folded into `STEP_RANGE`, or `GROOVE` until there are three.
+    fn groove(&self) -> f32 {
+        if self.gaps.len() < 3 {
+            return GROOVE;
+        }
+        let mut g = self.gaps.clone();
+        g.sort_by(f32::total_cmp);
+        let mut t = g[g.len() / 2];
+        while t > STEP_RANGE.1 {
+            t /= 2.0;
+        }
+        while t < STEP_RANGE.0 {
+            t *= 2.0;
+        }
+        t
     }
 
     fn rest(&mut self) -> f32 {
@@ -723,17 +789,16 @@ mod tests {
             "standing, he faces the way he went"
         );
         s.brain.set(Mode::Dance);
-        s.brain.last_beat = s.brain.clock;
         let dancing = s.brain.pose(&captain());
         assert_eq!(dancing.state, "dance");
         assert!(
             !dancing.flip,
             "a shout in a speech bubble is not spelt backwards"
         );
-        s.brain.last_beat = -1e9;
+        s.brain.steps += 1;
         assert!(
             !s.brain.pose(&captain()).flip,
-            "nor between beats, so he does not turn on each one"
+            "nor on the next step, so he does not turn on each one"
         );
         s.brain.set(Mode::Sleep);
         assert!(!s.brain.pose(&captain()).flip, "nor a sleeper's z's");
@@ -750,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn he_dances_a_frame_per_beat_and_stands_when_the_beats_stop() {
+    fn he_dances_a_frame_per_beat_and_keeps_dancing_when_the_beats_stop() {
         let pack = captain();
         let mut s = Sim::new(one_window());
         s.playing = true;
@@ -760,29 +825,75 @@ mod tests {
         let b = s.brain.pose(&pack);
         assert_eq!((a.state, b.state), ("dance", "dance"));
         assert_ne!(a.cell, b.cell, "the next beat, the next frame");
-        s.run(BEAT_STALE + 0.5, None);
-        assert_eq!(s.brain.pose(&pack).state, "idle", "a long break: standing");
+        // A long break: he keeps dancing, a frame at a time, never idle.
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..16 {
+            s.run(0.5, None);
+            let p = s.brain.pose(&pack);
+            assert_eq!(p.state, "dance", "music on: dancing (#222)");
+            seen.insert(p.cell);
+        }
+        assert!(seen.len() > 1, "and not frozen on one pose: {seen:?}");
         s.playing = false;
         s.run(0.1, None);
-        assert_eq!(s.brain.state(), "idle");
+        assert_eq!(s.brain.state(), "idle", "music off: he stands");
     }
 
     #[test]
-    fn a_gap_between_beats_holds_the_last_pose() {
-        let pack = captain();
+    fn a_song_with_no_beat_to_find_still_gets_him_dancing() {
         let mut s = Sim::new(one_window());
         s.playing = true;
-        s.run(0.2, Some(0.5));
-        let held = s.brain.pose(&pack);
-        assert_eq!(held.state, "dance");
-        for _ in 0..8 {
-            s.run(0.5, None);
-            assert_eq!(
-                s.brain.pose(&pack),
-                held,
-                "a sparse song does not flick him to idle"
-            );
-        }
+        s.run(11.0, None);
+        assert_eq!(s.brain.pose(&captain()).state, "dance");
+        let expect = 11.0 / GROOVE;
+        let got = s.brain.steps as f32;
+        assert!(
+            (got - expect).abs() <= 1.5,
+            "about {expect} steps, took {got}"
+        );
+    }
+
+    #[test]
+    fn steady_beats_are_one_step_each_never_two() {
+        let mut s = Sim::new(one_window());
+        s.playing = true;
+        // A beat every 0.5 s, some a tick late, for 10 s.
+        s.run(10.0, Some(0.5));
+        let got = s.brain.steps;
+        assert!((19..=21).contains(&got), "20 beats, {got} steps");
+    }
+
+    #[test]
+    fn in_a_break_he_keeps_the_last_songs_groove() {
+        let mut s = Sim::new(one_window());
+        s.playing = true;
+        s.run(4.0, Some(0.7));
+        assert!(
+            (s.brain.groove() - 0.7).abs() < 0.05,
+            "{}",
+            s.brain.groove()
+        );
+        let before = s.brain.steps;
+        s.run(7.0, None);
+        let taken = s.brain.steps - before;
+        assert!((9..=11).contains(&taken), "7 s at 0.7 s: {taken} steps");
+    }
+
+    #[test]
+    fn a_detector_that_hears_every_other_kick_gives_him_the_half_time_back() {
+        let mut s = Sim::new(one_window());
+        s.playing = true;
+        s.run(12.0, Some(1.4));
+        assert!(
+            (s.brain.groove() - 0.7).abs() < 0.05,
+            "{}",
+            s.brain.groove()
+        );
+        // A hi-hat at 0.2 s is doubled up to a step he can take.
+        let mut t = Sim::new(one_window());
+        t.playing = true;
+        t.run(3.0, Some(0.21));
+        assert!(t.brain.groove() >= STEP_RANGE.0, "{}", t.brain.groove());
     }
 
     #[test]
