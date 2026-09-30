@@ -136,7 +136,7 @@ pub fn read(path: &Path) -> Result<(Vec<FilePreset>, usize), EqfError> {
 pub fn list(conn: &Connection) -> Result<Vec<Preset>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT id, name, preamp_db, bands_db FROM eq_presets
-         WHERE COALESCE(is_builtin, 0) = 0 ORDER BY created_at, id",
+         WHERE COALESCE(is_builtin, 0) = 0 AND for_track = 0 ORDER BY created_at, id",
     )?;
     let rows = stmt.query_map([], |r| {
         let bands: String = r.get(3)?;
@@ -162,27 +162,13 @@ pub fn save(conn: &Connection, name: &str, preamp: f64, bands: &[f64]) -> Result
     if name.is_empty() {
         return Err(DbError::Io("a preset needs a name".into()));
     }
-    if bands.len() != 10 {
-        return Err(DbError::Io(format!(
-            "a preset has ten bands, not {}",
-            bands.len()
-        )));
-    }
-    let clamp = |v: f64| {
-        if v.is_finite() {
-            v.clamp(-12.0, 12.0)
-        } else {
-            0.0
-        }
-    };
-    let bands: Vec<f64> = bands.iter().map(|&v| clamp(v)).collect();
-    let preamp = clamp(preamp);
-    let json = serde_json::to_string(&bands).map_err(|e| DbError::Io(e.to_string()))?;
+    let (preamp, bands, json) = clean(preamp, bands)?;
     let existing: Option<i64> = conn
         .query_row(
             // Without case: the EQ window draws every name in capitals, so
             // "Mine" and "MINE" are one preset to anyone looking at it.
-            "SELECT id FROM eq_presets WHERE COALESCE(is_builtin, 0) = 0 AND name = ?1 COLLATE NOCASE",
+            "SELECT id FROM eq_presets
+             WHERE COALESCE(is_builtin, 0) = 0 AND for_track = 0 AND name = ?1 COLLATE NOCASE",
             [name],
             |r| r.get(0),
         )
@@ -212,13 +198,129 @@ pub fn save(conn: &Connection, name: &str, preamp: f64, bands: &[f64]) -> Result
     })
 }
 
+/// Ten bands and a preamp, each held to the EQ's range, and the bands as the
+/// table keeps them.
+fn clean(preamp: f64, bands: &[f64]) -> Result<(f64, Vec<f64>, String), DbError> {
+    if bands.len() != 10 {
+        return Err(DbError::Io(format!(
+            "a preset has ten bands, not {}",
+            bands.len()
+        )));
+    }
+    let clamp = |v: f64| {
+        if v.is_finite() {
+            v.clamp(-12.0, 12.0)
+        } else {
+            0.0
+        }
+    };
+    let bands: Vec<f64> = bands.iter().map(|&v| clamp(v)).collect();
+    let json = serde_json::to_string(&bands).map_err(|e| DbError::Io(e.to_string()))?;
+    Ok((clamp(preamp), bands, json))
+}
+
 /// Remove one of the person's presets. A preset that ships is not in this
-/// table, and a builtin row, if one ever is, is not removed from here.
+/// table, and a builtin row, if one ever is, is not removed from here, nor
+/// is a track's own (`clear_for_track` is how that goes).
 pub fn delete(conn: &Connection, id: i64) -> Result<(), DbError> {
     conn.execute(
-        "DELETE FROM eq_presets WHERE id = ?1 AND COALESCE(is_builtin, 0) = 0",
+        "DELETE FROM eq_presets WHERE id = ?1 AND COALESCE(is_builtin, 0) = 0 AND for_track = 0",
         [id],
     )?;
+    Ok(())
+}
+
+/// The id of a track's own EQ row, when it has one.
+fn own_id(conn: &Connection, media_id: i64) -> Option<i64> {
+    conn.query_row(
+        "SELECT p.id FROM media m JOIN eq_presets p ON p.id = m.eq_preset_id
+         WHERE m.id = ?1 AND p.for_track = 1",
+        [media_id],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
+/// A track's own EQ (#121, D178), which the EQ plays it with while AUTO is
+/// on: a preset row marked `for_track`, pointed at by its
+/// `media.eq_preset_id`, and never in the list a person picks from.
+pub fn for_track(conn: &Connection, media_id: i64) -> Result<Option<Preset>, DbError> {
+    let Some(id) = own_id(conn, media_id) else {
+        return Ok(None);
+    };
+    let p = conn.query_row(
+        "SELECT id, name, preamp_db, bands_db FROM eq_presets WHERE id = ?1",
+        [id],
+        |r| {
+            let bands: String = r.get(3)?;
+            Ok(Preset {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                preamp: r.get(2)?,
+                bands: serde_json::from_str::<Vec<f64>>(&bands).unwrap_or_default(),
+            })
+        },
+    )?;
+    Ok((p.bands.len() == 10).then_some(p))
+}
+
+/// Keep this EQ as the track's own: its row updated in place, or made and
+/// pointed at. Named after the track, which no list shows.
+pub fn set_for_track(
+    conn: &Connection,
+    media_id: i64,
+    preamp: f64,
+    bands: &[f64],
+) -> Result<Preset, DbError> {
+    let (preamp, bands, json) = clean(preamp, bands)?;
+    let title: String = conn
+        .query_row("SELECT title FROM media WHERE id = ?1", [media_id], |r| {
+            r.get(0)
+        })
+        .map_err(|_| DbError::Io(format!("track {media_id} is not in the library")))?;
+    let id = match own_id(conn, media_id) {
+        Some(id) => {
+            conn.execute(
+                "UPDATE eq_presets SET name = ?2, preamp_db = ?3, bands_db = ?4 WHERE id = ?1",
+                params![id, title, preamp, json],
+            )?;
+            id
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO eq_presets (name, preamp_db, bands_db, is_builtin, created_at, for_track)
+                 VALUES (?1, ?2, ?3, 0, ?4, 1)",
+                params![title, preamp, json, db::now()],
+            )?;
+            let id = conn.last_insert_rowid();
+            conn.execute(
+                "UPDATE media SET eq_preset_id = ?2 WHERE id = ?1",
+                params![media_id, id],
+            )?;
+            id
+        }
+    };
+    Ok(Preset {
+        id,
+        name: title,
+        preamp,
+        bands,
+    })
+}
+
+/// Forget a track's own EQ: the track plays with the everyday one again.
+pub fn clear_for_track(conn: &Connection, media_id: i64) -> Result<(), DbError> {
+    let id = own_id(conn, media_id);
+    conn.execute(
+        "UPDATE media SET eq_preset_id = NULL WHERE id = ?1",
+        [media_id],
+    )?;
+    if let Some(id) = id {
+        conn.execute(
+            "DELETE FROM eq_presets WHERE id = ?1 AND for_track = 1",
+            [id],
+        )?;
+    }
     Ok(())
 }
 
@@ -484,5 +586,77 @@ mod tests {
         assert_eq!(import(&conn, &paths[..1], &[]).saved, 2);
         assert_eq!(list(&conn).unwrap().len(), 2);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn track(conn: &Connection, title: &str) -> i64 {
+        conn.execute(
+            "INSERT OR IGNORE INTO library_roots (id, label, path) VALUES (1, 'r', 'C:/r')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO media (root_id, relpath, kind, title, added_at) VALUES (1, ?1, 'audio', ?1, 0)",
+            [title],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn a_tracks_own_eq_is_kept_for_it_and_out_of_the_list() {
+        let conn = fixture();
+        let a = track(&conn, "Linger");
+        let b = track(&conn, "Dreams");
+        assert_eq!(for_track(&conn, a).unwrap(), None, "none until one is kept");
+        let bands = [3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0];
+        let kept = set_for_track(&conn, a, -2.0, &bands).unwrap();
+        assert_eq!(kept.name, "Linger");
+        assert_eq!(for_track(&conn, a).unwrap(), Some(kept.clone()));
+        assert_eq!(for_track(&conn, b).unwrap(), None, "only that track");
+        assert!(
+            list(&conn).unwrap().is_empty(),
+            "not in the list a person picks from"
+        );
+        // Kept again: the same row, new values, clamped like any preset.
+        let again = set_for_track(&conn, a, 40.0, &[0.0; 10]).unwrap();
+        assert_eq!(again.id, kept.id);
+        assert_eq!(for_track(&conn, a).unwrap().unwrap().preamp, 12.0);
+        // The person's own presets and a track's never meet.
+        save(&conn, "Linger", 1.0, &[1.0; 10]).unwrap();
+        assert_eq!(list(&conn).unwrap().len(), 1);
+        assert_eq!(for_track(&conn, a).unwrap().unwrap().preamp, 12.0);
+        delete(&conn, kept.id).unwrap();
+        assert!(
+            for_track(&conn, a).unwrap().is_some(),
+            "a list delete cannot take it"
+        );
+        clear_for_track(&conn, a).unwrap();
+        assert_eq!(for_track(&conn, a).unwrap(), None);
+        let rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM eq_presets WHERE for_track = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 0, "its row is gone with it");
+        assert!(
+            set_for_track(&conn, 999, 0.0, &[0.0; 10]).is_err(),
+            "no such track"
+        );
+    }
+
+    #[test]
+    fn a_tracks_own_eq_goes_when_its_track_does() {
+        let conn = fixture();
+        let a = track(&conn, "Zombie");
+        set_for_track(&conn, a, 0.0, &[1.0; 10]).unwrap();
+        conn.execute("DELETE FROM media WHERE id = ?1", [a])
+            .unwrap();
+        crate::db::migrate(&conn).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM eq_presets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "swept at the next launch");
     }
 }

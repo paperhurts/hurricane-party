@@ -65,8 +65,10 @@ export const ACTIONS = [
   "playlist",
   "shuffle",
   "repeat",
-  // The equalizer's own: its on switch, and its preset menu.
+  // The equalizer's own: its on switch, AUTO (each track with its own EQ,
+  // #121), and its preset menu.
   "eqOn",
+  "eqAuto",
   "eqPresets",
   // The playlist's bottom bar (D99): add files, add a link, remove the
   // selected rows, show or put away the library (D123), and load the list
@@ -105,10 +107,12 @@ export const BINDS = [
   "volumePercent",
   "balance",
   "playState",
-  // The equalizer (D21). `eqOn` is "on" or "off", `eqMenu` "open" or
-  // "closed", `eqClip` "on" while the lamp is lit; `eqTrim` is the readout's
-  // words; the eleven gains are 0..1 fractions, 0.5 being 0 dB.
+  // The equalizer (D21). `eqOn` and `eqAuto` (#121) are "on" or "off",
+  // `eqMenu` "open" or "closed", `eqClip` "on" while the lamp is lit;
+  // `eqTrim` is the readout's words; the eleven gains are 0..1 fractions,
+  // 0.5 being 0 dB.
   "eqOn",
+  "eqAuto",
   "eqPreset",
   "eqMenu",
   "eqTrim",
@@ -1093,6 +1097,10 @@ export function actionTitle(action: Action | null, on: boolean): string {
       return "Repeat: off, this track, or the whole list";
     case "eqOn":
       return on ? "Turn the EQ off" : "Turn the EQ on";
+    case "eqAuto":
+      return on
+        ? "AUTO: a track that keeps its own EQ plays with it. Click for the one EQ for everything"
+        : "AUTO: play each track with its own EQ, kept with FOR THIS TRACK in the presets";
     case "eqPresets":
       return "Presets";
     case "add":

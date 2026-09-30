@@ -3,6 +3,11 @@
   // Main, so every change is sent over as the whole state and Main applies
   // it. Persisted in localStorage, which all the app's windows share, so both
   // sides read the same saved state at mount and only this window writes.
+  //
+  // AUTO (#121, D178): a track can keep its own EQ, and with AUTO on it plays
+  // with it. `eq` is the everyday EQ, the one saved; a track's own shows in
+  // its place while that track plays, and is what the sliders and presets
+  // change, until the next track brings the everyday EQ back.
   import { invoke } from "@tauri-apps/api/core";
   import { emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -16,6 +21,7 @@
     DB_MAX,
     DB_MIN,
     loadEq,
+    playing,
     presetName,
     saveEq,
     shadeBarPx,
@@ -23,25 +29,49 @@
     shipsAs,
     trimDb,
     type EqState,
+    type Own,
     type Preset,
   } from "../lib/eq";
 
   let eq = $state<EqState>(loadEq(localStorage));
+  // The track Main holds, the EQ it keeps (if it keeps one), and what has
+  // been changed of that since it came in, not yet kept.
+  let trackId = $state<number | null>(null);
+  let own = $state<Own | null>(null);
+  let live = $state<Own | null>(null);
+  // What plays, and so what every control shows.
+  let shown = $derived(playing(eq, live ?? own));
+  let theTrack = $derived(eq.auto && own !== null);
   // The person's own presets (#145), from the database; the four that ship
   // come first and cannot be removed.
   let mine = $state<Preset[]>([]);
   let presets = $derived([...SHIPPED, ...mine]);
-  let preset = $derived(presetName(eq, presets));
-  let trim = $derived(trimDb(eq));
+  let preset = $derived(theTrack ? "THIS TRACK" : presetName(eq, presets));
+  let trim = $derived(trimDb(shown));
 
   // The lamp stays lit a beat after the last clip Main reported, so a burst
   // of clipped blocks reads as one steady light rather than a flicker.
   let clip = $state(false);
   let clipTimer = 0;
 
+  /** Tell Main what plays. */
+  function send() {
+    emitTo("main", "eq:set", $state.snapshot(shown)).catch(() => {});
+  }
+  /** Keep the everyday EQ, and tell Main. */
   function commit() {
     saveEq(localStorage, eq);
-    emitTo("main", "eq:set", $state.snapshot(eq)).catch(() => {});
+    send();
+  }
+  /** Change what shows: a track's own while it plays, else the everyday EQ. */
+  function change(to: Own) {
+    if (theTrack) {
+      live = { preamp: to.preamp, bands: [...to.bands] };
+      send();
+    } else {
+      eq = { ...eq, preamp: to.preamp, bands: [...to.bands] };
+      commit();
+    }
   }
 
   // Half-dB steps: fine enough to be smooth, coarse enough that a preset can
@@ -49,15 +79,19 @@
   const snap = (db: number) => clampDb(Math.round(db * 2) / 2);
 
   function setBand(i: number, db: number) {
-    eq.bands[i] = snap(db);
-    commit();
+    const bands = [...shown.bands];
+    bands[i] = snap(db);
+    change({ preamp: shown.preamp, bands });
   }
   function setPre(db: number) {
-    eq.preamp = snap(db);
-    commit();
+    change({ preamp: snap(db), bands: shown.bands });
   }
   function toggleOn() {
     eq.on = !eq.on;
+    commit();
+  }
+  function toggleAuto() {
+    eq.auto = !eq.auto;
     commit();
   }
   // The preset button opens a menu. It used to cycle, which is not what a ▼
@@ -65,9 +99,56 @@
   let menuOpen = $state(false);
 
   function pick(p: Preset) {
-    eq = applyPreset(eq, p);
     menuOpen = false;
-    commit();
+    if (theTrack) change(applyPreset(shown, p));
+    else {
+      eq = applyPreset(eq, p);
+      commit();
+    }
+  }
+
+  // ---- the playing track's own EQ (#121) ----
+
+  /** The track Main holds changed: fetch what it keeps, forget what was being
+   * changed of the last one, and play what should play now. */
+  async function follow(id: number | null) {
+    if (id === trackId) return;
+    trackId = id;
+    live = null;
+    let kept: Own | null = null;
+    if (id !== null) {
+      kept = await invoke<Own | null>("track_eq", { id }).catch(() => null);
+    }
+    // Another track may have come in while that was asked.
+    if (trackId !== id) return;
+    own = kept;
+    send();
+  }
+
+  /** FOR THIS TRACK: what shows is kept as the playing track's own. */
+  async function keepForTrack() {
+    menuOpen = false;
+    if (trackId === null) return;
+    const id = trackId;
+    try {
+      await invoke("set_track_eq", { id, preamp: shown.preamp, bands: $state.snapshot(shown.bands) });
+      own = { preamp: shown.preamp, bands: [...shown.bands] };
+      live = null;
+      say(eq.auto ? "KEPT FOR TRACK" : "KEPT; AUTO IS OFF");
+    } catch (e) {
+      say(String(e).toUpperCase());
+    }
+  }
+
+  /** NOT FOR THIS TRACK: the track goes back to the everyday EQ. */
+  async function forgetForTrack() {
+    menuOpen = false;
+    if (trackId === null) return;
+    await invoke("clear_track_eq", { id: trackId }).catch(() => {});
+    own = null;
+    live = null;
+    send();
+    say("EVERYDAY EQ");
   }
 
   async function loadMine() {
@@ -96,7 +177,7 @@
   let nameEl = $state<HTMLInputElement | null>(null);
   async function startNaming() {
     naming = true;
-    newName = preset === CUSTOM ? "" : preset;
+    newName = preset === CUSTOM || theTrack ? "" : preset;
     await tick();
     nameEl?.focus();
     nameEl?.select();
@@ -109,7 +190,7 @@
       return;
     }
     try {
-      await invoke("save_eq_preset", { name, preamp: eq.preamp, bands: $state.snapshot(eq.bands) });
+      await invoke("save_eq_preset", { name, preamp: shown.preamp, bands: $state.snapshot(shown.bands) });
       await loadMine();
       naming = false;
       menuOpen = false;
@@ -163,8 +244,15 @@
       clearTimeout(clipTimer);
       clipTimer = window.setTimeout(() => (clip = false), 400);
     });
+    // Which track Main holds, as it tells every window; and asked for once,
+    // since it may have told before this window was listening.
+    const now = listen<{ id: number | null }>("player:now", (e) => follow(e.payload.id), {
+      target: { kind: "WebviewWindow", label: "eq" },
+    });
+    emitTo("main", "eq:hello").catch(() => {});
     return () => {
       sub.then((off) => off());
+      now.then((off) => off());
       clearTimeout(clipTimer);
     };
   });
@@ -174,7 +262,7 @@
 
   // The response curve: one point per band, drawn in a stretched viewBox.
   let curve = $derived(
-    eq.bands.map((v, i) => `${(i / (BANDS.length - 1)) * 100},${pct(eq.on ? v : 0)}`).join(" "),
+    shown.bands.map((v, i) => `${(i / (BANDS.length - 1)) * 100},${pct(shown.on ? v : 0)}`).join(" "),
   );
 
   // ---- what the skin draws (#3) ----
@@ -187,16 +275,18 @@
 
   let binds = $derived({
     eqOn: eq.on ? "on" : "off",
+    eqAuto: eq.auto ? "on" : "off",
     eqPreset: said ?? preset,
     eqMenu: menuOpen ? "open" : "closed",
     eqTrim: `${trim > 0 ? "+" : ""}${trim.toFixed(1)} dB`,
     eqClip: clip ? "on" : "off",
-    eqPre: frac(eq.preamp),
-    ...Object.fromEntries(eq.bands.map((db, i) => [`eqBand${i + 1}`, frac(db)])),
+    eqPre: frac(shown.preamp),
+    ...Object.fromEntries(shown.bands.map((db, i) => [`eqBand${i + 1}`, frac(db)])),
   });
 
   function action(name: string) {
     if (name === "eqOn") toggleOn();
+    else if (name === "eqAuto") toggleAuto();
     else if (name === "eqPresets") menuOpen = !menuOpen;
   }
 
@@ -233,7 +323,7 @@
     <span class="stag">EQ</span>
     <span class="stag" class:lit={eq.on}>{eq.on ? "ON" : "OFF"}</span>
     <div class="sbars" class:off={!eq.on} title={preset}>
-      {#each eq.bands as db, i (i)}
+      {#each shown.bands as db, i (i)}
         <i style:height="{shadeBarPx(db)}px"></i>
       {/each}
     </div>
@@ -245,7 +335,7 @@
      menu over it: the menu drops from the button straight onto the curve,
      which is where it always opened. Both are this window's to draw. -->
 {#snippet curveBox()}
-  <svg class="curve" class:off={!eq.on} viewBox="0 0 100 100" preserveAspectRatio="none">
+  <svg class="curve" class:off={!shown.on} viewBox="0 0 100 100" preserveAspectRatio="none">
     <line x1="0" y1="50" x2="100" y2="50" class="zero" />
     <polyline points={curve} class="halo" />
     <polyline points={curve} class="line" />
@@ -283,6 +373,20 @@
           onkeydown={nameKey}
         />
       {:else}
+        <!-- The playing track's own EQ (#121): kept, and forgotten. -->
+        <button
+          role="menuitem"
+          disabled={trackId === null}
+          title={trackId === null
+            ? "Nothing is playing"
+            : "Keep the EQ as it is now for the playing track; with AUTO on, it plays with it"}
+          onclick={keepForTrack}>FOR THIS TRACK</button
+        >
+        {#if own}
+          <button role="menuitem" title="The playing track goes back to the everyday EQ" onclick={forgetForTrack}
+            >NOT FOR THIS TRACK</button
+          >
+        {/if}
         <div class="acts">
           <button role="menuitem" title="Keep the EQ as it is now under a name" onclick={startNaming}>SAVE…</button>
           <button role="menuitem" title="Presets from Winamp .eqf files" onclick={importEqf}>IMPORT…</button>
@@ -381,7 +485,11 @@
     background: transparent;
     cursor: pointer;
   }
-  .pmenu button:hover,
+  .pmenu button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .pmenu button:hover:not(:disabled),
   .pmenu button.on {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
