@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 /// The id of the companion that ships first, and finds his own pack.
 pub const CAPTAIN: &str = "captain";
 /// Every companion that ships beside the player, in the picker's order:
-/// Cap'n Capy (#192), then Wee Man (D164). No imported pack takes their ids.
-pub const SHIPPED: [&str; 2] = [CAPTAIN, "wee-man"];
+/// Cap'n Capy (#192), Wee Man (D164), then Señor Bones (D176). No imported
+/// pack takes their ids.
+pub const SHIPPED: [&str; 3] = [CAPTAIN, "wee-man", "senor-bones"];
 pub const MANIFEST: &str = "companion.json";
 /// No file in a pack is bigger than this.
 const MAX_FILE: u64 = 32 * 1024 * 1024;
@@ -417,6 +418,7 @@ mod tests {
         assert_eq!(slug_for(&root, "Sir  Waddles!!"), "sir-waddles");
         assert_eq!(slug_for(&root, "Captain"), "captain-2");
         assert_eq!(slug_for(&root, "Wee Man"), "wee-man-2");
+        assert_eq!(slug_for(&root, "Senor Bones"), "senor-bones-2");
         assert_eq!(slug_for(&root, "???"), "companion");
         assert!(folder(&root, "../etc").is_none());
         let _ = fs::remove_dir_all(root);
@@ -426,7 +428,7 @@ mod tests {
     fn the_shipped_companions_come_first_and_an_imported_one_never_shadows_them() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skins/companions");
         let names: Vec<String> = shipped(Some(&repo)).into_iter().map(|p| p.name).collect();
-        assert_eq!(names, ["Cap'n Capy", "Wee Man"]);
+        assert_eq!(names, ["Cap'n Capy", "Wee Man", "Señor Bones"]);
         // Without the folder the Cap'n is still there: he finds his own pack.
         assert_eq!(
             shipped(None),
