@@ -64,3 +64,16 @@ input[type="checkbox"]:disabled { opacity: 0.35; cursor: default; }
 @media (forced-colors: active) {
   input[type="checkbox"]:checked::before { background: CanvasText; }
 }
+/* Scrollbars too (D180): `color-scheme: dark` has WebView2 draw dark ones,
+   dark bars on Purricane's white. The thumb is the EQ preset list's, half the
+   accent, and the whole accent under the pointer; the track is the ground.
+   ::-webkit-scrollbar and not scrollbar-color, which inherits, and Chromium
+   drops ::-webkit-scrollbar wherever scrollbar-color is set, so it would take
+   the playlist its skinned bar. The playlist's bar sets all of these again
+   (it never scrolls sideways, so the height is moot) and the EQ's list sets
+   scrollbar-color, which wins, so both draw as they did. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent) 50%, transparent); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
