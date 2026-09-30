@@ -61,6 +61,8 @@ fn remove_in(tx: &Transaction, id: i64) -> Result<Removed, DbError> {
         let rows = st.query_map([id], |r| r.get::<_, i64>(0))?;
         rows.filter_map(|r| r.ok()).collect()
     };
+    // Its own EQ, if it kept one (#121), goes with it.
+    crate::eq_presets::clear_for_track(tx, id)?;
     tx.execute("DELETE FROM media WHERE id = ?1", [id])?;
     for pid in lists {
         playlist::compact(tx, pid)?;

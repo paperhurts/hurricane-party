@@ -65,7 +65,10 @@ CREATE TABLE IF NOT EXISTS eq_presets (
   preamp_db     REAL NOT NULL DEFAULT 0,
   bands_db      TEXT NOT NULL,
   is_builtin    INTEGER DEFAULT 0,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  -- 1: a track's own EQ (#121), which its media.eq_preset_id points at and
+  -- the list a person picks from leaves out.
+  for_track     INTEGER NOT NULL DEFAULT 0
 );
 
 -- (root_id, relpath), never an absolute path (D28): an external drive that
@@ -274,6 +277,20 @@ pub fn migrate(conn: &Connection) -> Result<(), DbError> {
         if has_column(conn, "jobs", "id")? && !has_column(conn, "jobs", column)? {
             conn.execute_batch(ddl)?;
         }
+    }
+    // #121, D178: a track's own EQ is a preset row the person's list leaves
+    // out; one whose track has gone (a row removed, a duplicate merged) is
+    // swept away here, every launch.
+    if has_column(conn, "eq_presets", "id")? && !has_column(conn, "eq_presets", "for_track")? {
+        conn.execute_batch(
+            "ALTER TABLE eq_presets ADD COLUMN for_track INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    if has_column(conn, "eq_presets", "for_track")? && has_column(conn, "media", "eq_preset_id")? {
+        conn.execute_batch(
+            "DELETE FROM eq_presets WHERE for_track = 1 AND id NOT IN
+               (SELECT eq_preset_id FROM media WHERE eq_preset_id IS NOT NULL);",
+        )?;
     }
     if !has_column(conn, "playlists", "position")? {
         // The order a person already sees is creation order, so that is the

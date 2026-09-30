@@ -7,6 +7,7 @@ import {
   CUSTOM,
   dbToGain,
   defaultEq,
+  playing,
   loadEq,
   nextPreset,
   PRESETS,
@@ -150,7 +151,7 @@ describe("persistence", () => {
     expect(loadEq(bad)).toEqual(defaultEq());
     const short = mem();
     short.data[STORAGE_KEY] = JSON.stringify({ on: true, preamp: 3, bands: [1, 2, 3] });
-    expect(loadEq(short)).toEqual({ on: true, preamp: 3, bands: [...defaultEq().bands] });
+    expect(loadEq(short)).toEqual({ on: true, auto: false, preamp: 3, bands: [...defaultEq().bands] });
   });
 
   it("clamps what it reads", () => {
@@ -187,5 +188,41 @@ describe("shadeBarPx", () => {
     expect(shadeBarPx(40)).toBe(9);
     expect(shadeBarPx(Number.NaN)).toBe(5);
     expect(shadeBarPx(12, 4)).toBe(4);
+  });
+});
+
+describe("AUTO: a track plays with its own EQ (#121)", () => {
+  const own = { preamp: -3, bands: [6, 5, 4, 0, 0, 0, 0, 0, 0, 0] };
+
+  it("plays the track's own only with AUTO on, and the everyday EQ otherwise", () => {
+    const everyday = applyPreset(defaultEq(), "STORM WATCH");
+    expect(playing(everyday, own), "AUTO off").toBe(everyday);
+    const auto = { ...everyday, auto: true };
+    expect(playing(auto, null), "a track with none").toBe(auto);
+    expect(playing(auto, own)).toEqual({ on: true, auto: true, preamp: -3, bands: own.bands });
+  });
+
+  it("keeps the everyday ON switch, and never changes the everyday EQ", () => {
+    const off = { ...defaultEq(), on: false, auto: true };
+    expect(playing(off, own).on).toBe(false);
+    const before = JSON.stringify(off);
+    playing(off, own);
+    expect(JSON.stringify(off)).toBe(before);
+  });
+
+  it("clamps a track's values, and ignores one that is not ten bands", () => {
+    const auto = { ...defaultEq(), auto: true };
+    expect(playing(auto, { preamp: 40, bands: own.bands }).preamp).toBe(12);
+    expect(playing(auto, { preamp: 0, bands: [1, 2] })).toBe(auto);
+  });
+
+  it("is saved with the EQ, and a preset picked keeps it", () => {
+    const st = (() => {
+      const m = new Map<string, string>();
+      return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+    })();
+    saveEq(st, { ...defaultEq(), auto: true });
+    expect(loadEq(st).auto).toBe(true);
+    expect(applyPreset({ ...defaultEq(), auto: true }, "STORM WATCH").auto).toBe(true);
   });
 });

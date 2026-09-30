@@ -361,6 +361,9 @@
         eq = e.payload;
         graph?.applyEq(eq);
       }),
+      // The EQ window follows the track Main holds, for its own EQ (#121),
+      // and asks once when it opens.
+      listen("eq:hello", () => tell(), { target: { kind: "WebviewWindow", label: "main" } }),
       listen<boolean>("vis:calm", (e) => (calm = e.payload), { target: { kind: "WebviewWindow", label: "main" } }),
       listen<number>("vis:segments", (e) => (segments = e.payload === 8 ? 8 : 6), {
         target: { kind: "WebviewWindow", label: "main" },

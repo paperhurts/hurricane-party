@@ -174,6 +174,9 @@ describe("a classic skin becomes an hp-skin/1 manifest", () => {
     const band2 = els.find((e: Element) => e.name === "eqBand2")!;
     expect(band2.rect[0] - band1.rect[0]).toBe(18);
     expect(els.find((e: Element) => e.name === "eqOnButton")).toMatchObject({ action: "eqOn", bind: "eqOn" });
+    // AUTO beside ON, from its own art in EQMAIN.BMP, off and lit (#121).
+    const auto = els.find((e: Element) => e.name === "eqAutoButton")!;
+    expect(auto).toMatchObject({ action: "eqAuto", bind: "eqAuto", rect: [40, 18, 32, 12] });
   });
 
   it("gives the playlist its tiled frame, its bar and the corner that holds both edges", () => {

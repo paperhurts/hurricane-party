@@ -299,8 +299,8 @@ function Draw-Job($g, $job) {
             Ring $g 0 0 $w $hh $r $look.ring $look.a
         }
         '^(minimize|close|shade|zoom)$' { Draw-Circle $g $name $state }
-        '^(calm|eqOnButton)$' { Draw-Pill $g $w $hh $pills["mint"] $state }
-        '^(segments6|segments8|eq|pl)$' { Draw-Pill $g $w $hh $pills["peri"] $state }
+        '^(calm|eqOnButton|eqAutoButton)$' { Draw-Pill $g $w $hh $pills["mint"] $state }
+        '^(segments6|segments8|eq|pl|visButton)$' { Draw-Pill $g $w $hh $pills["peri"] $state }
         '^eqPresetButton$' { Draw-Pill $g $w $hh $pills["preset"] $state }
         '^(urlButton|removeButton|libraryButton|selectButton|shuffleButton|repeatButton)$' { Draw-Pill $g $w $hh $pills["floss"] $state }
         '^addButton$' {
@@ -351,11 +351,12 @@ function Draw-Job($g, $job) {
 $jobs = [ordered]@{}
 
 # Which elements draw alike, so may share a rectangle: the EQ's eleven
-# sliders, the playlist's pills, 6 SEG and 8 SEG, EQ and PL.
+# sliders, the playlist's pills, 6 SEG and 8 SEG, EQ and PL, and VIS, which
+# wears the segments' pill (D169).
 function Look-Of([string]$window, [string]$name) {
     switch -regex ($name) {
         '^eq(Pre|Band\d+)$' { return "eqslider" }
-        '^(segments6|segments8|eq|pl)$' { return "peri" }
+        '^(segments6|segments8|eq|pl|visButton)$' { return "peri" }
         '^(urlButton|removeButton|libraryButton|selectButton|shuffleButton|repeatButton)$' { return "floss" }
         '^dot$' { return "dot-$window" }
         default { return $name }

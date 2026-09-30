@@ -292,6 +292,8 @@ A `DynamicsCompressorNode` as a limiter is the lazier option and it colors the s
 
 **Per-track EQ** — the `auto` toggle on the EQ window means "load this track's saved preset on play." That's what `media.eq_preset_id` is for. Null means use the global setting.
 
+*As built* (#121, D178): AUTO sits beside ON, and the preset menu's **FOR THIS TRACK** keeps the EQ as it shows for the playing track, as a row in `eq_presets` marked `for_track` that `media.eq_preset_id` points at and the list a person picks from leaves out; **NOT FOR THIS TRACK** forgets it. The EQ window is the one that decides: it hears which track Main holds (`player:now`), asks for that track's own (`track_eq`), and sends Main what plays, the track's own with AUTO on and the everyday EQ otherwise (`playing` in `src/lib/eq.ts`). The everyday EQ, saved in `localStorage` with `auto` beside `on`, is never changed by a track's, so the next track without one goes back to it. Main applies whatever it is sent, gliding every gain (`setTargetAtTime`), so the change from one to the other does not click.
+
 **`.eqf` import** — Winamp's EQ preset format is small and simple, and importing it is cheap. Built at v0.5 (#145, D128): the EQ preset menu imports any number of `.eqf` files and saves the EQ under a name, into `eq_presets`, beside the four presets that ship. D31 has the byte layout.
 
 **Deliberately not in the control API v1.** No `set_eq` command. The public surface stays small; EQ is an in-app control, and adding it later is additive rather than breaking.

@@ -17,6 +17,8 @@ export const DB_MAX = 12;
 
 export type EqState = {
   on: boolean;
+  /** AUTO (#121, D178): a track that keeps its own EQ plays with it. */
+  auto: boolean;
   /** dB, -12..12 */
   preamp: number;
   /** dB, -12..12, ten entries in BANDS order */
@@ -57,7 +59,21 @@ export function shipsAs(name: string): boolean {
 }
 
 export function defaultEq(): EqState {
-  return { on: true, preamp: 0, bands: [...FLAT] };
+  return { on: true, auto: false, preamp: 0, bands: [...FLAT] };
+}
+
+/** A track's own EQ (#121): the values, without the switches, which stay the
+ * everyday EQ's. */
+export type Own = { preamp: number; bands: readonly number[] };
+
+/**
+ * What plays (#121, D178): the everyday EQ, or with AUTO on the playing
+ * track's own, under the everyday ON switch. The everyday EQ is never
+ * changed by it, so the next track without its own goes back to it.
+ */
+export function playing(everyday: EqState, own: Own | null): EqState {
+  if (!everyday.auto || !own || own.bands.length !== BANDS.length) return everyday;
+  return { on: everyday.on, auto: true, preamp: clampDb(own.preamp), bands: own.bands.map(clampDb) };
 }
 
 export function clampDb(v: number): number {
@@ -108,7 +124,7 @@ export function presetName(s: EqState, presets: readonly Preset[] = SHIPPED): st
 export function applyPreset(s: EqState, preset: string | Preset, presets: readonly Preset[] = SHIPPED): EqState {
   const p = typeof preset === "string" ? presets.find((x) => x.name === preset) : preset;
   if (!p || p.bands.length !== BANDS.length) return s;
-  return { on: s.on, preamp: clampDb(p.preamp), bands: p.bands.map(clampDb) };
+  return { on: s.on, auto: s.auto, preamp: clampDb(p.preamp), bands: p.bands.map(clampDb) };
 }
 
 /** Cycle to the next preset name after the current one, wrapping. */
@@ -141,6 +157,7 @@ export function loadEq(storage: StorageLike): EqState {
     const bands = Array.isArray(p.bands) && p.bands.length === BANDS.length ? p.bands.map(clampDb) : d.bands;
     return {
       on: typeof p.on === "boolean" ? p.on : d.on,
+      auto: typeof p.auto === "boolean" ? p.auto : d.auto,
       preamp: clampDb(Number(p.preamp)),
       bands,
     };

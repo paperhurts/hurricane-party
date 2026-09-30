@@ -210,6 +210,11 @@ const EQMAIN_SP = {
   onDown: [128, 119, 26, 12] as Rect,
   onSelected: [69, 119, 26, 12] as Rect,
   onSelectedDown: [187, 119, 26, 12] as Rect,
+  // AUTO sits beside ON in each of its four states (#121).
+  auto: [36, 119, 32, 12] as Rect,
+  autoDown: [154, 119, 32, 12] as Rect,
+  autoSelected: [95, 119, 32, 12] as Rect,
+  autoSelectedDown: [213, 119, 32, 12] as Rect,
   presets: [224, 164, 44, 12] as Rect,
   presetsDown: [224, 176, 44, 12] as Rect,
   graph: [0, 294, 113, 19] as Rect,
@@ -271,6 +276,7 @@ const L = {
   repeat: [210, 89, 28, 15] as Rect,
   // The equalizer.
   eqOn: [14, 18, 26, 12] as Rect,
+  eqAuto: [40, 18, 32, 12] as Rect,
   eqPresets: [217, 18, 44, 12] as Rect,
   eqGraph: [86, 17, 113, 19] as Rect,
   eqPreamp: [21, 38, 14, 63] as Rect,
@@ -384,7 +390,7 @@ export function paletteFrom(pledit: Record<string, string>): Record<string, stri
  * this number moves on (D107). Bump it whenever the mapping changes what it
  * writes for the same art.
  */
-export const WSZ_GENERATION = 5;
+export const WSZ_GENERATION = 6;
 
 /** What a classic skin draws that this app does not use (D110). Not a fault
  * in the skin and not one in this app: the format is another program's
@@ -809,6 +815,16 @@ function eqWindow(sheets: Record<string, string>, warnings: string[]) {
       on: { sprite: sp("eqmain", e.onSelected), active: sp("eqmain", e.onSelectedDown) },
       action: "eqOn",
       bind: "eqOn",
+      when: "on",
+    };
+    els.eqAutoButton = {
+      type: "toggle",
+      rect: L.eqAuto,
+      sprite: sp("eqmain", e.auto),
+      active: sp("eqmain", e.autoDown),
+      on: { sprite: sp("eqmain", e.autoSelected), active: sp("eqmain", e.autoSelectedDown) },
+      action: "eqAuto",
+      bind: "eqAuto",
       when: "on",
     };
     els.eqPresetButton = {

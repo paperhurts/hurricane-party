@@ -260,20 +260,35 @@
                    },
                    "action": "shade" },
 
-        "eqOnButton": { "type": "toggle", "rect": [4, 17, 60, 10],
-          "sprite": { "sheet": "chrome", "rect": [100, 126, 60, 10], "tint": "accent" },
-          "hover":  { "sheet": "chrome", "rect": [100, 137, 60, 10], "tint": "accent" },
-          "active": { "sheet": "chrome", "rect": [100, 148, 60, 10], "tint": "accent" },
+        "eqOnButton": { "type": "toggle", "rect": [4, 17, 29, 10],
+          "sprite": { "sheet": "chrome", "rect": [100, 126, 29, 10], "tint": "accent" },
+          "hover":  { "sheet": "chrome", "rect": [100, 137, 29, 10], "tint": "accent" },
+          "active": { "sheet": "chrome", "rect": [100, 148, 29, 10], "tint": "accent" },
           "on": {
-            "sprite": { "sheet": "chrome", "rect": [100, 159, 60, 10], "tint": "accent" },
-            "hover":  { "sheet": "chrome", "rect": [100, 170, 60, 10], "tint": "accent" },
-            "active": { "sheet": "chrome", "rect": [100, 181, 60, 10], "tint": "accent" }
+            "sprite": { "sheet": "chrome", "rect": [100, 159, 29, 10], "tint": "accent" },
+            "hover":  { "sheet": "chrome", "rect": [100, 170, 29, 10], "tint": "accent" },
+            "active": { "sheet": "chrome", "rect": [100, 181, 29, 10], "tint": "accent" }
           },
           "action": "eqOn", "bind": "eqOn", "when": "on" },
 
-        "eqOnLabel": { "type": "text", "rect": [4, 17, 60, 10], "font": "tag", "value": "EQ {}", "bind": "eqOn",
+        "eqOnLabel": { "type": "text", "rect": [4, 17, 29, 10], "font": "tag", "value": "{}", "bind": "eqOn",
           "align": "center", "tint": "text", "opacity": 0.55,
           "lit": { "bind": "eqOn", "when": "on", "tint": "accent", "opacity": 1 } },
+
+        "eqAutoButton": { "type": "toggle", "rect": [35, 17, 29, 10],
+          "sprite": { "sheet": "chrome", "rect": [131, 126, 29, 10], "tint": "accent" },
+          "hover":  { "sheet": "chrome", "rect": [131, 137, 29, 10], "tint": "accent" },
+          "active": { "sheet": "chrome", "rect": [131, 148, 29, 10], "tint": "accent" },
+          "on": {
+            "sprite": { "sheet": "chrome", "rect": [131, 159, 29, 10], "tint": "accent" },
+            "hover":  { "sheet": "chrome", "rect": [131, 170, 29, 10], "tint": "accent" },
+            "active": { "sheet": "chrome", "rect": [131, 181, 29, 10], "tint": "accent" }
+          },
+          "action": "eqAuto", "bind": "eqAuto", "when": "on" },
+
+        "eqAutoLabel": { "type": "text", "rect": [35, 17, 29, 10], "font": "tag", "value": "AUTO", "bind": "eqAuto",
+          "align": "center", "tint": "text", "opacity": 0.55,
+          "lit": { "bind": "eqAuto", "when": "on", "tint": "accent", "opacity": 1 } },
 
         "eqPresetWell": { "type": "image", "rect": [4, 29, 60, 11],
           "sprite": { "sheet": "chrome", "rect": [10, 0, 4, 4], "tint": "surface" } },

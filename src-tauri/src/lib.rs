@@ -1691,6 +1691,35 @@ fn delete_eq_preset(app: AppHandle, id: i64) -> Result<(), db::DbError> {
     eq_presets::delete(&conn, id)
 }
 
+/// A track's own EQ, if it keeps one (#121, D178): what AUTO plays it with.
+#[tauri::command]
+fn track_eq(app: AppHandle, id: i64) -> Result<Option<eq_presets::Preset>, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::for_track(&conn, id)
+}
+
+/// Keep this EQ as the track's own: FOR THIS TRACK in the preset menu.
+#[tauri::command]
+fn set_track_eq(
+    app: AppHandle,
+    id: i64,
+    preamp: f64,
+    bands: Vec<f64>,
+) -> Result<eq_presets::Preset, db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::set_for_track(&conn, id, preamp, &bands)
+}
+
+/// Forget a track's own EQ: NOT FOR THIS TRACK.
+#[tauri::command]
+fn clear_track_eq(app: AppHandle, id: i64) -> Result<(), db::DbError> {
+    let state = app.state::<Db>();
+    let conn = state.0.lock().unwrap();
+    eq_presets::clear_for_track(&conn, id)
+}
+
 /// Every preset in the `.eqf` files the person picked (D31). Read here, not
 /// over the asset protocol: a preset file lives wherever they keep it.
 #[tauri::command]
@@ -2127,6 +2156,9 @@ pub fn run() {
             eq_presets,
             save_eq_preset,
             delete_eq_preset,
+            track_eq,
+            set_track_eq,
+            clear_track_eq,
             import_eqf,
             import_skin,
             start_template,
