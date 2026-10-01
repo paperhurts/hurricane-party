@@ -542,6 +542,11 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
         handles.push(platform::handle_of(&win));
         let p = win.outer_position()?;
         let s = win.outer_size()?;
+        // spike-linux.md stage 0: what the OS reports right after the set.
+        eprintln!(
+            "spike: {id:?} reads {}x{} at {},{} right after setting",
+            s.width, s.height, p.x, p.y
+        );
         layout.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
     }
 
