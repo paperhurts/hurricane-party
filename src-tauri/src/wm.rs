@@ -228,6 +228,9 @@ pub struct WmState {
     pub monitors: Vec<MonitorInfo>,
     /// Set for the duration of a title-bar drag.
     pub drag: Option<DragState>,
+    /// Where the cursor was when a title bar was pressed, for the drag that
+    /// may follow to measure from (spike-linux.md stage 1).
+    pub pressed_at: Option<(Px, Px)>,
     /// Set for the duration of a splitter drag on a seam.
     pub splitter: Option<SplitterState>,
     /// Which window last took focus, so a window that mounts late can be told
@@ -885,11 +888,23 @@ pub fn drag_start(app: &AppHandle, id: WindowId) {
     let mut s = state.0.lock().unwrap();
     let moving = s.graph.component(id);
     let origin_layout = s.layout.clone();
+    // The drag starts on the first pointermove, so the cursor has already
+    // left the press by the time this runs; measuring from here would leave
+    // the group that far behind the pointer for the whole drag (up to 24 px on
+    // a flick, spike-linux.md stage 1). The press is the true origin.
+    let origin_cursor = s.pressed_at.take().unwrap_or(cursor);
     s.drag = Some(DragState {
         moving,
         origin_layout,
-        origin_cursor: cursor,
+        origin_cursor,
     });
+}
+
+/// A title bar was pressed: note where the cursor is, for the drag that may
+/// follow. No capture and no state beyond this, so a click stays a click.
+pub fn press(app: &AppHandle) {
+    let cursor = platform::platform().cursor_pos();
+    app.state::<Wm>().0.lock().unwrap().pressed_at = Some(cursor);
 }
 
 /// One drag frame, driven by the webview pointermove that the compositor has

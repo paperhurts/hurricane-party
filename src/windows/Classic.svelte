@@ -444,6 +444,8 @@
       toggleShade();
       return;
     }
+    // The drag measures from the press, not from the first move it waits for.
+    if (e.button === 0) invoke("wm_press");
     arm(e, () => {
       gesture = "move";
       invoke("wm_drag_start", { label });

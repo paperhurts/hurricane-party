@@ -848,6 +848,12 @@ fn wm_drag_start(app: AppHandle, label: String) {
     }
 }
 
+/// A title bar was pressed; the drag, if one follows, measures from here.
+#[tauri::command]
+fn wm_press(app: AppHandle) {
+    wm::press(&app);
+}
+
 /// One drag frame. The webview coalesces pointermove to one per display frame,
 /// so this is called at roughly refresh rate and has to stay cheap.
 #[tauri::command]
@@ -2188,6 +2194,7 @@ pub fn run() {
             viz_frame,
             viz_demand,
             wm_drag_start,
+            wm_press,
             wm_drag_move,
             wm_drag_end,
             wm_focus,
