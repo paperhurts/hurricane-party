@@ -896,6 +896,13 @@ pub fn drag_start(app: &AppHandle, id: WindowId) {
 /// already coalesced to one per display frame (O15).
 pub fn drag_move(app: &AppHandle) {
     let cursor = platform::platform().cursor_pos();
+    // spike-linux.md stage 1: when each move reaches Rust, against the wall
+    // clock the drag harness stamps its input and its observations with.
+    let us = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0);
+    eprintln!("spike-drag {us} {} {}", cursor.0, cursor.1);
 
     let (layout, moving) = {
         let state = app.state::<Wm>();
@@ -979,6 +986,12 @@ pub fn resync_spans(graph: &mut WindowGraph, layout: &Layout) {
 /// End a drag: form whatever bonds the final position earned, then re-apply the
 /// ownership topology so the new group shape is real in the z-order too.
 pub fn drag_end(app: &AppHandle) {
+    // The webview drops a pointermove while the last one is still in flight
+    // (Classic.svelte's `frame`), so the final position can arrive only as the
+    // release. One last move from the real cursor puts the group where the
+    // pointer let go; a move is computed from the drag's origin, so a repeat
+    // costs nothing (spike-linux.md stage 1: up to 24 px short without it).
+    drag_move(app);
     let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
