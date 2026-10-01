@@ -504,21 +504,28 @@ pub fn show_classic_windows(app: &AppHandle) -> tauri::Result<()> {
 /// landed from where it was put (the set/read round trip), take the OS's word
 /// for the layout, and drop any bond it does not bear out.
 fn confirm_layout(app: &AppHandle) {
+    // Settled is three reads in a row that agree: X moves a window after it
+    // maps, so the first answer can be the compositor's placement, not ours.
     let started = std::time::Instant::now();
+    let (mut last, mut agreeing) = (Layout::new(), 0);
     let read = loop {
         let mut read = Layout::new();
         for id in CLASSIC {
             if let Some(win) = app.get_webview_window(label_of(id)) {
-                if let Ok((p, s)) = platform::rect_of(&win) {
-                    if s.width > 0 && s.height > 0 {
-                        read.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
-                    }
+                if let Some((p, s)) = platform::rect_of(&win) {
+                    read.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
                 }
             }
         }
-        if read.len() == CLASSIC.len() || started.elapsed().as_millis() > 2000 {
+        agreeing = if read.len() == CLASSIC.len() && read == last {
+            agreeing + 1
+        } else {
+            0
+        };
+        if agreeing >= 2 || started.elapsed().as_millis() > 2000 {
             break read;
         }
+        last = read;
         std::thread::sleep(std::time::Duration::from_millis(16));
     };
     let plan = {
@@ -610,11 +617,10 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
             continue;
         };
         handles.push(platform::handle_of(&win));
-        let (p, s) = platform::rect_of(&win)?;
-        if s.width == 0 || s.height == 0 {
+        let Some((p, s)) = platform::rect_of(&win) else {
             unanswered = true;
             continue;
-        }
+        };
         layout.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
     }
 

@@ -288,18 +288,25 @@ pub fn hold_size(_w: &tauri::WebviewWindow, _width: u32, _height: u32) {}
 /// even for an undecorated window (WSLg's Weston claims 38/38/59/38), so the
 /// position set never reads back (spike-linux.md, stage 0). On Windows an
 /// undecorated window's outer rect is its own.
+///
+/// None when the OS has no answer yet. X keeps no geometry for a window that
+/// is not mapped (GTK reports tao's default 800x600 at 0,0 for one), whereas a
+/// hidden window on Windows has its real rect.
 #[cfg(target_os = "linux")]
 pub fn rect_of(
     w: &tauri::WebviewWindow,
-) -> tauri::Result<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
-    Ok((w.inner_position()?, w.inner_size()?))
+) -> Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    if !w.is_visible().ok()? {
+        return None;
+    }
+    Some((w.inner_position().ok()?, w.inner_size().ok()?))
 }
 
 #[cfg(not(target_os = "linux"))]
 pub fn rect_of(
     w: &tauri::WebviewWindow,
-) -> tauri::Result<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
-    Ok((w.outer_position()?, w.outer_size()?))
+) -> Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    Some((w.outer_position().ok()?, w.outer_size().ok()?))
 }
 
 #[cfg(windows)]
