@@ -531,9 +531,24 @@ fn confirm_layout(app: &AppHandle) {
         last = read;
         std::thread::sleep(std::time::Duration::from_millis(16));
     };
+    // spike-linux.md stage 2: a window has no X id until GTK realizes it,
+    // which for the classic three is the show, so register's are re-read here.
+    let handles: Vec<NativeWindow> = CLASSIC
+        .iter()
+        .map(|id| {
+            app.get_webview_window(label_of(*id))
+                .map(|w| platform::handle_of(&w))
+                .unwrap_or(NativeWindow::NONE)
+        })
+        .collect();
+    eprintln!("spike: X ids {handles:?}, SPIKE_Z={:?}", std::env::var("SPIKE_Z").ok());
     let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
+        s.handles = handles;
+        for m in &s.monitors {
+            eprintln!("spike: monitor {:?} work {:?} scale {}", m.rect, m.work, m.scale);
+        }
         for (id, got) in read.iter() {
             if let Some(want) = s.layout.get(id) {
                 eprintln!(
@@ -904,6 +919,7 @@ pub fn drag_start(app: &AppHandle, id: WindowId) {
 /// follow. No capture and no state beyond this, so a click stays a click.
 pub fn press(app: &AppHandle) {
     let cursor = platform::platform().cursor_pos();
+    eprintln!("spike-press {} {}", cursor.0, cursor.1);
     app.state::<Wm>().0.lock().unwrap().pressed_at = Some(cursor);
 }
 
@@ -968,6 +984,14 @@ pub fn drag_move(app: &AppHandle) {
         // the magnet, so a snap cannot put one out of reach either.
         let mut layout = layout;
         let (cx, cy) = reach_clamp(&layout, &drag.moving, &s.monitors, s.zoom());
+        eprintln!(
+            "spike-frame total {:?} origin {:?} snapped {:?} clamp {:?} screen {:?}",
+            total,
+            drag.origin_layout.get(&MAIN).map(|r| (r.x, r.y)),
+            layout.get(&MAIN).map(|r| (r.x, r.y)),
+            (cx, cy),
+            screen
+        );
         if (cx, cy) != (0, 0) {
             bond::translate_group(&mut layout, &drag.moving, cx, cy);
         }

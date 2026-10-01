@@ -33,6 +33,25 @@ def origin():
     X.XTranslateCoordinates(d, xid, root, 0, 0, ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(c))
     return rx.value, ry.value
 
+X.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong] + [ctypes.POINTER(ctypes.c_ulong)] * 2 + \
+                           [ctypes.POINTER(ctypes.c_int)] * 4 + [ctypes.POINTER(ctypes.c_uint)]
+
+def pointer():
+    a, b = ctypes.c_ulong(), ctypes.c_ulong()
+    rx, ry, wx, wy, m = ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_uint()
+    X.XQueryPointer(d, root, a, b, rx, ry, wx, wy, m)
+    return rx.value, ry.value
+
+def settle(x, y, timeout=2.0):
+    """Wait until X reports the pointer where it was put. Under XWayland with
+    -enable-ei-portal (GNOME), XTEST goes through the compositor and the first
+    events of a burst can take a few hundred ms to come back; a press before
+    then lands where the pointer was, not where it was sent."""
+    end = time.perf_counter() + timeout
+    while pointer() != (int(round(x)), int(round(y))) and time.perf_counter() < end:
+        time.sleep(0.005)
+    time.sleep(0.1)
+
 INJ = []
 def move(x, y):
     T.XTestFakeMotionEvent(d, -1, int(round(x)), int(round(y)), 0); X.XFlush(d)
@@ -46,7 +65,7 @@ def run(speed, dist=600, step_ms=8):
     INJ.clear(); OBS.clear(); t_start = time.time_ns() // 1000
     wx0, wy0 = origin()
     gx, gy = wx0 + 60, wy0 + 6          # the title strip, left of the buttons
-    move(gx, gy); time.sleep(0.15); button(True); time.sleep(0.15)
+    move(gx, gy); settle(gx, gy); button(True); time.sleep(0.15)
     samples = []                         # (t, cursor dx, window dx)
     t0 = time.perf_counter()
     path = [(+1, dist), (-1, dist)]

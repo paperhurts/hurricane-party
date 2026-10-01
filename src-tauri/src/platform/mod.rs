@@ -254,7 +254,18 @@ pub fn handle_of(w: &tauri::WebviewWindow) -> NativeWindow {
     }
 }
 
-#[cfg(not(windows))]
+/// On X11 the window's own X id, found by its title (spike-linux.md stage 2),
+/// or NONE for a window GTK has not realized, which is every hidden root.
+#[cfg(target_os = "linux")]
+pub fn handle_of(w: &tauri::WebviewWindow) -> NativeWindow {
+    w.title()
+        .ok()
+        .and_then(|t| x11_impl::find_window(&t))
+        .map(|x| NativeWindow(x as isize))
+        .unwrap_or(NativeWindow::NONE)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn handle_of(_w: &tauri::WebviewWindow) -> NativeWindow {
     NativeWindow::NONE
 }
