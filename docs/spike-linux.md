@@ -1,6 +1,6 @@
 # The Linux spike (#187)
 
-**Status:** under way. The owner's calls are D181: Linux first, under XWayland, and this spike before any porting.
+**Status:** the first read in WSL is done (stages 0, 1 and 3 pass provisionally, below); the verdict on the laptop is next. The owner's calls are D181: Linux first, under XWayland, and this spike before any porting.
 
 **What it answers:** whether the player on Linux is the same app, with three classic windows that bond, or a reduced one. That is the question v0.0 answered for Windows (D45), asked again of a different window system.
 
@@ -48,4 +48,25 @@ v0.0's stages, in v0.0's order, with v0.0's pass criteria (`spike-v0.0.md`). Eac
 
 ## Findings
 
-Not yet run.
+### The first read, in WSL (2026-10-01)
+
+Ubuntu 24.04 in WSL2, through WSLg: Weston's window manager, XWayland, one 2560×1080 screen at 96 dpi (scale 1.0). WebKitGTK 2.52.6, GTK 3.24.41. Input by XTEST. The code is on `spike/linux`, with the scripts in `tools/spike-linux/`.
+
+- **It builds as it is.** The app compiles for Linux on the stub, with warnings as errors, and WebKitGTK draws the classic chrome correctly.
+- **Stage 0: a provisional pass, after three fixes.**
+  1. **GTK3 holds a non-resizable window to at least 200 px tall**, so the classic windows came up 275×200 and overlapped. A plain X window, or a resizable GTK one, gets 275×116. A size request on the window itself fixes it (`platform::hold_size`). Making the windows resizable does not: on Linux, tauri-runtime-wry starts a native resize from any press within 5 px of a resizable undecorated window's edge, which is the seam. That is D43 again.
+  2. **X keeps no geometry for a window that is not mapped, and answers a move later, not at once.** D58's startup check read 0×0, or tao's default 800×600, and dropped every bond. It now waits until the windows are shown and three reads in a row agree, about 0.6 s at startup.
+  3. **tao's outer geometry adds the window manager's `_NET_FRAME_EXTENTS`.** Weston claims 38, 38, 59 and 38 px even for an undecorated window, so a position read back 38 and 59 px from where it was set. The engine now reads a window's own rect on Linux (`platform::rect_of`).
+
+  With the three fixes, the round trip closes exactly and the bonds survive. Not tested: any scale but 1.0.
+- **Stage 1: a provisional pass, after a fix that is not Linux's alone.** A drag took its origin from the cursor when `drag_start` ran, which is after the first move. The group trailed the pointer by one input step for the whole drag: 2, 6 and 24 px at 200, 800 and 3000 px/s. It now measures from the press (`wm_press`), and a drag's release makes one last move from the real cursor. Two runs after the fix, against D39:
+
+  | Speed | Excess over floor (≤ 1 px) | Latency (≤ 1.1 frames) |
+  |---|---|---|
+  | 200 px/s | −0.8, −0.6 | 0.79, 0.84 |
+  | 800 px/s | 1.7, −2.6 | 1.22, 0.93 |
+
+  The window ends exactly under the cursor at every speed, with no runaway, and updates arrive at the frame rate (53 to 62 a second). The latency splits into input to Rust, about 4 ms, and Rust to X, 5 to 13 ms (median). The second half is the window manager acknowledging the move, so it is Weston's, and the real desktop has to answer it.
+- **Stage 3, the group move:** held midway, all three windows had moved by exactly the drag. After six round trips of 1,200 px, they were back to the pixel.
+- **Not answerable in WSL:** stage 2, because Windows stacks WSLg's windows, not X; stage 6, because WSLg sees one display; and the scale gate at anything but 1.0. These, and stages 4, 5 and 7 by real input, are for the laptop.
+- **Two fixes are not Linux's alone.** Windows has the same drag origin (smaller, since its IPC is faster) and the same dropped last move. Both belong on `main` whatever the verdict.
