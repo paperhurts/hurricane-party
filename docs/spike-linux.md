@@ -1,6 +1,6 @@
 # The Linux spike (#187)
 
-**Status:** done. Stages 0 to 7 ran on a real GNOME desktop under XWayland, and the verdict is **go**, with four Linux rules for the port (below). The owner's calls are D181: Linux first, under XWayland, and this spike before any porting.
+**Status:** done. Stages 0 to 7 ran on a real GNOME desktop under XWayland, and the verdict is **go** (D182), with four Linux rules for the port (below). The owner's calls are D181: Linux first, under XWayland, and this spike before any porting.
 
 **What it answers:** whether the player on Linux is the same app, with three classic windows that bond, or a reduced one. That is the question v0.0 answered for Windows (D45), asked again of a different window system.
 
