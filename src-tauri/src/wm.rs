@@ -442,6 +442,7 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
         // size, so size-then-position leaves the window 1.5x too big.
         let r = seeded[id];
         win.set_position(PhysicalPosition::new(r.x, r.y))?;
+        platform::hold_size(&win, r.w as u32, r.h as u32);
         win.set_size(PhysicalSize::new(r.w as u32, r.h as u32))?;
         // #47: the webview's own zoom factor, not a CSS zoom. The page lays
         // out at 275 x 116 as always and the browser renders it doubled, so
@@ -660,6 +661,7 @@ pub fn push_to_os(app: &AppHandle, layout: &Layout, ids: &[WindowId]) {
             continue;
         };
         let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
+        platform::hold_size(&win, r.w as u32, r.h as u32);
         let _ = win.set_size(PhysicalSize::new(r.w as u32, r.h as u32));
     }
 }

@@ -259,11 +259,37 @@ pub fn handle_of(_w: &tauri::WebviewWindow) -> NativeWindow {
     NativeWindow::NONE
 }
 
+/// GTK3 holds a non-resizable window to at least 200 px tall unless the
+/// window itself asks for its size (spike-linux.md, stage 0). The classic
+/// windows stay non-resizable on Linux too: there tauri-runtime-wry starts a
+/// native resize from any press within 5 px of a resizable undecorated
+/// window's edge, which is the seam (D43). So every size the app sets is also
+/// asked for here, before the resize, on the main thread GTK needs.
+#[cfg(target_os = "linux")]
+pub fn hold_size(w: &tauri::WebviewWindow, width: u32, height: u32) {
+    use gtk::prelude::WidgetExt;
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let logical = |px: u32| (px as f64 / scale).round() as i32;
+    let (lw, lh) = (logical(width), logical(height));
+    let win = w.clone();
+    let _ = w.run_on_main_thread(move || {
+        if let Ok(g) = win.gtk_window() {
+            g.set_size_request(lw, lh);
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn hold_size(_w: &tauri::WebviewWindow, _width: u32, _height: u32) {}
+
 #[cfg(windows)]
 mod windows_impl;
 
 #[cfg(not(windows))]
 mod stub;
+
+#[cfg(target_os = "linux")]
+mod x11_impl;
 
 /// The one place the platform is chosen.
 #[cfg(windows)]
@@ -271,7 +297,12 @@ pub fn platform() -> &'static dyn WindowPlatform {
     &windows_impl::Win32Platform
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn platform() -> &'static dyn WindowPlatform {
+    &x11_impl::X11Platform
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn platform() -> &'static dyn WindowPlatform {
     &stub::StubPlatform
 }
