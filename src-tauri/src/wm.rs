@@ -492,7 +492,72 @@ pub fn show_classic_windows(app: &AppHandle) -> tauri::Result<()> {
             win.show()?;
         }
     }
+    // spike-linux.md stage 0: on X11 the windows only now get geometry, and
+    // asynchronously, so D58's check runs once they have it. Off the main
+    // thread, which has to keep turning for the answer to arrive.
+    let app = app.clone();
+    std::thread::spawn(move || confirm_layout(&app));
     Ok(())
+}
+
+/// D58, once the OS can answer: read the windows back, report how far each
+/// landed from where it was put (the set/read round trip), take the OS's word
+/// for the layout, and drop any bond it does not bear out.
+fn confirm_layout(app: &AppHandle) {
+    let started = std::time::Instant::now();
+    let read = loop {
+        let mut read = Layout::new();
+        for id in CLASSIC {
+            if let Some(win) = app.get_webview_window(label_of(id)) {
+                if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) {
+                    if s.width > 0 && s.height > 0 {
+                        read.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
+                    }
+                }
+            }
+        }
+        if read.len() == CLASSIC.len() || started.elapsed().as_millis() > 2000 {
+            break read;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    };
+    let plan = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        for (id, got) in read.iter() {
+            if let Some(want) = s.layout.get(id) {
+                eprintln!(
+                    "spike: {id:?} put {}x{} at {},{}, reads {}x{} at {},{} after {} ms",
+                    want.w,
+                    want.h,
+                    want.x,
+                    want.y,
+                    got.w,
+                    got.h,
+                    got.x,
+                    got.y,
+                    started.elapsed().as_millis()
+                );
+            }
+            s.layout.insert(*id, *got);
+        }
+        let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
+            .into_iter()
+            .map(|(b, why)| {
+                eprintln!(
+                    "wm: dropping bond {:?}-{:?}, the OS disagrees: {why}",
+                    b.a, b.b
+                );
+                b.pair()
+            })
+            .collect();
+        for (a, b) in stale {
+            s.graph.break_bond(a, b);
+        }
+        plan_ownership(&s, Some(MAIN))
+    };
+    apply_ownership(&plan);
+    emit_state(app);
 }
 
 /// Read the windows back out of the OS and seed the state from what is actually
@@ -535,6 +600,11 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
 
     let mut handles = Vec::with_capacity(CLASSIC.len());
     let mut layout = Layout::new();
+    // spike-linux.md stage 0: a GTK window built hidden has no geometry until
+    // it is mapped, and X answers a move later, not now. A window that reads
+    // 0x0 has not been answered for yet, so D58's check waits for
+    // `confirm_layout` after the show rather than judging the bonds by nothing.
+    let mut unanswered = false;
     for id in CLASSIC {
         let Some(win) = app.get_webview_window(label_of(id)) else {
             continue;
@@ -542,11 +612,10 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
         handles.push(platform::handle_of(&win));
         let p = win.outer_position()?;
         let s = win.outer_size()?;
-        // spike-linux.md stage 0: what the OS reports right after the set.
-        eprintln!(
-            "spike: {id:?} reads {}x{} at {},{} right after setting",
-            s.width, s.height, p.x, p.y
-        );
+        if s.width == 0 || s.height == 0 {
+            unanswered = true;
+            continue;
+        }
         layout.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
     }
 
@@ -568,8 +637,21 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
         s.monitors = monitors;
         s.handles = handles;
         s.roots = roots;
+        if unanswered {
+            eprintln!("spike: the OS has no geometry yet; D58's check waits for the show");
+            for id in CLASSIC {
+                if let (None, Some(r)) = (layout.get(&id), s.layout.get(&id)) {
+                    layout.insert(id, *r);
+                }
+            }
+        }
         s.layout = layout;
-        let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
+        let violations = if unanswered {
+            Vec::new()
+        } else {
+            bond::violations(&s.graph, &s.layout)
+        };
+        let stale: Vec<(WindowId, WindowId)> = violations
             .into_iter()
             .map(|(b, why)| {
                 eprintln!(
