@@ -509,7 +509,7 @@ fn confirm_layout(app: &AppHandle) {
         let mut read = Layout::new();
         for id in CLASSIC {
             if let Some(win) = app.get_webview_window(label_of(id)) {
-                if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) {
+                if let Ok((p, s)) = platform::rect_of(&win) {
                     if s.width > 0 && s.height > 0 {
                         read.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
                     }
@@ -610,8 +610,7 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
             continue;
         };
         handles.push(platform::handle_of(&win));
-        let p = win.outer_position()?;
-        let s = win.outer_size()?;
+        let (p, s) = platform::rect_of(&win)?;
         if s.width == 0 || s.height == 0 {
             unanswered = true;
             continue;

@@ -282,6 +282,26 @@ pub fn hold_size(w: &tauri::WebviewWindow, width: u32, height: u32) {
 #[cfg(not(target_os = "linux"))]
 pub fn hold_size(_w: &tauri::WebviewWindow, _width: u32, _height: u32) {}
 
+/// A classic window's own rect, in physical pixels: where `set_position` puts
+/// it and what `set_size` makes it. On X11 tao's outer geometry adds the
+/// window manager's `_NET_FRAME_EXTENTS`, which a window manager may claim
+/// even for an undecorated window (WSLg's Weston claims 38/38/59/38), so the
+/// position set never reads back (spike-linux.md, stage 0). On Windows an
+/// undecorated window's outer rect is its own.
+#[cfg(target_os = "linux")]
+pub fn rect_of(
+    w: &tauri::WebviewWindow,
+) -> tauri::Result<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    Ok((w.inner_position()?, w.inner_size()?))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn rect_of(
+    w: &tauri::WebviewWindow,
+) -> tauri::Result<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    Ok((w.outer_position()?, w.outer_size()?))
+}
+
 #[cfg(windows)]
 mod windows_impl;
 
