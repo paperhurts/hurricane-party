@@ -14,7 +14,7 @@ The download carries three programs beside hurricane-party itself. hurricane-par
 
 - FFmpeg at the commit this build was made from: <https://github.com/FFmpeg/FFmpeg/tree/65a3870462>
 - The scripts that built it, which name every library in it and the version of each: <https://github.com/yt-dlp/FFmpeg-Builds/tree/1c5094a1995b3a1cff6d8696d339bfb304384716>
-- The release the binary came from: <https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-10-01-19-27>, which yt-dlp removes after a few weeks; the same archives are kept at <https://github.com/paperhurts/hurricane-party/releases/tag/sidecars-2026-10> (D183)
+- The release the binary came from: <https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-10-01-19-27>, which yt-dlp removes after a few weeks; the same archives are kept at <https://github.com/paperhurts/hurricane-party/releases/tag/sidecars-2026-10> (D184)
 - `ffmpeg -version` prints the build's full configuration.
 
 **yt-dlp**: <https://github.com/yt-dlp/yt-dlp/tree/2026.08.19>

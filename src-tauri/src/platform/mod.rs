@@ -132,7 +132,7 @@ pub trait WindowPlatform: Send + Sync {
         true
     }
 
-    /// D184: must the player's media come over loopback HTTP rather than the
+    /// D185: must the player's media come over loopback HTTP rather than the
     /// asset protocol? WebKitGTK plays through GStreamer, which cannot fetch
     /// from a custom scheme; WebView2 can.
     fn media_over_loopback(&self) -> bool {

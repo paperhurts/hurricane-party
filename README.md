@@ -40,7 +40,7 @@ only by merging a pull request on GitHub.
 Versions are **pinned deliberately** (O11) — a surprise yt-dlp bump the day before a
 storm is the wrong failure. Bump them on purpose, test, then commit the new pin. The
 pinned files come from this repo's own `sidecars-*` release, each checked by SHA-256,
-because upstream prunes its dated builds (D183).
+because upstream prunes its dated builds (D184).
 
 On Linux (#187, the port under way), the same with a shell script, and the app run
 under XWayland (D181):

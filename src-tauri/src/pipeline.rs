@@ -408,7 +408,7 @@ fn bundled_ffmpeg() -> Option<PathBuf> {
 /// Path to the bundled deno, for the same reason (D46): yt-dlp looks for its
 /// JS runtime on PATH. On Windows it also found the copy beside it; on Linux
 /// it does not, and says "JS runtimes: none", the quiet loss of formats D46
-/// is about (found running the pinned build, D183).
+/// is about (found running the pinned build, D184).
 fn bundled_deno() -> Option<PathBuf> {
     bundled("deno")
 }

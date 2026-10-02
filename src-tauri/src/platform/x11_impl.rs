@@ -272,7 +272,7 @@ impl WindowPlatform for X11Platform {
         false
     }
 
-    /// WebKitGTK's GStreamer cannot play from the asset protocol (D184).
+    /// WebKitGTK's GStreamer cannot play from the asset protocol (D185).
     fn media_over_loopback(&self) -> bool {
         true
     }

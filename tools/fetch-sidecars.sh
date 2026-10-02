@@ -1,6 +1,6 @@
 #!/bin/sh
 # fetch-sidecars.sh: populate src-tauri/binaries/ for Tauri's externalBin, on
-# Linux. The counterpart of fetch-sidecars.ps1 (D183): the same three
+# Linux. The counterpart of fetch-sidecars.ps1 (D184): the same three
 # sidecars, the same pins, from the same sidecars release, each archive and
 # each program checked against its SHA-256. Bump both scripts together; the
 # steps are at the top of fetch-sidecars.ps1.

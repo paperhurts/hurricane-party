@@ -1,5 +1,5 @@
 //! The loopback media server, where the webview cannot play from the asset
-//! protocol (D184).
+//! protocol (D185).
 //!
 //! WebKitGTK plays `<audio>` and `<video>` through GStreamer, and GStreamer
 //! fetches only over http(s), `file:` and `blob:`: a custom scheme like

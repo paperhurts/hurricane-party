@@ -14,7 +14,7 @@
 
     Versions are PINNED (O11). A surprise yt-dlp bump the day before a storm is the
     wrong failure. Every file comes from this project's own sidecars release, where
-    the exact archives are kept (D183): yt-dlp prunes its dated ffmpeg autobuilds
+    the exact archives are kept (D184): yt-dlp prunes its dated ffmpeg autobuilds
     after a few weeks, which is how the first pin went 404. Each archive is checked
     against its SHA-256 and each program against its own, so a machine holding any
     other copy fetches this one without -Force.
@@ -31,7 +31,7 @@
 #>
 [CmdletBinding()]
 param(
-    # The sidecars release (D183) and what it holds: yt-dlp 2026.08.19, deno
+    # The sidecars release (D184) and what it holds: yt-dlp 2026.08.19, deno
     # 2.6.4, and yt-dlp's ffmpeg autobuild-2026-10-01-19-27.
     [string]$Mirror       = "https://github.com/paperhurts/hurricane-party/releases/download/sidecars-2026-10",
     [string]$YtDlpSha     = "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",

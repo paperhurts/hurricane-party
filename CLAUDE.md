@@ -96,7 +96,7 @@ Any session, any model. There is no planning session and no execution session; a
 ## Conventions
 
 - Platform-specific calls (`windows-rs`, HWND owner tricks) go behind a trait. Don't scatter `#[cfg(windows)]`
-- Scripts are Windows PowerShell 5.1, run as `powershell -NoProfile -ExecutionPolicy Bypass -File`. `pwsh` is not installed on the dev machine and nothing may assume it. A script Linux needs too gets a POSIX `sh` twin beside it, kept in step (D183: `fetch-sidecars.sh`)
+- Scripts are Windows PowerShell 5.1, run as `powershell -NoProfile -ExecutionPolicy Bypass -File`. `pwsh` is not installed on the dev machine and nothing may assume it. A script Linux needs too gets a POSIX `sh` twin beside it, kept in step (D184: `fetch-sidecars.sh`)
 - Snap and bond math is in **physical pixels**, converted at the boundaries. Mixing logical and physical here produces bugs that only appear on a second monitor
 - Parse yt-dlp with `--progress-template`. Never scrape the human-readable progress bar
 - Tauri events: a `listen()` with no target receives **every** emit, including an `emitTo` aimed at another window. Any event that more than one window listens to is listened to with `{ target: { kind: "WebviewWindow", label } }`. Main once wore the playlist's seam edges because of this
