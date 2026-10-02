@@ -2,7 +2,8 @@
 //! painted, turned into a pack. The template's `companion.json` says
 //! `"painted": true`; the rest is read off the sheet itself:
 //!
-//! - one row per state, in the format's order, eight cells a row;
+//! - one row per state, in the format's order, up to 32 cells a row (the
+//!   template is 32 across, and one written before D183 is 8);
 //! - a cell counts once anything is painted in it, and a row's frames are its
 //!   painted cells from the left, so a gap is a mistake worth saying;
 //! - idle's first cell is the one cell a companion cannot go without.
@@ -10,12 +11,24 @@
 //! Painted at 64 px a cell (true pixel art, as Aseprite draws it), the sheet
 //! is the 1x and is doubled pixel for pixel for the `@2x` twin (D160), which
 //! stays crisp. Painted at 128 px, it is the twin, and the 1x is its 2x2
-//! average. The timings are the format's, the ones `tools/sheet.ps1` writes.
+//! average. The timings are the format's, the ones `tools/sheet.ps1` writes,
+//! and so is the layout: as wide as the longest row and never narrower than
+//! eight, whatever width it was painted on.
 
 /// The format's vocabulary, in the sheet's row order (`purricane.md`).
 pub const STATES: [&str; 7] = ["idle", "sleep", "dance", "walk", "startle", "pet", "carry"];
-pub const COLUMNS: u32 = 8;
+/// A finished sheet is never narrower than this, the layout every pack had
+/// before D183, so a pack of eight or fewer poses a state comes out as it did.
+pub const MIN_COLUMNS: u32 = 8;
+/// The most poses a state holds: 32 cells of 128 px, the twin, is 4096 px.
+pub const MAX_COLUMNS: u32 = 32;
 pub const CELL: u32 = 64;
+
+/// How wide a finished sheet is, in cells: the longest state, and never
+/// narrower than `MIN_COLUMNS`.
+pub(crate) fn columns_for(counts: &[u32]) -> u32 {
+    counts.iter().copied().fold(MIN_COLUMNS, u32::max)
+}
 
 /// Whether a manifest is a painted template waiting to be read.
 pub fn is_painted(json: &str) -> bool {
@@ -40,25 +53,36 @@ pub fn finish(json: &str, sheet_png: &[u8]) -> Result<Vec<(String, Vec<u8>)>, St
         .unwrap_or_else(|| "My companion".into());
     let sheet = decode(sheet_png)?;
     let rows = STATES.len() as u32;
-    let (one, two) = if (sheet.w, sheet.h) == (COLUMNS * CELL, rows * CELL) {
-        let two = double(&sheet);
-        (sheet, two)
-    } else if (sheet.w, sheet.h) == (2 * COLUMNS * CELL, 2 * rows * CELL) {
-        let one = halve(&sheet);
-        (one, sheet)
-    } else {
+    // The height says the size it was painted at, and the width how many
+    // cells a row has: 32 on the template, 8 on one written before D183.
+    let scale = [1, 2].into_iter().find(|s| sheet.h == s * rows * CELL);
+    let across = scale.map(|s| (sheet.w / (s * CELL), sheet.w % (s * CELL)));
+    if !matches!(across, Some((1..=MAX_COLUMNS, 0))) {
         return Err(format!(
-            "the painted sheet is {}x{}; the template's is {}x{} (64 px cells), or {}x{} painted at twice the size",
+            "the painted sheet is {}x{}; the template's is {}x{}, {MAX_COLUMNS} cells of {CELL} px across (any number up to {MAX_COLUMNS} will do), or {}x{} painted at twice the size",
             sheet.w,
             sheet.h,
-            COLUMNS * CELL,
+            MAX_COLUMNS * CELL,
             rows * CELL,
-            2 * COLUMNS * CELL,
+            2 * MAX_COLUMNS * CELL,
             2 * rows * CELL
         ));
+    }
+    let (one, painted_twin) = if scale == Some(1) {
+        (sheet, None)
+    } else {
+        (halve(&sheet), Some(sheet))
     };
     let counts = count_cells(&one)?;
-    let manifest = manifest(&name, &counts);
+    // Laid out as wide as the longest row, so the same painting comes out the
+    // same pack on a template of any width, and an 8-wide one as it always did.
+    let columns = columns_for(&counts);
+    let one = fit(one, columns * CELL);
+    let two = match painted_twin {
+        Some(twin) => fit(twin, 2 * columns * CELL),
+        None => double(&one),
+    };
+    let manifest = manifest(&name, &counts, columns);
     Ok(vec![
         ("companion.json".into(), manifest.into_bytes()),
         ("sheet.png".into(), encode(&one)?),
@@ -72,7 +96,7 @@ pub fn finish(json: &str, sheet_png: &[u8]) -> Result<Vec<(String, Vec<u8>)>, St
 fn count_cells(sheet: &Image) -> Result<Vec<u32>, String> {
     let mut counts = Vec::new();
     for (r, state) in STATES.iter().enumerate() {
-        let painted: Vec<bool> = (0..COLUMNS)
+        let painted: Vec<bool> = (0..sheet.w / CELL)
             .map(|c| cell_painted(sheet, c, r as u32))
             .collect();
         let n = painted.iter().take_while(|p| **p).count() as u32;
@@ -97,16 +121,17 @@ fn cell_painted(sheet: &Image, c: u32, r: u32) -> bool {
         .any(|y| (x0..x0 + CELL).any(|x| sheet.px[((y * sheet.w + x) * 4 + 3) as usize] > 8))
 }
 
-/// The manifest, with the format's timings. Idle's first frame is the pose
-/// and each later one a moment in it, as `tools/sheet.ps1` writes it: the
-/// pose held eleven frames, the moment once (a blink every 3 s at 4 fps).
-pub(crate) fn manifest(name: &str, counts: &[u32]) -> String {
+/// The manifest, with the format's timings, for a sheet `columns` cells wide.
+/// Idle's first frame is the pose and each later one a moment in it, as
+/// `tools/sheet.ps1` writes it: the pose held eleven frames, the moment once
+/// (a blink every 3 s at 4 fps).
+pub(crate) fn manifest(name: &str, counts: &[u32], columns: u32) -> String {
     let mut states = serde_json::Map::new();
     for (r, (state, &n)) in STATES.iter().zip(counts).enumerate() {
         if n == 0 {
             continue;
         }
-        let first = r as u32 * COLUMNS;
+        let first = r as u32 * columns;
         let mut frames: Vec<u32> = (first..first + n).collect();
         if *state == "idle" && n > 1 {
             frames = frames[1..]
@@ -139,6 +164,21 @@ pub(crate) fn manifest(name: &str, counts: &[u32]) -> String {
         "defaultCount": 1,
     });
     serde_json::to_string_pretty(&m).unwrap_or_default()
+}
+
+/// The same rows cut or widened to `w`: cells past the last painted one are
+/// empty, and a narrower template's missing cells are transparent.
+fn fit(src: Image, w: u32) -> Image {
+    if src.w == w {
+        return src;
+    }
+    let keep = (src.w.min(w) * 4) as usize;
+    let mut px = vec![0u8; (w * src.h * 4) as usize];
+    for (y, row) in px.chunks_exact_mut((w * 4) as usize).enumerate() {
+        let s = y * (src.w * 4) as usize;
+        row[..keep].copy_from_slice(&src.px[s..s + keep]);
+    }
+    Image { w, h: src.h, px }
 }
 
 /// Every pixel twice across and twice down: pixel art stays pixel art.
@@ -244,20 +284,26 @@ pub(crate) fn encode(img: &Image) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
-    /// A template-sized sheet at `scale` (1 or 2), with the given number of
-    /// painted cells per row: each painted cell has one opaque pixel.
+    /// A template from before D183, 8 cells wide, at `scale` (1 or 2).
     fn painted(scale: u32, counts: &[u32; 7]) -> Vec<u8> {
+        painted_on(scale, 8, counts)
+    }
+
+    /// A template `columns` cells wide at `scale` (1 or 2), with the given
+    /// number of painted cells per row: each painted cell has one opaque
+    /// pixel, coloured by where it is.
+    fn painted_on(scale: u32, columns: u32, counts: &[u32; 7]) -> Vec<u8> {
         let cell = CELL * scale;
         let mut img = Image {
-            w: COLUMNS * cell,
+            w: columns * cell,
             h: 7 * cell,
-            px: vec![0; (COLUMNS * cell * 7 * cell * 4) as usize],
+            px: vec![0; (columns * cell * 7 * cell * 4) as usize],
         };
         for (r, &n) in counts.iter().enumerate() {
             for c in 0..n {
                 let (x, y) = (c * cell + cell / 2, r as u32 * cell + cell - 1);
                 let i = ((y * img.w + x) * 4) as usize;
-                img.px[i..i + 4].copy_from_slice(&[200, 100, 50, 255]);
+                img.px[i..i + 4].copy_from_slice(&[200, 100 + c as u8, 50 + r as u8, 255]);
             }
         }
         encode(&img).unwrap()
@@ -364,13 +410,66 @@ mod tests {
     fn no_idle_is_refused_and_a_wrong_size_says_the_right_one() {
         let e = finish(JSON, &painted(1, &[0, 1, 0, 0, 0, 0, 0])).unwrap_err();
         assert!(e.contains("idle"), "{e}");
-        let odd = encode(&Image {
-            w: 100,
-            h: 100,
-            px: vec![0; 40000],
-        })
-        .unwrap();
-        let e = finish(JSON, &odd).unwrap_err();
-        assert!(e.contains("512x448"), "{e}");
+        let blank = |w: u32, h: u32| {
+            encode(&Image {
+                w,
+                h,
+                px: vec![0; (w * h * 4) as usize],
+            })
+            .unwrap()
+        };
+        // Not a template's height; a width that is not whole cells; 33 cells.
+        for (w, h) in [(100, 100), (2048, 450), (2000, 448), (33 * 64, 448)] {
+            let e = finish(JSON, &blank(w, h)).unwrap_err();
+            assert!(
+                e.contains(&format!("{w}x{h}")) && e.contains("2048x448"),
+                "{e}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_32_wide_template_holds_a_20_pose_dance_and_the_pack_is_as_wide_as_it() {
+        for scale in [1, 2] {
+            let files = finish(JSON, &painted_on(scale, 32, &[8, 2, 20, 4, 0, 1, 2])).unwrap();
+            let (one, two) = (decode(&files[1].1).unwrap(), decode(&files[2].1).unwrap());
+            assert_eq!((one.w, one.h), (20 * 64, 448), "scale {scale}");
+            assert_eq!((two.w, two.h), (20 * 128, 896), "scale {scale}");
+            let m = manifest_of(&files);
+            assert_eq!(
+                m["states"]["dance"]["frames"],
+                serde_json::json!((40..60).collect::<Vec<u32>>())
+            );
+            assert_eq!(
+                m["states"]["walk"]["frames"],
+                serde_json::json!([60, 61, 62, 63])
+            );
+            let idle = m["states"]["idle"]["frames"].as_array().unwrap();
+            assert_eq!(
+                idle.len(),
+                7 * 12,
+                "seven moments, each after the pose held"
+            );
+            assert_eq!((idle[0].as_u64(), idle[83].as_u64()), (Some(0), Some(7)));
+            // The 20th dance pose's pixel, at the bottom of row 2, column 19.
+            let at = |x: u32, y: u32| one.px[((y * one.w + x) * 4 + 1) as usize];
+            assert_eq!(at(19 * 64 + 32, 3 * 64 - 1), 100 + 19);
+        }
+    }
+
+    #[test]
+    fn the_same_painting_on_any_width_of_template_is_the_same_pack() {
+        // Eight or fewer a row: the 32-wide template, the 8-wide one from
+        // before D183 and a 5-wide cut-down all come out as the 8-wide always
+        // did, byte for byte.
+        let counts = [3, 2, 8, 4, 2, 1, 2];
+        for scale in [1, 2] {
+            let old = finish(JSON, &painted_on(scale, 8, &counts)).unwrap();
+            let wide = finish(JSON, &painted_on(scale, 32, &counts)).unwrap();
+            assert!(wide == old, "scale {scale}: 32 wide is not the 8-wide pack");
+        }
+        let narrow = finish(JSON, &painted_on(1, 5, &[3, 2, 5, 4, 2, 1, 2])).unwrap();
+        let one = decode(&narrow[1].1).unwrap();
+        assert_eq!((one.w, one.h), (512, 448), "widened to eight cells");
     }
 }

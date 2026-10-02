@@ -13,7 +13,14 @@ import type { Token } from "./skin";
 /** The format's states, in the sheet's row order (purricane.md). */
 export const COMPANION_STATES = ["idle", "sleep", "dance", "walk", "startle", "pet", "carry"] as const;
 export const COMPANION_CELL = 64;
-export const COMPANION_COLUMNS = 8;
+/**
+ * Cells a row: the most poses a state holds (D183). Most rows use two to
+ * four; the import reads however many are painted, and lays the pack out no
+ * wider than its longest row. A template written before D183 is 8 across.
+ */
+export const COMPANION_COLUMNS = 32;
+/** The guide marks the cells off in groups this wide, to count by. */
+const GROUP = 8;
 
 /** How many frames each state wants (companion-art.md), shown on the guide. */
 export const SUGGESTED: Record<(typeof COMPANION_STATES)[number], number> = {
@@ -58,14 +65,16 @@ export function companionTemplateReadme(): string {
     "",
     "Only idle is needed: a row left empty uses idle instead. A row's frames are",
     "its painted cells, from the left, so paint left to right with no gaps.",
+    `A row holds up to ${COMPANION_COLUMNS} poses; the suggested number is plenty to start, and`,
+    "the cells past it are there for more: a longer dance, more ways to stand.",
     "",
     "One pose per cell. Face right (it turns around by itself to walk left),",
     "stand on the bottom row of the cell (the ground line in guide.png), and",
     "keep to the middle mark. Leave the background transparent.",
     "",
-    "guide.png is the same size, with the rows named, the suggested cells shaded,",
-    "and the ground line and the middle marked. Use it as a layer under your",
-    "painting; the app never reads it.",
+    "guide.png is the same size, with the rows named, the cells numbered and",
+    `marked off in ${GROUP}s, the suggested cells shaded, and the ground line and the`,
+    "middle marked. Use it as a layer under your painting; the app never reads it.",
     "",
     "In Aseprite: open sheet.png. View > Grid > Grid Settings, set 64 x 64, and",
     "turn on View > Snap to Grid. Add the guide with Layer > New > New Reference",
@@ -101,9 +110,11 @@ export async function blankCompanionSheet(): Promise<Uint8Array> {
 
 /**
  * The guide, the sheet's own size so it can sit under it as a layer: every
- * cell outlined, the suggested cells shaded, the ground line along each
- * cell's bottom row and a mark at its middle, and each row named in its
- * first cell.
+ * cell outlined and numbered, the suggested cells shaded, the ground line
+ * along each cell's bottom row and a mark at its middle, and each row named
+ * in its first cell. At 32 cells a row, a painter zoomed in on cell 20 sees
+ * only a few cells, so the row's name comes again at the start of every group
+ * of eight, where a line marks the group off.
  */
 export async function companionGuide(palette: Record<Token, string>): Promise<Uint8Array> {
   const cell = COMPANION_CELL;
@@ -129,15 +140,33 @@ export async function companionGuide(palette: Record<Token, string>): Promise<Ui
       g.strokeStyle = suggested ? palette.accent : palette.text;
       g.globalAlpha = suggested ? 0.6 : 0.2;
       g.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+      // A group of eight starts: a firmer line down its left edge.
+      if (col > 0 && col % GROUP === 0) {
+        g.fillStyle = palette.text;
+        g.globalAlpha = 0.5;
+        g.fillRect(x, y, 1, cell);
+      }
       g.globalAlpha = 1;
       // The ground line: the cell's bottom row, where the feet go.
       g.fillStyle = palette.accent;
       g.fillRect(x, y + cell - 1, cell, 1);
       // The middle: where the feet are centred.
       g.fillRect(x + cell / 2, y + cell - 8, 1, 7);
+      // The cell's number, top right, counted from 1 as the README counts.
+      // (So the row's name stands alone: the shading says how many are
+      // suggested, where a count beside the name would read as a cell.)
+      g.fillStyle = palette.text;
+      g.globalAlpha = 0.45;
+      g.textAlign = "right";
+      g.fillText(String(col + 1), x + cell - 3, y + 3);
+      g.textAlign = "left";
+      // The row's name, and again at each later group, fainter.
+      if (col % GROUP === 0) {
+        g.globalAlpha = col === 0 ? 1 : 0.45;
+        g.fillText(state.toUpperCase(), x + 3, y + 3);
+      }
+      g.globalAlpha = 1;
     }
-    g.fillStyle = palette.text;
-    g.fillText(`${state.toUpperCase()} ${SUGGESTED[state]}`, 3, y + 3);
   });
   return png(c);
 }

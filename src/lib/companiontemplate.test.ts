@@ -20,18 +20,24 @@ describe("a companion to paint (D163)", () => {
     expect(companionTemplateManifest("Sir Waddles").name).toBe("Sir Waddles");
   });
 
-  it("is the Cap'n's layout: the same rows in the same order, 64 px cells, 8 across", () => {
+  it("is the Cap'n's layout: the same rows in the same order, 64 px cells, and up to 32 across", () => {
     expect(captain.frameSize).toEqual([COMPANION_CELL, COMPANION_CELL]);
-    const rows = Object.entries(captain.states).map(([s, v]) => [s, Math.floor(v.frames[0] / COMPANION_COLUMNS)]);
+    // His sheet is as wide as a pack ever is with eight or fewer a state,
+    // 8 across; the template has room for 32, and the import lays a painted
+    // pack out no wider than its longest row (D183).
+    const his = 8;
+    const rows = Object.entries(captain.states).map(([s, v]) => [s, Math.floor(v.frames[0] / his)]);
     expect(rows).toEqual(COMPANION_STATES.map((s, i) => [s, i]));
-    for (const s of COMPANION_STATES) expect(SUGGESTED[s]).toBeLessThanOrEqual(COMPANION_COLUMNS);
+    expect(COMPANION_COLUMNS).toBe(32);
+    for (const s of COMPANION_STATES) expect(SUGGESTED[s]).toBeLessThanOrEqual(his);
   });
 
   it("has a README that names every row and how to paint in Aseprite, in CRLF", () => {
     const readme = companionTemplateReadme();
     for (const s of COMPANION_STATES) expect(readme).toContain(` ${s} `);
-    expect(readme).toContain("512 x 448");
-    expect(readme).toContain("1024 x 896");
+    expect(readme).toContain("2048 x 448");
+    expect(readme).toContain("4096 x 896");
+    expect(readme).toContain("up to 32");
     expect(readme).toContain("Aseprite");
     expect(readme).toContain("Import companion");
     expect(readme.split("\n").every((l, i, all) => i === all.length - 1 || l.endsWith("\r"))).toBe(true);

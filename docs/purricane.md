@@ -212,7 +212,7 @@ A pack may carry its sheet at twice the size beside it: `sheet@2x.png` for `shee
 
 **A person's own pack** comes in through **Import companion…** in the settings window (#233): its `companion.json`, or a zip holding one. Exactly three files are copied into the app's `companions/` folder: the manifest, its sheet and the sheet's `@2x` twin. The companion's own loader checks the pack first (`hp-companion --check --pack <folder>`), and a pack it refuses is taken out again, with the reason on screen. The picker beside the Cap'n Capy box chooses which companion the box starts (D162), and **Remove…** beside it takes an imported one out again (#223): it asks first, naming the companion, deletes the app's copy of its files and leaves wherever it was imported from alone. The two that ship cannot be removed. Removing the pick makes Cap'n Capy the pick, and with the box ticked he comes in its place. The picker reads the folder again whenever the settings window comes forward, so a folder deleted by hand leaves the list.
 
-**A companion to paint** comes from **Paint a companion…** beside it: a folder with a blank `sheet.png` in this layout at 64 px a cell, a `guide.png` naming every row, a `companion.json` that says `"painted": true`, and a README. Import companion… on that `companion.json` reads the painted cells off the sheet, left to right in each row, and installs a finished pack with both sheets (D163).
+**A companion to paint** comes from **Paint a companion…** beside it: a folder with a blank `sheet.png` in this layout at 64 px a cell, 32 cells a row (D183), a `guide.png` naming every row, a `companion.json` that says `"painted": true`, and a README. Import companion… on that `companion.json` reads the painted cells off the sheet, left to right in each row, and installs a finished pack with both sheets (D163).
 
 **Frames the app packs** come in the same way: Import companion… on one frame of a folder of `<state>-<n>.png` at any size, or on an Aseprite sprite-sheet export's `.json` with a tag per state, cuts each pose to what is drawn, sizes them all by one factor (a whole one for art smaller than the cell, so pixel art stays crisp), and writes both sheets and the manifest (D165).
 
@@ -223,7 +223,7 @@ How the art for a pack comes into existence, with an image model or a pencil, an
 Packs are untrusted input from the internet, even without code in them. So:
 
 - Validate the manifest against a schema and **refuse to load rather than half-load.** A partially-valid pack is a support burden
-- Cap sprite sheet dimensions and frame counts — a 16k×16k PNG is a denial of service dressed as a unicorn
+- Cap sprite sheet dimensions and frame counts — a 16k×16k PNG is a denial of service dressed as a unicorn. The caps that bound the cost are on pixels: a sheet up to 4096 px a side (its `@2x` twin up to twice that), a cell up to 256 px. A state's frame list is only cell indices, each distinct cell cut once however often it is listed, so its cap, 1024 entries, only refuses an absurd manifest; a state holds up to 32 poses, and the sheet is as wide as its longest state (D183)
 - Missing optional states fall back to `idle`. Missing `idle` is a hard failure
 - Unknown keys are ignored, not errors, so `hp-companion/2` degrades gracefully
 

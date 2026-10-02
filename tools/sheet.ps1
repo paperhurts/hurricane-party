@@ -16,9 +16,11 @@
     The default -Filter, area, averages what each cell pixel covers, which is
     even across frames; nearest is for pixel art drawn at (or an integer
     multiple of) the cell size, where there is nothing to average.
-    Rows are the format's states in the format's order, eight cells each; a
-    state with no files is left out of the manifest and the app falls back to
-    idle for it. No idle is an error here, as it is in the app.
+    Rows are the format's states in the format's order. The sheet is eight
+    cells wide, or as wide as the longest state when one has more, up to 32
+    (D183), so a pack of eight or fewer a state is laid out as it always was.
+    A state with no files is left out of the manifest and the app falls back
+    to idle for it. No idle is an error here, as it is in the app.
 
     Windows PowerShell 5.1, System.Drawing only. See docs/companion-art.md.
 #>
@@ -67,7 +69,11 @@ Add-Type -AssemblyName System.Drawing
 # The format's vocabulary, fixed (purricane.md): the row order on the sheet,
 # and the timing each state carries in the manifest.
 $States = @("idle", "sleep", "dance", "walk", "startle", "pet", "carry")
-$Columns = 8
+# The sheet is never narrower than eight cells, the layout every pack had
+# before D183, and a state holds at most 32 poses: 32 cells of 128 px, a
+# 64 px pack's twin, is 4096 px wide.
+$MinColumns = 8
+$MaxColumns = 32
 $Timing = @{
     idle    = @{ fps = 4;  loop = $true }
     sleep   = @{ fps = 1;  loop = $true }
@@ -92,7 +98,7 @@ foreach ($state in $States) {
     $files = Get-StateFiles $Cells $state
     $ready = $files.Count -gt 0
     if (-not $ready) { $files = Get-StateFiles $In $state }
-    if ($files.Count -gt $Columns) { throw "$state has $($files.Count) frames; the sheet holds $Columns per state" }
+    if ($files.Count -gt $MaxColumns) { throw "$state has $($files.Count) frames; a state holds $MaxColumns" }
     $i = 0
     foreach ($f in $files) {
         $bmp = [System.Drawing.Bitmap]::FromFile($f.FullName)
@@ -118,6 +124,12 @@ foreach ($state in $States) {
     }
 }
 if (-not ($frames | Where-Object { $_.state -eq "idle" })) { throw "no idle-*.png in $In; idle is the one state a pack cannot go without" }
+# As wide as the longest state, and never narrower than eight.
+$Columns = $MinColumns
+foreach ($fr in $frames) { if ($fr.index + 1 -gt $Columns) { $Columns = $fr.index + 1 } }
+if ($Columns * $Frame -gt 4096) {
+    throw "$Columns cells of $Frame px make a sheet $($Columns * $Frame) px wide; the app reads 4096 a side"
+}
 
 # Opaque bounding box of one bitmap: the pose, not the canvas it was drawn on.
 function Get-OpaqueBox([System.Drawing.Bitmap]$b) {
