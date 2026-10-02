@@ -18,10 +18,16 @@ pub const FORMAT: &str = "hp-companion/1";
 pub const STATES: [&str; 7] = ["idle", "sleep", "dance", "walk", "startle", "pet", "carry"];
 
 /// A sheet bigger than this is refused before it is decoded: a 16k x 16k PNG
-/// is a denial of service dressed as a unicorn (`purricane.md`).
+/// is a denial of service dressed as a unicorn (`purricane.md`). These two
+/// are what bound the pixels a pack can cost.
 pub const MAX_SHEET_SIDE: u32 = 4096;
 pub const MAX_FRAME_SIDE: u32 = 256;
-pub const MAX_FRAMES_PER_STATE: usize = 64;
+/// A state's frame list is only cell indices, and each distinct cell is cut
+/// once however often it is listed, so a long list costs next to nothing.
+/// This only refuses an absurd manifest: idle written as each pose held
+/// eleven frames and its moment once is twelve entries a pose, and 32 poses
+/// in a row are under 400 (D183).
+pub const MAX_FRAMES_PER_STATE: usize = 1024;
 
 /// One cell, straight (not premultiplied) RGBA, top-down.
 #[derive(Debug, Clone, PartialEq)]
@@ -497,6 +503,43 @@ pub(crate) mod tests {
             p.state("idle"),
             "a pack cannot add a behaviour"
         );
+    }
+
+    #[test]
+    fn a_long_frame_list_loads_and_only_an_absurd_one_is_refused() {
+        // Idle as `sheet.ps1` writes 32 poses: each later pose after the
+        // first held eleven frames, 372 entries over 32 cells (D183).
+        let held: Vec<String> = (1..32)
+            .flat_map(|m| std::iter::repeat_n(0, 11).chain(std::iter::once(m)))
+            .map(|i: u32| i.to_string())
+            .collect();
+        let idle =
+            |frames: &[String]| format!(r#""idle":{{"frames":[{}],"fps":4}}"#, frames.join(","));
+        let p = Pack::parse(&manifest(&idle(&held)), &sheet(32, 1, 4)).unwrap();
+        assert_eq!(p.state("idle").frames.len(), 372);
+        assert_eq!(p.cell(31).px[0], 31, "every distinct cell is cut once");
+        let most = vec!["0".to_string(); MAX_FRAMES_PER_STATE];
+        assert!(Pack::parse(&manifest(&idle(&most)), &sheet(8, 1, 4)).is_ok());
+        let past = vec!["0".to_string(); MAX_FRAMES_PER_STATE + 1];
+        let e = Pack::parse(&manifest(&idle(&past)), &sheet(8, 1, 4)).unwrap_err();
+        assert!(e.contains("more than 1024 frames"), "{e}");
+    }
+
+    #[test]
+    fn a_sheet_wider_than_eight_cells_is_read_by_its_own_width() {
+        // 20 cells a row: dance's 20th pose is row 2, column 19.
+        let dance = format!(
+            r#"{IDLE},"dance":{{"frames":[{}],"syncTo":"beat"}}"#,
+            (40..60)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let p = Pack::parse_with_2x(&manifest(&dance), &sheet(20, 7, 4), Some(&sheet(20, 7, 8)))
+            .unwrap();
+        assert_eq!(p.state("dance").frames.len(), 20);
+        assert_eq!(p.cell(59).px[0], 59);
+        assert_eq!(p.cell_for(59, 2).0.px[0], 59, "the twin's cell too");
     }
 
     #[test]
