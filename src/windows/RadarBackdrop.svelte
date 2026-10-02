@@ -5,12 +5,13 @@
   // they read as one map with the radar in the middle.
   //
   // Drawn on a canvas under every sprite. The frames are Rust's, already in
-  // the analyser's ramp; this draws them softened, rings the distance from
-  // the centre (the radar's reach, or from you around a ZIP code, #161),
-  // lays the window's ground over them so the chrome stays readable, and, when
-  // the loop is stale or the fetch failed, draws them grey and dim. That is a
-  // canvas filter, inside the canvas: no CSS filter touches anything here, and
-  // the analyser is not under this element (D73).
+  // the analyser's ramp; this draws them crisp, rings the distance from the
+  // centre (the radar's reach, or from you around a ZIP code, #161), lays the
+  // window's ground over them so the chrome stays readable, and, when the
+  // loop is stale or the fetch failed, draws them grey and dim. That is
+  // compositing inside the canvas, the same in WebView2 and WebKitGTK
+  // (D186): no CSS filter touches anything here, and the analyser is not
+  // under this element (D73).
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { frameAt, stackTop, type RadarStatus } from "../lib/radar";
   import type { WindowName } from "../lib/skin";
@@ -99,9 +100,27 @@
     const [fw] = status?.frame_size ?? [550, 1044];
     const perLogical = fw / 275; // frame px per logical px
     if (img && img.complete && img.naturalWidth > 0) {
+      // Crisp, as the frame is (D186). At 2x a frame pixel is a device pixel
+      // and nothing is resampled; at 1x the smoothing averages two into one
+      // rather than dropping every other.
       ctx.save();
-      ctx.filter = `blur(${1.2 * dpr}px)${warn ? " grayscale(0.85) brightness(0.55)" : ""}`;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, top * perLogical, fw, (H / scale) * perLogical, 0, 0, W, H);
+      if (warn) {
+        // Grey and dim by compositing, not ctx.filter, which WebKitGTK does
+        // not have (D186). The radar takes the ground's saturation, which is
+        // next to none, 85% of the way, then the ground is laid over it at
+        // 45%. Blended with itself the ground is unchanged, so only the
+        // radar turns.
+        ctx.fillStyle = ground;
+        ctx.globalCompositeOperation = "saturation";
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 0.45;
+        ctx.fillRect(0, 0, W, H);
+      }
       ctx.restore();
     }
     // 75, 150 and 230 km from the centre: the radar's reach, or distance
