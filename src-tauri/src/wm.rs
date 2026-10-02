@@ -154,15 +154,22 @@ pub fn scale_at(monitors: &[MonitorInfo], x: Px, y: Px, fallback: f64) -> f64 {
 /// slide across the seam — a neighbour too short to hold it does not hide the
 /// edge, it just moves where the window falls off.
 pub fn screen_rect_for(monitors: &[MonitorInfo], start: Rect, group: Rect) -> Rect {
+    let rects: Vec<Rect> = monitors.iter().map(|m| m.rect).collect();
+    merged_rect_for(&rects, start, group)
+}
+
+/// `screen_rect_for` over any one rect per display: the displays themselves,
+/// or their work areas (D182).
+fn merged_rect_for(rects: &[Rect], start: Rect, group: Rect) -> Rect {
     let mut r = start;
     // Each side walks independently. The guard bounds a loop that already
     // cannot cycle, since every step strictly grows `r` in one direction.
-    let limit = monitors.len() + 1;
+    let limit = rects.len() + 1;
 
     for _ in 0..limit {
-        let Some(n) = monitors
+        let Some(n) = rects
             .iter()
-            .map(|m| m.rect)
+            .copied()
             .find(|n| n.x == r.right() && n.y <= group.y && n.bottom() >= group.bottom())
         else {
             break;
@@ -170,9 +177,9 @@ pub fn screen_rect_for(monitors: &[MonitorInfo], start: Rect, group: Rect) -> Re
         r.w = n.right() - r.x;
     }
     for _ in 0..limit {
-        let Some(n) = monitors
+        let Some(n) = rects
             .iter()
-            .map(|m| m.rect)
+            .copied()
             .find(|n| n.right() == r.x && n.y <= group.y && n.bottom() >= group.bottom())
         else {
             break;
@@ -181,9 +188,9 @@ pub fn screen_rect_for(monitors: &[MonitorInfo], start: Rect, group: Rect) -> Re
         r.x = n.x;
     }
     for _ in 0..limit {
-        let Some(n) = monitors
+        let Some(n) = rects
             .iter()
-            .map(|m| m.rect)
+            .copied()
             .find(|n| n.y == r.bottom() && n.x <= group.x && n.right() >= group.right())
         else {
             break;
@@ -191,9 +198,9 @@ pub fn screen_rect_for(monitors: &[MonitorInfo], start: Rect, group: Rect) -> Re
         r.h = n.bottom() - r.y;
     }
     for _ in 0..limit {
-        let Some(n) = monitors
+        let Some(n) = rects
             .iter()
-            .map(|m| m.rect)
+            .copied()
             .find(|n| n.bottom() == r.y && n.x <= group.x && n.right() >= group.right())
         else {
             break;
@@ -228,6 +235,12 @@ pub struct WmState {
     pub monitors: Vec<MonitorInfo>,
     /// Set for the duration of a title-bar drag.
     pub drag: Option<DragState>,
+    /// Where the cursor was when a title bar or seam was pressed, for the
+    /// drag that may follow to measure from (D182).
+    pub pressed_at: Option<(Px, Px)>,
+    /// `register` found no geometry to check D58 against (X11 before the
+    /// show, D182), so the check runs once the windows are shown.
+    pub confirm_pending: bool,
     /// Set for the duration of a splitter drag on a seam.
     pub splitter: Option<SplitterState>,
     /// Which window last took focus, so a window that mounts late can be told
@@ -346,13 +359,35 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     };
     let zoom = if double { 2.0 } else { 1.0 };
 
-    let (mut layout, graph, shaded, unshaded_h) = match restored {
+    let (mut layout, mut graph, shaded, mut unshaded_h) = match restored {
         Some(r) => (r.layout, r.graph, r.shaded, r.unshaded_h),
         None => {
             let (l, g) = initial_layout(scale, zoom);
             (l, g, BTreeSet::new(), BTreeMap::new())
         }
     };
+
+    // D182: a layout saved at another scale comes back at the size it was
+    // saved, where one scale covers the desktop and the toolkit draws at the
+    // new one: a quarter of the chrome showing, or a quarter of the window
+    // used. Main is a fixed size, so its width says the scale it was saved
+    // at. The stored heights are the unshaded ones, as a re-derive wants.
+    if platform::platform().one_scale() {
+        if let Some(saved) = saved_scale(&layout, zoom) {
+            if (saved - scale).abs() > 0.01 {
+                eprintln!("wm: the layout was saved at scale {saved}, the desktop is at {scale}");
+                // Positions stay: what the displays were then is not known,
+                // and the rescue and the clamp below cover a layout that no
+                // longer lands.
+                (layout, graph) = rescale_layout(&layout, &graph, &[], &[], (saved, scale), zoom);
+                for (id, h) in unshaded_h.iter_mut() {
+                    if let Some(r) = layout.get(id) {
+                        *h = r.h;
+                    }
+                }
+            }
+        }
+    }
 
     // D33 again, and the reason the column records a monitor at all: a layout
     // saved on a display that is no longer attached must not restore into empty
@@ -361,7 +396,13 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     layout = rescue_layout(&layout, &graph, &monitors);
     // #101, D88: and a group whose title bars sit off the usable screen, or
     // under the taskbar, is pulled to where a hand can reach it.
-    layout = reach_layout(&layout, &graph, &monitors, zoom);
+    layout = keep_layout_in_reach(
+        &layout,
+        &graph,
+        &monitors,
+        zoom,
+        platform::platform().confines_to_work_area(),
+    );
 
     // Re-collapse whatever was left shaded. The stored height is the *unshaded*
     // one, so this is a fresh collapse from a known-good size rather than a
@@ -442,6 +483,7 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
         // size, so size-then-position leaves the window 1.5x too big.
         let r = seeded[id];
         win.set_position(PhysicalPosition::new(r.x, r.y))?;
+        platform::hold_size(&win, r.w as u32, r.h as u32);
         win.set_size(PhysicalSize::new(r.w as u32, r.h as u32))?;
         // #47: the webview's own zoom factor, not a CSS zoom. The page lays
         // out at 275 x 116 as always and the browser renders it doubled, so
@@ -491,7 +533,87 @@ pub fn show_classic_windows(app: &AppHandle) -> tauri::Result<()> {
             win.show()?;
         }
     }
+    // D58 needs the OS's answer, and on X11 there is none until the windows
+    // are mapped, which is now, and asynchronously (D182). `register` left
+    // the check for this moment; it runs off the main thread, which has to
+    // keep turning for the answer to arrive. Windows answered in `register`.
+    let pending = std::mem::take(&mut app.state::<Wm>().0.lock().unwrap().confirm_pending);
+    if pending {
+        let app = app.clone();
+        std::thread::spawn(move || confirm_layout(&app));
+    }
     Ok(())
+}
+
+/// D58, once the OS can answer: read the windows back, take the OS's word for
+/// the layout, and drop any bond it does not bear out. Only where `register`
+/// had no geometry to read (D182).
+fn confirm_layout(app: &AppHandle) {
+    // Settled is three reads in a row that agree: X moves a window after it
+    // maps, so the first answer can be the compositor's placement, not ours.
+    // About 0.2 to 0.7 s after the show, measured; two seconds is the cap.
+    let started = std::time::Instant::now();
+    let (mut last, mut agreeing) = (Layout::new(), 0);
+    let read = loop {
+        let mut read = Layout::new();
+        for id in CLASSIC {
+            if let Some(win) = app.get_webview_window(label_of(id)) {
+                if let Some((p, s)) = platform::rect_of(&win) {
+                    read.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
+                }
+            }
+        }
+        agreeing = if read.len() == CLASSIC.len() && read == last {
+            agreeing + 1
+        } else {
+            0
+        };
+        if agreeing >= 2 || started.elapsed().as_millis() > 2000 {
+            break read;
+        }
+        last = read;
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    };
+    // A window has no X id until GTK realizes it, which for the classic three
+    // is the show, so the handles `register` read are read again.
+    let handles: Vec<NativeWindow> = CLASSIC
+        .iter()
+        .map(|id| {
+            app.get_webview_window(label_of(*id))
+                .map(|w| platform::handle_of(&w))
+                .unwrap_or(NativeWindow::NONE)
+        })
+        .collect();
+    let plan = {
+        let state = app.state::<Wm>();
+        let mut s = state.0.lock().unwrap();
+        s.handles = handles;
+        for (id, got) in read.iter() {
+            if s.layout.get(id).is_some_and(|want| want != got) {
+                eprintln!(
+                    "wm: {id:?} was put at {:?}, the OS has it at {got:?}",
+                    s.layout[id]
+                );
+            }
+            s.layout.insert(*id, *got);
+        }
+        let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
+            .into_iter()
+            .map(|(b, why)| {
+                eprintln!(
+                    "wm: dropping bond {:?}-{:?}, the OS disagrees: {why}",
+                    b.a, b.b
+                );
+                b.pair()
+            })
+            .collect();
+        for (a, b) in stale {
+            s.graph.break_bond(a, b);
+        }
+        plan_ownership(&s, Some(MAIN))
+    };
+    apply_ownership(&plan);
+    emit_state(app);
 }
 
 /// Read the windows back out of the OS and seed the state from what is actually
@@ -534,13 +656,20 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
 
     let mut handles = Vec::with_capacity(CLASSIC.len());
     let mut layout = Layout::new();
+    // On X11 a window built hidden has no geometry until it is mapped, and X
+    // answers a move later, not now (D182). A window with no answer yet keeps
+    // its seeded rect, and D58's check waits for `confirm_layout` after the
+    // show rather than judging the bonds by nothing. Windows always answers.
+    let mut unanswered = false;
     for id in CLASSIC {
         let Some(win) = app.get_webview_window(label_of(id)) else {
             continue;
         };
         handles.push(platform::handle_of(&win));
-        let p = win.outer_position()?;
-        let s = win.outer_size()?;
+        let Some((p, s)) = platform::rect_of(&win) else {
+            unanswered = true;
+            continue;
+        };
         layout.insert(id, Rect::new(p.x, p.y, s.width as Px, s.height as Px));
     }
 
@@ -562,8 +691,21 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
         s.monitors = monitors;
         s.handles = handles;
         s.roots = roots;
+        s.confirm_pending = unanswered;
+        if unanswered {
+            for id in CLASSIC {
+                if let (None, Some(r)) = (layout.get(&id), s.layout.get(&id)) {
+                    layout.insert(id, *r);
+                }
+            }
+        }
         s.layout = layout;
-        let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
+        let violations = if unanswered {
+            Vec::new()
+        } else {
+            bond::violations(&s.graph, &s.layout)
+        };
+        let stale: Vec<(WindowId, WindowId)> = violations
             .into_iter()
             .map(|(b, why)| {
                 eprintln!(
@@ -660,6 +802,7 @@ pub fn push_to_os(app: &AppHandle, layout: &Layout, ids: &[WindowId]) {
             continue;
         };
         let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
+        platform::hold_size(&win, r.w as u32, r.h as u32);
         let _ = win.set_size(PhysicalSize::new(r.w as u32, r.h as u32));
     }
 }
@@ -791,11 +934,25 @@ pub fn drag_start(app: &AppHandle, id: WindowId) {
     let mut s = state.0.lock().unwrap();
     let moving = s.graph.component(id);
     let origin_layout = s.layout.clone();
+    // The drag starts on the first pointermove, so the cursor has already
+    // left the press by the time this runs; measuring from here would leave
+    // the group that far behind the pointer for the whole drag (up to 24 px on
+    // a flick, measured on Linux, and less but the same on Windows, D182).
+    // The press is the true origin.
+    let origin_cursor = s.pressed_at.take().unwrap_or(cursor);
     s.drag = Some(DragState {
         moving,
         origin_layout,
-        origin_cursor: cursor,
+        origin_cursor,
     });
+}
+
+/// A title bar or seam was pressed: note where the cursor is, for the drag
+/// that may follow. No capture and no state beyond this, so a click stays a
+/// click; the next press overwrites it.
+pub fn press(app: &AppHandle) {
+    let cursor = platform::platform().cursor_pos();
+    app.state::<Wm>().0.lock().unwrap().pressed_at = Some(cursor);
 }
 
 /// One drag frame, driven by the webview pointermove that the compositor has
@@ -848,10 +1005,17 @@ pub fn drag_move(app: &AppHandle) {
             threshold,
             screen,
         );
-        // #101, D88: a title bar never leaves a display's work area. After
-        // the magnet, so a snap cannot put one out of reach either.
+        // #101, D88: a title bar never leaves a display's work area; where
+        // the window manager confines windows, no part of one does (D182).
+        // After the magnet, so a snap cannot put one out of reach either.
         let mut layout = layout;
-        let (cx, cy) = reach_clamp(&layout, &drag.moving, &s.monitors, s.zoom());
+        let (cx, cy) = keep_in_reach(
+            &layout,
+            &drag.moving,
+            &s.monitors,
+            s.zoom(),
+            platform::platform().confines_to_work_area(),
+        );
         if (cx, cy) != (0, 0) {
             bond::translate_group(&mut layout, &drag.moving, cx, cy);
         }
@@ -885,6 +1049,12 @@ pub fn resync_spans(graph: &mut WindowGraph, layout: &Layout) {
 /// End a drag: form whatever bonds the final position earned, then re-apply the
 /// ownership topology so the new group shape is real in the z-order too.
 pub fn drag_end(app: &AppHandle) {
+    // The webview drops a pointermove while the last one is still in flight
+    // (Classic.svelte's `frame`), so the final position can arrive only as the
+    // release. One last move from the real cursor puts the group where the
+    // pointer let go; a move is computed from the drag's origin, so a repeat
+    // costs nothing (up to 24 px short without it, D182).
+    drag_move(app);
     let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
@@ -1114,8 +1284,12 @@ pub fn splitter_move(app: &AppHandle) {
             bond::d40::physical(CHROME_H * zoom, scale)
         };
         bond::apply_splitter_in_graph(&mut layout, &s.graph, &sp.bond, pos, &is_resizable, min);
+        let touched = s.graph.component(sp.bond.a);
+        if grows_out(&s.layout, &layout, &touched, &s.monitors) {
+            return;
+        }
         s.layout = layout.clone();
-        (layout, s.graph.component(sp.bond.a))
+        (layout, touched)
     };
 
     push_to_os(app, &layout, &touched);
@@ -1224,7 +1398,12 @@ pub fn resize_move(app: &AppHandle) {
         let scale = scale_at(&s.monitors, r.origin.x, r.origin.y, s.scale);
         let delta = (cursor.0 - r.origin_cursor.0, cursor.1 - r.origin_cursor.1);
         let rect = resize_frame(r.origin, delta, r.w_free, r.h_free, scale, s.zoom());
-        s.layout.insert(r.id, rect);
+        let mut layout = s.layout.clone();
+        layout.insert(r.id, rect);
+        if grows_out(&s.layout, &layout, &s.graph.component(r.id), &s.monitors) {
+            return;
+        }
+        s.layout = layout;
         (s.layout.clone(), r.id)
     };
     push_to_os(app, &layout, &[id]);
@@ -1373,10 +1552,16 @@ pub fn toggle_shade(app: &AppHandle, id: WindowId) {
         let graph = s.graph.clone();
         let mut layout = s.layout.clone();
         apply_shade(&mut layout, &graph, id, h);
-        s.layout = layout.clone();
 
         // Everything in the component may have moved, plus the window itself.
         let moved = s.graph.component(id);
+        // D182: a group that unshades past the work area's edge comes back
+        // inside it whole, rather than the window manager pushing one window.
+        if platform::platform().confines_to_work_area() {
+            let (dx, dy) = confine_clamp(&layout, &moved, &s.monitors);
+            bond::translate_group(&mut layout, &moved, dx, dy);
+        }
+        s.layout = layout.clone();
         (layout, moved, topmost_set(&s))
     }; // D54: lock dropped before any OS call.
 
@@ -1521,9 +1706,16 @@ pub fn minimize_group(app: &AppHandle) {
         s.minimized = true;
         minimize_plan(&s)
     }; // D54: the lock is gone before any window is touched.
+       // D182: where a window that skips the taskbar cannot be minimised
+       // (Mutter), the satellites are hidden instead, and come back with Main.
+    let hide = !platform::platform().minimises_taskbarless();
     for id in members {
         if let Some(w) = app.get_webview_window(label_of(id)) {
-            let _ = w.minimize();
+            let _ = if hide && id != MAIN {
+                w.hide()
+            } else {
+                w.minimize()
+            };
         }
     }
     watch_restore(app);
@@ -1583,7 +1775,124 @@ fn restore_if_back(app: &AppHandle) {
     {
         p.restore_no_activate(*w);
     }
+    // D182: and the satellites `minimize_group` hid, where it could not
+    // minimise them. Main is already up, so this shows them behind it.
+    if !p.minimises_taskbarless() {
+        show_hidden(app);
+    }
     app.state::<Wm>().0.lock().unwrap().minimized = false;
+}
+
+/// Show the classic windows `minimize_group` hid (D182), where the model has
+/// them. A window manager places a window that comes back from hidden as if
+/// it were new (Mutter put the EQ and playlist wherever it liked, found by
+/// hand), so the model's rects are pushed again until the OS reads them back,
+/// as `confirm_layout` waits at startup. Off the main thread, which has to
+/// keep turning for the windows to map.
+fn show_hidden(app: &AppHandle) {
+    let shown: Vec<WindowId> = CLASSIC
+        .iter()
+        .copied()
+        .filter(|id| {
+            app.get_webview_window(label_of(*id))
+                .is_some_and(|w| !w.is_visible().unwrap_or(true) && w.show().is_ok())
+        })
+        .collect();
+    settle(app, shown);
+}
+
+/// D182: hide the windows and show them again, then settle them where the
+/// model has them. After X's one scale changes, Mutter refuses every resize of
+/// a window mapped before the change, its own size hints and a direct
+/// `XResizeWindow` alike, until the window is mapped afresh (found by hand,
+/// GNOME 50). A flicker on a rare event: a display coming or going, or the
+/// scale chosen in the settings. Called on the main thread; the show waits a
+/// beat so GTK does not fold the hide and the show into nothing.
+fn remap(app: &AppHandle, ids: Vec<WindowId>) {
+    let visible: Vec<WindowId> = ids
+        .into_iter()
+        .filter(|id| {
+            app.get_webview_window(label_of(*id))
+                .is_some_and(|w| w.is_visible().unwrap_or(false) && w.hide().is_ok())
+        })
+        .collect();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let shown = app.clone();
+        let ids = visible.clone();
+        let _ = app.run_on_main_thread(move || {
+            for id in &ids {
+                if let Some(w) = shown.get_webview_window(label_of(*id)) {
+                    let _ = w.show();
+                }
+            }
+        });
+        settle_now(&app, &visible);
+        // And a resize the webview sees: after the remap it is still laid out
+        // for the old scale (the playlist drew its contents at twice its
+        // size, found by hand) until its window's size changes. Two pixels
+        // wider and back.
+        let layout = app.state::<Wm>().0.lock().unwrap().layout.clone();
+        let mut nudged = layout.clone();
+        for id in &visible {
+            if let Some(r) = nudged.get_mut(id) {
+                r.w += 2;
+            }
+        }
+        push_to_os(&app, &nudged, &visible);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        push_to_os(&app, &layout, &visible);
+    });
+}
+
+/// Push the model's rects for `ids` until the OS reads them back (D182), off
+/// the main thread, which has to keep turning for the answers to arrive. For
+/// the moments a window manager is still placing windows of its own accord: a
+/// window shown again after being hidden, which Mutter places as if it were
+/// new. Gives up after two seconds, saying so.
+fn settle(app: &AppHandle, ids: Vec<WindowId>) {
+    if ids.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || settle_now(&app, &ids));
+}
+
+/// `settle`, on the calling thread, which must not be the main thread.
+fn settle_now(app: &AppHandle, ids: &[WindowId]) {
+    for _ in 0..40 {
+        let (layout, handles) = {
+            let state = app.state::<Wm>();
+            let s = state.0.lock().unwrap();
+            let handles: Vec<NativeWindow> = ids.iter().map(|id| s.handle(*id)).collect();
+            (s.layout.clone(), handles)
+        }; // D54: the lock is gone before the OS is asked.
+        let off: Vec<WindowId> = ids
+            .iter()
+            .zip(handles)
+            .filter(|(id, h)| {
+                // X's answer where there is one: tao's reads back what it
+                // asked for before the window manager has placed anything.
+                let read = match platform::platform().placed(*h) {
+                    Some((x, y, w, h)) => Some(Rect::new(x, y, w as Px, h as Px)),
+                    None if h.is_none() => app
+                        .get_webview_window(label_of(**id))
+                        .and_then(|w| platform::rect_of(&w))
+                        .map(|(p, s)| Rect::new(p.x, p.y, s.width as Px, s.height as Px)),
+                    None => None,
+                };
+                read != layout.get(id).copied()
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if off.is_empty() {
+            return;
+        }
+        push_to_os(app, &layout, &off);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    eprintln!("wm: the windows did not settle where the model has them");
 }
 
 /// The windows Main's minimise takes with it: its component, Main last.
@@ -1628,17 +1937,86 @@ pub fn rezoom_layout(
     new_zoom: f64,
 ) -> (Layout, WindowGraph) {
     let scale_of = |r: &Rect| {
-        monitor_at(monitors, r.x, r.y)
+        let s = monitor_at(monitors, r.x, r.y)
             .map(|m| m.scale)
-            .unwrap_or(fallback_scale)
+            .unwrap_or(fallback_scale);
+        (s, s)
     };
+    rederive_layout(
+        layout,
+        graph,
+        &scale_of,
+        (old_zoom, new_zoom),
+        &|r: &Rect| (r.x, r.y),
+    )
+}
 
+/// D182: re-derive a layout for a new scale, where one scale covers the whole
+/// desktop (X11) and a display coming or going, or a scale chosen in the
+/// settings, has just changed it. Each window keeps its place on its own
+/// display: its offset from the display's corner grows or shrinks as the
+/// display's X rect did, which is nothing for one display taken from 100 % to
+/// 200 % (X's screen stays the panel's pixels) and double when a 150 %
+/// display joins a 100 % one (X's screen doubles). Displays are matched by
+/// their order, which follows the connectors; a window whose display is gone
+/// keeps its position for the rescue to bring back. Every size comes fresh
+/// from the logical base at its display's new scale, the playlist keeping its
+/// step count, and bonded groups are re-packed by the walk a re-zoom uses, so
+/// seams stay flush however the rounding falls. `fallback` is the (old, new)
+/// scale for a window on no display, and a restored layout passes no
+/// displays at all. `layout` must be the expanded one, as for a re-zoom.
+pub fn rescale_layout(
+    layout: &Layout,
+    graph: &WindowGraph,
+    old: &[MonitorInfo],
+    new: &[MonitorInfo],
+    fallback: (f64, f64),
+    zoom: f64,
+) -> (Layout, WindowGraph) {
+    let pair = |r: &Rect| {
+        let n = |m: &MonitorInfo| {
+            r.x >= m.rect.x && r.x < m.rect.right() && r.y >= m.rect.y && r.y < m.rect.bottom()
+        };
+        let i = old.iter().position(n)?;
+        Some((old[i], *new.get(i)?))
+    };
+    rederive_layout(
+        layout,
+        graph,
+        &|r: &Rect| pair(r).map_or(fallback, |(o, n)| (o.scale, n.scale)),
+        (zoom, zoom),
+        &|r: &Rect| {
+            let Some((o, n)) = pair(r) else {
+                return (r.x, r.y);
+            };
+            let along = |p: Px, o0: Px, ow: Px, n0: Px, nw: Px| {
+                n0 + ((p - o0) as f64 * nw as f64 / ow as f64).round() as Px
+            };
+            (
+                along(r.x, o.rect.x, o.rect.w, n.rect.x, n.rect.w),
+                along(r.y, o.rect.y, o.rect.h, n.rect.y, n.rect.h),
+            )
+        },
+    )
+}
+
+/// The walk `rezoom_layout` and `rescale_layout` share. `scales` gives a
+/// window's (old, new) scale from its old rect, `zooms` the (old, new) chrome
+/// zoom, and `anchor` where each group's anchor window's top-left lands.
+fn rederive_layout(
+    layout: &Layout,
+    graph: &WindowGraph,
+    scales: &dyn Fn(&Rect) -> (f64, f64),
+    zooms: (f64, f64),
+    anchor_at: &dyn Fn(&Rect) -> (Px, Px),
+) -> (Layout, WindowGraph) {
+    let (old_zoom, new_zoom) = zooms;
     let mut sizes: BTreeMap<WindowId, (Px, Px)> = BTreeMap::new();
     for (id, r) in layout {
-        let scale = scale_of(r);
+        let (old_scale, scale) = scales(r);
         let size = if is_resizable(*id) {
             let steps = |px: Px, base: f64, step: f64| {
-                (((px as f64 / scale) - base * old_zoom) / (step * old_zoom))
+                (((px as f64 / old_scale) - base * old_zoom) / (step * old_zoom))
                     .round()
                     .max(0.0) as i32
             };
@@ -1668,18 +2046,19 @@ pub fn rezoom_layout(
         else {
             continue;
         };
-        let ar = layout[&anchor];
+        let (ax, ay) = anchor_at(&layout[&anchor]);
         let (aw, ah) = sizes[&anchor];
-        out.insert(anchor, Rect::new(ar.x, ar.y, aw, ah));
+        out.insert(anchor, Rect::new(ax, ay, aw, ah));
 
         let mut queue = VecDeque::from([anchor]);
         while let Some(p) = queue.pop_front() {
             let p_old = layout[&p];
             let p_new = out[&p];
-            let scale = scale_of(&p_old);
+            let (old_scale, scale) = scales(&p_old);
             // An offset along the seam, re-derived from the logical base.
-            let along =
-                |old: Px| bond::d40::physical((old as f64 / scale / old_zoom) * new_zoom, scale);
+            let along = |old: Px| {
+                bond::d40::physical((old as f64 / old_scale / old_zoom) * new_zoom, scale)
+            };
             for q in graph.neighbours(p) {
                 if out.contains_key(&q) {
                     continue;
@@ -1744,47 +2123,11 @@ pub fn set_double(app: &AppHandle, on: bool) {
         }
         let old_zoom = s.zoom();
         let new_zoom = if on { 2.0 } else { 1.0 };
-
-        // Expand, re-derive, re-collapse: the same dance `save` does, because
-        // a shaded height is a state to reapply, not a size to scale.
-        let mut expanded = s.layout.clone();
-        for id in &s.shaded {
-            if let Some(h) = s.unshaded_h.get(id).copied() {
-                apply_shade(&mut expanded, &s.graph, *id, h);
-            }
-        }
-        let (rezoomed, graph) = rezoom_layout(
-            &expanded,
-            &s.graph,
-            &s.monitors,
-            s.scale,
-            old_zoom,
-            new_zoom,
-        );
-        // A group that doubled may now hang off the display; same rescue as a
-        // topology change, so it comes back rigidly with its bonds intact.
-        let mut layout = rescue_layout(&rezoomed, &graph, &s.monitors);
-        layout = reach_layout(&layout, &graph, &s.monitors, new_zoom);
-
+        let (monitors, scale) = (s.monitors.clone(), s.scale);
+        let layout = rederive_state(&mut s, new_zoom, |l, g| {
+            rezoom_layout(l, g, &monitors, scale, old_zoom, new_zoom)
+        });
         s.double = on;
-        let shaded: Vec<WindowId> = s.shaded.iter().copied().collect();
-        for id in shaded {
-            let Some(r) = layout.get(&id).copied() else {
-                continue;
-            };
-            s.unshaded_h.insert(id, r.h);
-            let at = monitor_at(&s.monitors, r.x, r.y)
-                .map(|m| m.scale)
-                .unwrap_or(s.scale);
-            apply_shade(
-                &mut layout,
-                &graph,
-                id,
-                bond::d40::physical(SHADE_H * new_zoom, at),
-            );
-        }
-        s.graph = graph;
-        s.layout = layout.clone();
         (layout, new_zoom)
     }; // D54: the lock is gone before any window call.
 
@@ -1796,6 +2139,60 @@ pub fn set_double(app: &AppHandle, on: bool) {
     push_to_os(app, &layout, &CLASSIC);
     emit_state(app);
     save_now(app);
+}
+
+/// The scale a layout was saved at, read from Main's width (D182): Main is
+/// never resized, so it is `CHROME_W` logical pixels at the chrome zoom.
+pub fn saved_scale(layout: &Layout, zoom: f64) -> Option<f64> {
+    let w = layout.get(&MAIN)?.w;
+    (w > 0).then(|| w as f64 / (CHROME_W * zoom))
+}
+
+/// Re-derive the whole layout in place: expand, re-derive, rescue, keep in
+/// reach, re-collapse. The same dance `save` does, because a shaded height is
+/// a state to reapply, not a size to scale. A re-zoom (#47) and a change of
+/// X's one scale (D182) both come through here. Returns the new layout.
+fn rederive_state(
+    s: &mut WmState,
+    new_zoom: f64,
+    rederive: impl FnOnce(&Layout, &WindowGraph) -> (Layout, WindowGraph),
+) -> Layout {
+    let mut expanded = s.layout.clone();
+    for id in &s.shaded {
+        if let Some(h) = s.unshaded_h.get(id).copied() {
+            apply_shade(&mut expanded, &s.graph, *id, h);
+        }
+    }
+    let (rederived, graph) = rederive(&expanded, &s.graph);
+    // A group that grew may now hang off the display; same rescue as a
+    // topology change, so it comes back rigidly with its bonds intact.
+    let mut layout = rescue_layout(&rederived, &graph, &s.monitors);
+    layout = keep_layout_in_reach(
+        &layout,
+        &graph,
+        &s.monitors,
+        new_zoom,
+        platform::platform().confines_to_work_area(),
+    );
+    let shaded: Vec<WindowId> = s.shaded.iter().copied().collect();
+    for id in shaded {
+        let Some(r) = layout.get(&id).copied() else {
+            continue;
+        };
+        s.unshaded_h.insert(id, r.h);
+        let at = monitor_at(&s.monitors, r.x, r.y)
+            .map(|m| m.scale)
+            .unwrap_or(s.scale);
+        apply_shade(
+            &mut layout,
+            &graph,
+            id,
+            bond::d40::physical(SHADE_H * new_zoom, at),
+        );
+    }
+    s.graph = graph;
+    s.layout = layout.clone();
+    layout
 }
 
 // ---- rescue -----------------------------------------------------------------
@@ -1966,9 +2363,71 @@ pub fn reach_layout(
     monitors: &[MonitorInfo],
     zoom: f64,
 ) -> Layout {
+    keep_layout_in_reach(layout, graph, monitors, zoom, false)
+}
+
+/// D182: the rigid translation that keeps every member of a group wholly
+/// inside the work area, or (0, 0) when it already is. The area is the work
+/// area of the display nearest the group, joined to its neighbours' where the
+/// group could slide across the seam (`screen_rect_for`'s walk), so a group
+/// may still straddle two displays as Mutter allows. A group larger than the
+/// area keeps its top and left edges, where the title bars are.
+pub fn confine_clamp(layout: &Layout, group: &[WindowId], monitors: &[MonitorInfo]) -> (Px, Px) {
+    let Some(bounds) = bond::bounds(layout, group) else {
+        return (0, 0);
+    };
+    let Some(m) = nearest_monitor(monitors, bounds) else {
+        return (0, 0);
+    };
+    let works: Vec<Rect> = monitors.iter().map(|m| m.work).collect();
+    contain_translation(bounds, merged_rect_for(&works, m.work, bounds))
+}
+
+/// D182: would this splitter or grip frame take a group that fits inside the
+/// work area out of it? Then the frame is refused and the edge stops where
+/// the area does, as it would at a window's minimum size. Only where the
+/// window manager confines windows, and never for a group that did not fit to
+/// begin with, which would otherwise be stuck.
+fn grows_out(
+    before: &Layout,
+    after: &Layout,
+    group: &[WindowId],
+    monitors: &[MonitorInfo],
+) -> bool {
+    platform::platform().confines_to_work_area()
+        && confine_clamp(before, group, monitors) == (0, 0)
+        && confine_clamp(after, group, monitors) != (0, 0)
+}
+
+/// The clamp a group gets wherever it moves or grows: within reach (#101,
+/// D88), or wholly inside the work area where the window manager would
+/// otherwise clamp each window on its own and shear the group (D182).
+pub fn keep_in_reach(
+    layout: &Layout,
+    group: &[WindowId],
+    monitors: &[MonitorInfo],
+    zoom: f64,
+    confine: bool,
+) -> (Px, Px) {
+    if confine {
+        confine_clamp(layout, group, monitors)
+    } else {
+        reach_clamp(layout, group, monitors, zoom)
+    }
+}
+
+/// `keep_in_reach` for every connected component: launch, the display
+/// rescue and a re-zoom.
+pub fn keep_layout_in_reach(
+    layout: &Layout,
+    graph: &WindowGraph,
+    monitors: &[MonitorInfo],
+    zoom: f64,
+    confine: bool,
+) -> Layout {
     let mut out = layout.clone();
     for comp in graph.components(&CLASSIC) {
-        let (dx, dy) = reach_clamp(&out, &comp, monitors, zoom);
+        let (dx, dy) = keep_in_reach(&out, &comp, monitors, zoom, confine);
         if (dx, dy) != (0, 0) {
             bond::translate_group(&mut out, &comp, dx, dy);
         }
@@ -2049,29 +2508,61 @@ pub fn check_displays(app: &AppHandle) {
         p.restore_no_activate(*w);
     }
 
-    let (layout, moved) = {
+    let (layout, moved, rescaled) = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
         s.minimized = false;
-        s.monitors = monitors.clone();
+        let old_monitors = std::mem::replace(&mut s.monitors, monitors.clone());
+        let old_scale = s.scale;
         s.scale = monitors.first().map(|m| m.scale).unwrap_or(s.scale);
-        let rescued = rescue_layout(&s.layout, &s.graph, &s.monitors);
-        let rescued = reach_layout(&rescued, &s.graph, &s.monitors, s.zoom());
+        let before = s.layout.clone();
+        // D182: where one scale covers the whole desktop, a display coming or
+        // going can change it for every window at once. The toolkit follows
+        // and redraws at the new scale without resizing anything, so the
+        // layout is re-derived for it, positions and sizes both.
+        let rescaled = p.one_scale() && (s.scale - old_scale).abs() > 1e-6;
+        let rescued = if rescaled {
+            let (zoom, new_scale) = (s.zoom(), s.scale);
+            eprintln!("wm: the desktop's scale went from {old_scale} to {new_scale}");
+            rederive_state(&mut s, zoom, |l, g| {
+                rescale_layout(l, g, &old_monitors, &monitors, (old_scale, new_scale), zoom)
+            })
+        } else {
+            let rescued = rescue_layout(&s.layout, &s.graph, &s.monitors);
+            keep_layout_in_reach(
+                &rescued,
+                &s.graph,
+                &s.monitors,
+                s.zoom(),
+                p.confines_to_work_area(),
+            )
+        };
         let moved: Vec<WindowId> = CLASSIC
             .iter()
             .copied()
-            .filter(|id| s.layout.get(id) != rescued.get(id))
+            .filter(|id| before.get(id) != rescued.get(id))
             .collect();
         s.layout = rescued.clone();
-        (rescued, moved)
+        (rescued, moved, rescaled)
     }; // D54: lock dropped before the OS is touched.
+
+    // D182: satellites `minimize_group` hid rather than minimised come back
+    // with the group, now that the rescue has cleared the flag that would
+    // have brought them back.
+    if !p.minimises_taskbarless() {
+        show_hidden(app);
+    }
 
     if !moved.is_empty() {
         eprintln!(
             "wm: display topology changed, rescued {} window(s) onto a surviving display",
             moved.len()
         );
-        push_to_os(app, &layout, &moved);
+        if rescaled {
+            remap(app, moved);
+        } else {
+            push_to_os(app, &layout, &moved);
+        }
     } else if !minimized.is_empty() {
         // Un-minimizing alone can leave the OS geometry behind the model, so
         // re-assert it (D58: the model and the OS have to be made to agree,
@@ -3391,6 +3882,135 @@ mod tests {
         // and wait for one to come back.
         let s = stacked();
         assert_eq!(rescue_layout(&s.layout, &s.graph, &[]), s.layout);
+    }
+
+    // ---- confined to the work area (D182) -----------------------------------
+
+    /// The GNOME laptop the Linux spike ran on: the dock on the left, the top
+    /// bar along the top.
+    fn gnome() -> Vec<MonitorInfo> {
+        vec![MonitorInfo {
+            rect: Rect::new(0, 0, 1920, 1080),
+            scale: 1.0,
+            work: Rect::new(67, 32, 1853, 1048),
+        }]
+    }
+
+    #[test]
+    fn a_group_past_the_dock_comes_inside_the_work_area_whole() {
+        let s = stacked();
+        let ms = gnome();
+        let mut l = s.layout.clone();
+        bond::translate_group(&mut l, &CLASSIC, -15, 100);
+        // Reach is satisfied, since every bar keeps a grab inside; on Windows
+        // that is where the group stays. Mutter would put each window at
+        // x = 67 on its own; the engine moves the group there first.
+        assert_eq!(reach_clamp(&l, &CLASSIC, &ms, 1.0), (0, 0));
+        assert_eq!(confine_clamp(&l, &CLASSIC, &ms), (67 + 15, 0));
+        let out = keep_layout_in_reach(&l, &s.graph, &ms, 1.0, true);
+        assert!(CLASSIC.iter().all(|id| out[id].x == 67));
+        assert!(bond::violations(&s.graph, &out).is_empty());
+        assert_eq!(keep_layout_in_reach(&l, &s.graph, &ms, 1.0, false), l);
+    }
+
+    #[test]
+    fn a_doubled_stack_near_the_bottom_rises_whole_rather_than_shearing() {
+        // The owner's 2x at the bottom right: Mutter left the EQ and the
+        // playlist overlapping by 204 px.
+        let mut l = Layout::new();
+        for (i, id) in CLASSIC.iter().enumerate() {
+            l.insert(*id, Rect::new(1370, 820 + 232 * i as Px, 550, 232));
+        }
+        let s = stacked();
+        let out = keep_layout_in_reach(&l, &s.graph, &gnome(), 2.0, true);
+        assert_eq!(out[&PLAYLIST].bottom(), 32 + 1048);
+        assert_eq!(out[&MAIN].y, 32 + 1048 - 3 * 232);
+        assert!(CLASSIC.iter().all(|id| out[id].x == 1370));
+        assert!(bond::violations(&s.graph, &out).is_empty());
+    }
+
+    #[test]
+    fn a_group_may_straddle_two_work_areas_side_by_side() {
+        // Stage 6's arrangement as X saw it at scale 2: the panel with its
+        // dock and bar, the external display to its right with neither.
+        let ms = vec![
+            MonitorInfo {
+                rect: Rect::new(0, 0, 3840, 2160),
+                scale: 2.0,
+                work: Rect::new(134, 64, 3706, 2096),
+            },
+            mon(3840, 0, 5120, 2880, 2.0),
+        ];
+        let mut l = Layout::new();
+        for (i, id) in CLASSIC.iter().enumerate() {
+            l.insert(*id, Rect::new(3600, 500 + 232 * i as Px, 550, 232));
+        }
+        assert_eq!(confine_clamp(&l, &CLASSIC, &ms), (0, 0));
+        // Off the far side of the external display it comes back.
+        bond::translate_group(&mut l, &CLASSIC, 5500, 0);
+        assert_eq!(
+            confine_clamp(&l, &CLASSIC, &ms).0,
+            3840 + 5120 - (3600 + 5500 + 550)
+        );
+    }
+
+    // ---- one scale for the desktop (D182) -----------------------------------
+
+    #[test]
+    fn one_display_to_200_percent_resizes_in_place_and_keeps_its_seams() {
+        // X's screen stays the panel's 1920 x 1080 at 200 %, so nothing moves.
+        let (mut l, g) = initial_layout(1.0, 1.0);
+        // A playlist two steps taller, which must stay two steps taller.
+        let pl = l[&PLAYLIST];
+        l.insert(PLAYLIST, Rect::new(pl.x, pl.y, pl.w, pl.h + 2 * 29));
+        let at1 = [mon(0, 0, 1920, 1080, 1.0)];
+        let at2 = [mon(0, 0, 1920, 1080, 2.0)];
+        let (out, g2) = rescale_layout(&l, &g, &at1, &at2, (1.0, 2.0), 1.0);
+        assert_eq!(out[&MAIN], Rect::new(120, 120, 550, 232));
+        assert_eq!(out[&EQ], Rect::new(120, 352, 550, 232));
+        assert_eq!(out[&PLAYLIST], Rect::new(120, 584, 550, 232 + 2 * 58));
+        assert!(bond::violations(&g2, &out).is_empty());
+        let (back, _) = rescale_layout(&out, &g2, &at2, &at1, (2.0, 1.0), 1.0);
+        assert_eq!(back, l);
+    }
+
+    #[test]
+    fn a_display_that_doubles_xs_screen_moves_the_group_with_it() {
+        // Stage 6: a 150 % display joined the 100 % panel, X went to scale 2,
+        // and the panel became 3840 x 2160 in X's pixels.
+        let (l, g) = initial_layout(1.0, 1.0);
+        let before = [mon(0, 0, 1920, 1080, 1.0)];
+        let after = [mon(0, 0, 3840, 2160, 2.0), mon(3840, 0, 5120, 2880, 2.0)];
+        let (out, g2) = rescale_layout(&l, &g, &before, &after, (1.0, 2.0), 1.0);
+        assert_eq!(out[&MAIN], Rect::new(240, 240, 550, 232));
+        assert!(bond::violations(&g2, &out).is_empty());
+        // And the Dell goes again: a window that was on it keeps its place for
+        // the rescue, sized for the scale left.
+        let mut on_dell = out.clone();
+        bond::translate_group(&mut on_dell, &CLASSIC, 4000, 0);
+        let (gone, _) = rescale_layout(&on_dell, &g2, &after, &before, (2.0, 1.0), 1.0);
+        assert_eq!(gone[&MAIN], Rect::new(4240, 240, 275, 116));
+    }
+
+    #[test]
+    fn a_fractional_scale_change_keeps_seams_flush() {
+        let (l, g) = initial_layout(1.0, 2.0);
+        let (out, g2) = rescale_layout(&l, &g, &[], &[], (1.0, 1.25), 2.0);
+        assert_eq!(out[&MAIN].w, bond::d40::physical(CHROME_W * 2.0, 1.25));
+        assert_eq!((out[&MAIN].x, out[&MAIN].y), (l[&MAIN].x, l[&MAIN].y));
+        assert!(bond::violations(&g2, &out).is_empty());
+    }
+
+    #[test]
+    fn mains_width_says_the_scale_a_layout_was_saved_at() {
+        let (l, _) = initial_layout(1.0, 1.0);
+        assert_eq!(saved_scale(&l, 1.0), Some(1.0));
+        let (l, _) = initial_layout(2.0, 1.0);
+        assert_eq!(saved_scale(&l, 1.0), Some(2.0));
+        let (l, _) = initial_layout(1.0, 2.0);
+        assert_eq!(saved_scale(&l, 2.0), Some(1.0));
+        let (l, _) = initial_layout(1.25, 1.0);
+        assert!((saved_scale(&l, 1.0).unwrap() - 1.25).abs() < 0.01);
     }
 
     // ---- reach (#101, D88) --------------------------------------------------

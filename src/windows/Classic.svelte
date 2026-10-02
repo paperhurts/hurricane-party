@@ -444,6 +444,9 @@
       toggleShade();
       return;
     }
+    // The drag measures from the press, not from the first move it waits for
+    // (D182).
+    if (e.button === 0) invoke("wm_press");
     arm(e, () => {
       gesture = "move";
       invoke("wm_drag_start", { label });
@@ -458,6 +461,9 @@
       demagnetize(side);
       return;
     }
+    // A seam that cannot resize is a move handle (D35), and a move measures
+    // from the press (D182). Also replaces any press a title click left.
+    if (e.button === 0) invoke("wm_press");
     arm(e, () => {
       // Provisionally a move, so the frames arriving before Rust answers are
       // not dropped. Rust decides which it really is: a seam whose neighbours
