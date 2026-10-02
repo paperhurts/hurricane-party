@@ -1400,6 +1400,7 @@ dependencies = [
  "icu_normalizer",
  "icu_properties",
  "lofty",
+ "percent-encoding",
  "png 0.18.1",
  "reqwest",
  "rusqlite",

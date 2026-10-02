@@ -11,6 +11,7 @@ mod jobs;
 mod layout;
 mod library;
 mod localimport;
+mod media_server;
 mod packs;
 mod painted;
 mod pipeline;
@@ -1065,6 +1066,9 @@ fn set_cookies_file(app: AppHandle, path: String) -> Result<String, String> {
 struct OwnFfmpeg {
     path: String,
     present: bool,
+    /// What an ffmpeg is called here, for the picker: `ffmpeg.exe` on
+    /// Windows, `ffmpeg` on Linux (#187).
+    file: String,
 }
 
 #[tauri::command]
@@ -1075,7 +1079,11 @@ fn get_ffmpeg(app: AppHandle) -> OwnFfmpeg {
         db::get_setting(&conn, pipeline::FFMPEG_SETTING).unwrap_or_default()
     };
     let present = pipeline::own_ffmpeg(&app).is_some();
-    OwnFfmpeg { path, present }
+    OwnFfmpeg {
+        path,
+        present,
+        file: format!("ffmpeg{}", std::env::consts::EXE_SUFFIX),
+    }
 }
 
 /// Use an ffmpeg of a person's own, or the bundled one again with "".
@@ -2050,6 +2058,10 @@ pub fn run() {
             // is no useful work to do if it is wrong. Panics if awareness is
             // not per-monitor-v2 — deliberately, and permanently.
             eprintln!("DPI awareness: {}", platform::platform().assert_dpi_aware());
+            // D184: where the webview cannot play from the asset protocol.
+            if platform::platform().media_over_loopback() {
+                media_server::start(app.handle());
+            }
 
             let handle = app.handle().clone();
             let path = handle
@@ -2212,6 +2224,7 @@ pub fn run() {
             export_cookies_from_browser,
             get_cookies_file,
             get_ffmpeg,
+            media_server::media_base,
             set_ffmpeg,
             open_library_folder,
             get_download_dir,

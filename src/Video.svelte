@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+  import { invoke } from "@tauri-apps/api/core";
+  import { mediaSrc } from "./lib/media";
   import { emitTo, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { applyTheme, isWearable } from "./lib/theme";
@@ -20,6 +21,20 @@
   };
 
   let track = $state<MediaRow | null>(null);
+  // Where the element plays it from (D184), resolved when the track changes.
+  let src = $state("");
+  $effect(() => {
+    const t = track;
+    src = "";
+    if (!t) return;
+    let live = true;
+    mediaSrc(t.path).then((u) => {
+      if (live) src = u;
+    });
+    return () => {
+      live = false;
+    };
+  });
   let error = $state<string | null>(null);
   // The error is the file not opening (#43), the one case where "remove it"
   // is the right offer (#78).
@@ -209,13 +224,13 @@
         <button class="act" onclick={removeMissing}>Remove from library</button>
       {/if}
     </div>
-  {:else if track}
+  {:else if track && src}
     <!-- svelte-ignore a11y_media_has_caption -->
     <!-- A file that has moved used to leave this blank and silent (#43). The
          element reports it; it just has to be listened to. -->
     <video
       bind:this={video}
-      src={convertFileSrc(track.path)}
+      {src}
       controls
       autoplay
       onplay={() => {

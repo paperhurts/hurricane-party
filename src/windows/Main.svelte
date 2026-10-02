@@ -3,7 +3,8 @@
   // (D5) live here, so the analyser reads the sound that is actually coming
   // out; the library window is a remote that says "play this" and mirrors what
   // is playing. Transport arriving from the control pipe lands here too.
-  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+  import { invoke } from "@tauri-apps/api/core";
+  import { mediaSrc } from "../lib/media";
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import Classic from "./Classic.svelte";
   import SpectrumBars from "./SpectrumBars.svelte";
@@ -176,7 +177,7 @@
     // and a minimised group stays minimised whatever asked (#191, D152).
     if (t.raise) invoke("wm_raise", { label: "main" }).catch(() => {});
     ensureGraph();
-    audio.src = convertFileSrc(t.path);
+    audio.src = await mediaSrc(t.path);
     // One transport (D69): starting a track pauses a video that is playing.
     // Nothing resumes it; the video window stays on its paused frame.
     emitTo("video", "hp://pause").catch(() => {});

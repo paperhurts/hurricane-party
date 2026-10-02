@@ -584,17 +584,21 @@
    * newer one, or one with more in it. Rust asks it what it is before keeping
    * it, and a copy that has gone since is reported while the bundled one runs.
    */
-  let ffmpeg = $state<{ path: string; present: boolean }>({ path: "", present: false });
+  type OwnFfmpeg = { path: string; present: boolean; file: string };
+  let ffmpeg = $state<OwnFfmpeg>({ path: "", present: false, file: "ffmpeg" });
   async function pickFfmpeg() {
+    // `ffmpeg.exe` on Windows; a bare `ffmpeg` on Linux, which has no
+    // extension to filter on (#187).
+    const exe = ffmpeg.file.endsWith(".exe");
     const picked = await openDialog({
       multiple: false,
-      title: "Pick an ffmpeg.exe",
-      filters: [{ name: "ffmpeg", extensions: ["exe"] }],
+      title: `Pick an ${ffmpeg.file}`,
+      filters: exe ? [{ name: "ffmpeg", extensions: ["exe"] }] : undefined,
     });
     if (typeof picked !== "string") return;
     try {
       const said = await invoke<string>("set_ffmpeg", { path: picked });
-      ffmpeg = await invoke<{ path: string; present: boolean }>("get_ffmpeg");
+      ffmpeg = await invoke<OwnFfmpeg>("get_ffmpeg");
       notice = `Downloads now use your ffmpeg: ${said}.`;
     } catch (e) {
       notice = `That ffmpeg was refused: ${e instanceof Error ? e.message : String(e)}`;
@@ -602,7 +606,7 @@
   }
   async function clearFfmpeg() {
     await invoke<string>("set_ffmpeg", { path: "" });
-    ffmpeg = { path: "", present: false };
+    ffmpeg = { ...ffmpeg, path: "", present: false };
     notice = "Downloads use the ffmpeg that ships with the app again.";
   }
 
@@ -628,7 +632,7 @@
     invoke<number>("get_concurrency").then((n) => (concurrency = n));
     refreshDownloadDir();
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
-    invoke<{ path: string; present: boolean }>("get_ffmpeg").then((f) => (ffmpeg = f));
+    invoke<OwnFfmpeg>("get_ffmpeg").then((f) => (ffmpeg = f));
     invoke<CookieSource[]>("cookie_browsers").then((b) => (browsers = b));
 
     // What changes elsewhere while this is open: Purricane's skin bringing its

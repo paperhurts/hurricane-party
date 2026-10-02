@@ -352,14 +352,24 @@ fn strip_video_tags(song: &str) -> String {
 
 /// Whether a file is named as an ffmpeg is, before it is run to ask (D133):
 /// `ffmpeg.exe`, or a name that begins with it, like the sidecar's own
-/// `ffmpeg-x86_64-pc-windows-msvc.exe`.
+/// `ffmpeg-x86_64-pc-windows-msvc.exe`; on Linux `ffmpeg`, with no extension.
 pub fn named_like_ffmpeg(name: &str) -> std::result::Result<(), String> {
+    named_like_ffmpeg_on(name, std::env::consts::EXE_SUFFIX)
+}
+
+/// `named_like_ffmpeg` for a platform's executable suffix, `.exe` or none.
+fn named_like_ffmpeg_on(name: &str, suffix: &str) -> std::result::Result<(), String> {
     let n = name.to_ascii_lowercase();
-    if n.starts_with("ffmpeg") && n.ends_with(".exe") {
+    let ends_right = if suffix.is_empty() {
+        !n.contains('.')
+    } else {
+        n.ends_with(suffix)
+    };
+    if n.starts_with("ffmpeg") && ends_right {
         Ok(())
     } else {
         Err(format!(
-            "{name} is not ffmpeg: pick a file called ffmpeg.exe"
+            "{name} is not ffmpeg: pick a file called ffmpeg{suffix}"
         ))
     }
 }
@@ -392,14 +402,24 @@ pub fn check_ffmpeg(version: &str, encoders: &str) -> std::result::Result<String
 /// ffmpeg installed, and silently doesn't on a clean machine. That is exactly
 /// the failure this app cannot have the week before a storm.
 fn bundled_ffmpeg() -> Option<PathBuf> {
-    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    for name in ["ffmpeg.exe", "ffmpeg"] {
-        let p = dir.join(name);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
+    bundled("ffmpeg")
+}
+
+/// Path to the bundled deno, for the same reason (D46): yt-dlp looks for its
+/// JS runtime on PATH. On Windows it also found the copy beside it; on Linux
+/// it does not, and says "JS runtimes: none", the quiet loss of formats D46
+/// is about (found running the pinned build, D183).
+fn bundled_deno() -> Option<PathBuf> {
+    bundled("deno")
+}
+
+/// A sidecar Tauri placed beside the main executable, by its bare name.
+fn bundled(name: &str) -> Option<PathBuf> {
+    let p = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    p.exists().then_some(p)
 }
 
 /// The browsers yt-dlp can read a cookie store from on Windows (D113).
@@ -857,25 +877,31 @@ fn ytdlp_base(app: &AppHandle) -> Vec<String> {
 /// The same, for the one call that wants a list expanded rather than reduced
 /// to its first video (#137).
 fn ytdlp_args_for(app: &AppHandle, playlists: bool) -> Vec<String> {
-    ytdlp_args(cookies_file(app).as_deref(), playlists)
+    ytdlp_args(
+        cookies_file(app).as_deref(),
+        playlists,
+        bundled_deno().as_deref(),
+    )
 }
 
 /// The same list without the lookup, so its shape can be tested without an app.
 ///
 /// `--js-runtimes deno` is D46. Without a JS runtime, yt-dlp warns that
 /// "YouTube extraction without a JS runtime has been deprecated" and silently
-/// returns fewer formats — a degradation that looks like success.
+/// returns fewer formats — a degradation that looks like success. With the
+/// bundled deno's path it is `deno:<path>`, yt-dlp's `RUNTIME[:PATH]`, which
+/// splits at the first colon, so a drive letter's survives.
 ///
 /// `--no-playlist` is on every call but the list probe: a job downloads the one
 /// video it was queued for, so its file keeps the `[id]` a resume depends on
 /// (D49), and a pasted `watch?v=…&list=…` never turns into forty downloads
 /// nobody asked for.
-fn ytdlp_args(cookies: Option<&Path>, playlists: bool) -> Vec<String> {
-    let mut args: Vec<String> = vec![
-        "--js-runtimes".into(),
-        "deno".into(),
-        "--no-warnings".into(),
-    ];
+fn ytdlp_args(cookies: Option<&Path>, playlists: bool, deno: Option<&Path>) -> Vec<String> {
+    let runtime = match deno {
+        Some(p) => format!("deno:{}", p.to_string_lossy()),
+        None => "deno".into(),
+    };
+    let mut args: Vec<String> = vec!["--js-runtimes".into(), runtime, "--no-warnings".into()];
     if !playlists {
         args.push("--no-playlist".into());
     }
@@ -1314,11 +1340,16 @@ fn playlist_from(
             .filter(|s| !s.is_empty())
     };
     let entries = v.get("entries").and_then(|e| e.as_array());
+    // A list may hold one video twice. It is one download, and the picker
+    // keys its rows by id, so a repeat threw while drawing and left the
+    // library saying "Reading the list…" for good (found by hand on #187).
+    // The first place it appears is the one kept.
+    let mut seen = std::collections::HashSet::new();
     let items = entries
         .map(|a| {
             a.iter()
                 .filter_map(|e| {
-                    let id = str_of(e, "id")?;
+                    let id = str_of(e, "id").filter(|id| seen.insert(id.clone()))?;
                     let title = str_of(e, "title");
                     // YouTube marks the entries it will not show; a bare id
                     // is the same thing unexplained (D119).
@@ -2249,7 +2280,7 @@ mod tests {
     /// Every yt-dlp invocation must terminate option parsing before the URL.
     #[test]
     fn terminator_is_added_per_call_site_not_in_base() {
-        assert!(!ytdlp_args(None, false).contains(&"--".to_string()));
+        assert!(!ytdlp_args(None, false, None).contains(&"--".to_string()));
     }
 
     /// The progress template is pipe-delimited and parsed positionally — never
@@ -2470,6 +2501,23 @@ mod tests {
     }
 
     #[test]
+    fn a_video_a_list_holds_twice_is_offered_once_where_it_first_appears() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"entries": [
+                {"id": "aaaaaaaaaaa", "title": "One"},
+                {"id": "bbbbbbbbbbb", "title": "Two"},
+                {"id": "aaaaaaaaaaa", "title": "One again"},
+                {"id": "ccccccccccc", "title": "Three"}
+            ]}"#,
+        )
+        .unwrap();
+        let probe = playlist_from(&v, "PL123", |_| crate::library::Held::default());
+        let ids: Vec<&str> = probe.items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"]);
+        assert_eq!(probe.items[0].title, "One");
+    }
+
+    #[test]
     fn looking_for_a_sign_in_elsewhere_names_only_known_stores() {
         // Whatever this machine holds, every answer is the label of a store
         // `cookie_sources` offers — never a path, never a cookie (D115).
@@ -2610,13 +2658,22 @@ mod tests {
 
     #[test]
     fn only_a_file_named_as_ffmpeg_is_run_to_ask() {
-        assert!(named_like_ffmpeg("ffmpeg.exe").is_ok());
-        assert!(named_like_ffmpeg("FFmpeg.EXE").is_ok());
-        assert!(named_like_ffmpeg("ffmpeg-x86_64-pc-windows-msvc.exe").is_ok());
-        let why = named_like_ffmpeg("notepad.exe").unwrap_err();
+        let win = |n| named_like_ffmpeg_on(n, ".exe");
+        assert!(win("ffmpeg.exe").is_ok());
+        assert!(win("FFmpeg.EXE").is_ok());
+        assert!(win("ffmpeg-x86_64-pc-windows-msvc.exe").is_ok());
+        let why = win("notepad.exe").unwrap_err();
         assert!(why.contains("notepad.exe"), "{why}");
-        assert!(named_like_ffmpeg("ffmpeg.txt").is_err());
-        assert!(named_like_ffmpeg("my-ffmpeg.exe").is_err());
+        assert!(win("ffmpeg.txt").is_err());
+        assert!(win("my-ffmpeg.exe").is_err());
+        // Linux (#187): no extension, and one is a sign of the wrong file.
+        let linux = |n| named_like_ffmpeg_on(n, "");
+        assert!(linux("ffmpeg").is_ok());
+        assert!(linux("ffmpeg-x86_64-unknown-linux-gnu").is_ok());
+        assert!(linux("ffmpeg.txt").is_err());
+        assert!(linux("ffmpeg.exe").is_err());
+        assert!(linux("my-ffmpeg").is_err());
+        assert!(linux("notepad").unwrap_err().contains("called ffmpeg"));
     }
 
     #[test]
@@ -2640,10 +2697,24 @@ mod tests {
     }
 
     #[test]
+    fn the_bundled_deno_is_named_to_yt_dlp_by_its_path() {
+        let at = |args: &[String]| {
+            let i = args.iter().position(|a| a == "--js-runtimes").unwrap();
+            args[i + 1].clone()
+        };
+        assert_eq!(at(&ytdlp_args(None, false, None)), "deno");
+        let p = Path::new(r"C:\Program Files\hurricane-party\deno.exe");
+        assert_eq!(
+            at(&ytdlp_args(None, false, Some(p))),
+            r"deno:C:\Program Files\hurricane-party\deno.exe"
+        );
+    }
+
+    #[test]
     fn cookies_become_one_flag_and_its_path() {
-        let none = ytdlp_args(None, false);
+        let none = ytdlp_args(None, false, None);
         assert!(!none.contains(&"--cookies".to_string()));
-        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")), false);
+        let with = ytdlp_args(Some(Path::new(r"C:\keys\cookies.txt")), false, None);
         let at = with
             .iter()
             .position(|a| a == "--cookies")

@@ -1,20 +1,20 @@
 # Third-party software in the download
 
-The Windows zip carries three programs beside `hurricane-party.exe`. hurricane-party starts each as a separate program and links none of them into itself, so each keeps its own licence, whose text is in this folder.
+The download carries three programs beside hurricane-party itself. hurricane-party starts each as a separate program and links none of them into itself, so each keeps its own licence, whose text is in this folder.
 
 | Program | Version | Licence | Text here |
 |---|---|---|---|
-| ffmpeg | N-126504-g1b8a2b690b (2026-09-11), yt-dlp's Windows x64 GPL build | GPL version 3 or later: built with `--enable-gpl --enable-version3` | `ffmpeg-GPL-3.0.txt` |
-| yt-dlp | 2026.08.19, the official Windows executable | The Unlicense. The executable bundles Python and other components under their own licences | `yt-dlp-LICENSE.txt`, `yt-dlp-THIRD_PARTY_LICENSES.txt` |
+| ffmpeg | N-127083-g65a3870462 (2026-10-01), yt-dlp's GPL build: Windows x64, and Linux x64 | GPL version 3 or later: built with `--enable-gpl --enable-version3` | `ffmpeg-GPL-3.0.txt` |
+| yt-dlp | 2026.08.19, the official standalone executable for Windows (`yt-dlp.exe`) and Linux (`yt-dlp_linux`) | The Unlicense. The executable bundles Python and other components under their own licences | `yt-dlp-LICENSE.txt`, `yt-dlp-THIRD_PARTY_LICENSES.txt` |
 | Deno | 2.6.4 | MIT | `deno-LICENSE.md` |
 
 ## Where the source is
 
 **ffmpeg**, as shipped:
 
-- FFmpeg at the commit this build was made from: <https://github.com/FFmpeg/FFmpeg/tree/1b8a2b690b>
-- The scripts that built it, which name every library in it and the version of each: <https://github.com/yt-dlp/FFmpeg-Builds/tree/0309b22040edfc40b855f3a2d917c39c2d3975af>
-- The release the binary came from: <https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-09-11-17-43>
+- FFmpeg at the commit this build was made from: <https://github.com/FFmpeg/FFmpeg/tree/65a3870462>
+- The scripts that built it, which name every library in it and the version of each: <https://github.com/yt-dlp/FFmpeg-Builds/tree/1c5094a1995b3a1cff6d8696d339bfb304384716>
+- The release the binary came from: <https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-10-01-19-27>, which yt-dlp removes after a few weeks; the same archives are kept at <https://github.com/paperhurts/hurricane-party/releases/tag/sidecars-2026-10> (D183)
 - `ffmpeg -version` prints the build's full configuration.
 
 **yt-dlp**: <https://github.com/yt-dlp/yt-dlp/tree/2026.08.19>

@@ -38,7 +38,19 @@ only by merging a pull request on GitHub.
 
 `fetch-sidecars.ps1` populates `src-tauri/binaries/` with the three bundled helpers.
 Versions are **pinned deliberately** (O11) — a surprise yt-dlp bump the day before a
-storm is the wrong failure. Bump them on purpose, test, then commit the new pin.
+storm is the wrong failure. Bump them on purpose, test, then commit the new pin. The
+pinned files come from this repo's own `sidecars-*` release, each checked by SHA-256,
+because upstream prunes its dated builds (D183).
+
+On Linux (#187, the port under way), the same with a shell script, and the app run
+under XWayland (D181):
+
+```sh
+tools/fetch-sidecars.sh
+pnpm install && pnpm build
+cd src-tauri && cargo build --features tauri/custom-protocol
+GDK_BACKEND=x11 ./target/debug/hurricane-party
+```
 
 | Sidecar | Why | Decision |
 |---|---|---|
