@@ -13,9 +13,11 @@
 //!   alpha, which is exact at whole factors and even across frames otherwise.
 //!
 //! Both sheets are packed from the frames themselves, the `@2x` twin at twice
-//! the factor (D160), and the manifest carries the format's timings.
+//! the factor (D160), and the manifest carries the format's timings. A state
+//! holds up to 32 poses, and the sheet is as wide as the longest state and
+//! never narrower than eight cells, as `sheet.ps1` lays it out (D183).
 
-use crate::painted::{self, Image, CELL, COLUMNS, STATES};
+use crate::painted::{self, Image, CELL, MAX_COLUMNS, STATES};
 use std::fs;
 use std::path::Path;
 
@@ -320,9 +322,9 @@ fn pack(name: &str, states: Vec<Poses>) -> Result<Vec<(String, Vec<u8>)>, String
     }
     let mut poses: Vec<Vec<Pose>> = Vec::new();
     for (state, frames) in STATES.iter().zip(&states) {
-        if frames.len() > COLUMNS as usize {
+        if frames.len() > MAX_COLUMNS as usize {
             return Err(format!(
-                "{state} has {} frames; a state holds {COLUMNS}",
+                "{state} has {} frames; a state holds {MAX_COLUMNS}",
                 frames.len()
             ));
         }
@@ -341,25 +343,26 @@ fn pack(name: &str, states: Vec<Poses>) -> Result<Vec<(String, Vec<u8>)>, String
         factor = factor.floor();
     }
     let counts: Vec<u32> = poses.iter().map(|p| p.len() as u32).collect();
+    let columns = painted::columns_for(&counts);
     Ok(vec![
         (
             "companion.json".into(),
-            painted::manifest(name, &counts).into_bytes(),
+            painted::manifest(name, &counts, columns).into_bytes(),
         ),
         (
             "sheet.png".into(),
-            painted::encode(&sheet(&poses, factor, 1))?,
+            painted::encode(&sheet(&poses, factor, 1, columns))?,
         ),
         (
             "sheet@2x.png".into(),
-            painted::encode(&sheet(&poses, factor, 2))?,
+            painted::encode(&sheet(&poses, factor, 2, columns))?,
         ),
     ])
 }
 
-fn sheet(poses: &[Vec<Pose>], factor: f64, scale: u32) -> Image {
+fn sheet(poses: &[Vec<Pose>], factor: f64, scale: u32, columns: u32) -> Image {
     let cell = CELL * scale;
-    let (w, h) = (COLUMNS * cell, STATES.len() as u32 * cell);
+    let (w, h) = (columns * cell, STATES.len() as u32 * cell);
     let mut out = Image {
         w,
         h,
@@ -608,15 +611,58 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_without_idle_or_with_nine_walks_is_refused() {
+    fn a_folder_without_idle_or_with_33_walks_is_refused() {
         let dir = tmp("refuse");
         put(&dir, "walk-0.png", &block(8, 8, 0, 0, 8, 8));
         assert!(from_folder(&dir).unwrap_err().contains("idle"));
         put(&dir, "idle-0.png", &block(8, 8, 0, 0, 8, 8));
-        for n in 1..9 {
+        for n in 1..32 {
             put(&dir, &format!("walk-{n}.png"), &block(8, 8, 0, 0, 8, 8));
         }
-        assert!(from_folder(&dir).unwrap_err().contains("walk has 9 frames"));
+        assert!(from_folder(&dir).is_ok(), "32 walks are taken");
+        put(&dir, "walk-32.png", &block(8, 8, 0, 0, 8, 8));
+        let refused = from_folder(&dir).err().unwrap_or_default();
+        assert!(refused.contains("walk has 33 frames"), "{refused}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_20_pose_dance_widens_the_sheet_to_20_cells_and_eight_poses_keep_it_at_8() {
+        let dir = tmp("wide");
+        // Eight idle poses and a dance of twenty, pose k drawn k + 1 px wide.
+        for n in 0..8 {
+            put(&dir, &format!("idle-{n}.png"), &block(32, 32, 0, 0, 16, 32));
+        }
+        for n in 0..20 {
+            put(
+                &dir,
+                &format!("dance-{n}.png"),
+                &block(32, 32, 0, 8, n + 1, 24),
+            );
+        }
+        let (m, one, two) = sheets(&from_folder(&dir).unwrap());
+        assert_eq!((one.w, one.h, two.w, two.h), (1280, 448, 2560, 896));
+        assert_eq!(
+            m["states"]["dance"]["frames"],
+            serde_json::json!((40..60).collect::<Vec<u32>>())
+        );
+        let idle = m["states"]["idle"]["frames"].as_array().unwrap();
+        assert_eq!(idle.len(), 7 * 12);
+        assert_eq!((idle[0].as_u64(), idle[83].as_u64()), (Some(0), Some(7)));
+        // The last pose is in the last cell, the widest of the dance.
+        let last = opaque_in(&one, 64, 19, 2).unwrap();
+        let first = opaque_in(&one, 64, 0, 2).unwrap();
+        assert!(
+            last.2 - last.0 > 10 * (first.2 - first.0),
+            "{first:?} {last:?}"
+        );
+        // With the dance taken out, eight a state is the 8-wide sheet.
+        for n in 0..20 {
+            fs::remove_file(dir.join(format!("dance-{n}.png"))).unwrap();
+        }
+        let (m, one, _) = sheets(&from_folder(&dir).unwrap());
+        assert_eq!((one.w, one.h), (512, 448));
+        assert_eq!(m["states"]["idle"]["frames"][83], 7);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -812,7 +858,7 @@ mod tests {
             painted::decode_named(&fs::read(dir_in.join("sheet@2x.png")).unwrap(), "twin").unwrap();
         let dir = tmp("wee");
         for (row, state) in STATES.iter().enumerate() {
-            for col in 0..COLUMNS {
+            for col in 0..twin.w / 128 {
                 let cell = crop_rect(
                     &twin,
                     &Rect {
