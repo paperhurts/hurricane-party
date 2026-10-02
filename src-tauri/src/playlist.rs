@@ -677,8 +677,10 @@ mod tests {
     fn fixture(n: i64) -> (Connection, i64) {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(crate::db::schema_for_tests()).unwrap();
+        // A root that is nowhere on any machine. `/tmp` was, on Linux, where
+        // it is also `temp_dir()`, which a test adds as a second root.
         conn.execute(
-            "INSERT INTO library_roots (id, label, path) VALUES (1, 'test', '/tmp')",
+            "INSERT INTO library_roots (id, label, path) VALUES (1, 'test', '/hp-test-root')",
             [],
         )
         .unwrap();

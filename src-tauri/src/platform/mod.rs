@@ -109,6 +109,38 @@ pub trait WindowPlatform: Send + Sync {
     /// way, so nothing pops up in front of what they are doing.
     fn show_minimized_no_activate(&self, w: NativeWindow);
 
+    /// Where the window is on screen and how big, as the window system has it
+    /// now, in physical pixels: `(x, y, w, h)`. None while it is not mapped.
+    /// For waiting out a window manager that places a window of its own
+    /// accord (D182); where the toolkit's own answer is already the truth,
+    /// None, and the caller asks the toolkit.
+    fn placed(&self, _w: NativeWindow) -> Option<(i32, i32, u32, u32)> {
+        None
+    }
+
+    /// D182: does the window manager keep every window it places wholly
+    /// inside the work area? Mutter does, one window at a time, so a group
+    /// pushed past an edge would shear; the engine clamps the whole group
+    /// first instead. Windows lets a window hang off a display (D88).
+    fn confines_to_work_area(&self) -> bool {
+        false
+    }
+
+    /// D182: can a window that skips the taskbar be minimised? Mutter
+    /// refuses, so there Main's minimise hides its satellites instead (D86).
+    fn minimises_taskbarless(&self) -> bool {
+        true
+    }
+
+    /// D182: is there one scale for the whole desktop? X has one, so a
+    /// display coming or going can change the scale of every window at once,
+    /// and the toolkit follows it without resizing anything; the engine
+    /// re-derives the layout. Windows scales per display, and rescales a
+    /// window itself as it crosses (D52).
+    fn one_scale(&self) -> bool {
+        false
+    }
+
     /// D117: end a process **and every process it started**.
     ///
     /// The one call here that is not about a window, and it is here for the
@@ -254,9 +286,70 @@ pub fn handle_of(w: &tauri::WebviewWindow) -> NativeWindow {
     }
 }
 
-#[cfg(not(windows))]
+/// On X11 the window's own X id, found by its title (D182). NONE for a window
+/// GTK has not realized, which is every window that has never been shown.
+#[cfg(target_os = "linux")]
+pub fn handle_of(w: &tauri::WebviewWindow) -> NativeWindow {
+    w.title()
+        .ok()
+        .and_then(|t| x11_impl::find_window(&t))
+        .map(|x| NativeWindow(x as isize))
+        .unwrap_or(NativeWindow::NONE)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn handle_of(_w: &tauri::WebviewWindow) -> NativeWindow {
     NativeWindow::NONE
+}
+
+/// GTK3 holds a non-resizable window to at least 200 px tall unless the
+/// window itself asks for its size (D182). The classic windows stay
+/// non-resizable on Linux too: there tauri-runtime-wry starts a native resize
+/// from any press within 5 px of a resizable undecorated window's edge, which
+/// is the seam (D43). So every size the app sets is also asked for here,
+/// before the resize, on the main thread GTK needs.
+#[cfg(target_os = "linux")]
+pub fn hold_size(w: &tauri::WebviewWindow, width: u32, height: u32) {
+    use gtk::prelude::WidgetExt;
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let logical = |px: u32| (px as f64 / scale).round() as i32;
+    let (lw, lh) = (logical(width), logical(height));
+    let win = w.clone();
+    let _ = w.run_on_main_thread(move || {
+        if let Ok(g) = win.gtk_window() {
+            g.set_size_request(lw, lh);
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn hold_size(_w: &tauri::WebviewWindow, _width: u32, _height: u32) {}
+
+/// A classic window's own rect, in physical pixels: where `set_position` puts
+/// it and what `set_size` makes it.
+///
+/// On X11 tao's outer geometry adds the window manager's `_NET_FRAME_EXTENTS`,
+/// which a window manager may claim even for an undecorated window (WSLg's
+/// Weston claims 38/38/59/38), so the position set would never read back; the
+/// window's own rect is the inner one. And X keeps no geometry for a window
+/// that is not mapped (GTK reports tao's default 800x600 at 0,0 for one), so a
+/// hidden window has no answer yet: None. On Windows an undecorated window's
+/// outer rect is its own, and a hidden window has its real rect.
+#[cfg(target_os = "linux")]
+pub fn rect_of(
+    w: &tauri::WebviewWindow,
+) -> Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    if !w.is_visible().ok()? {
+        return None;
+    }
+    Some((w.inner_position().ok()?, w.inner_size().ok()?))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn rect_of(
+    w: &tauri::WebviewWindow,
+) -> Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>)> {
+    Some((w.outer_position().ok()?, w.outer_size().ok()?))
 }
 
 #[cfg(windows)]
@@ -265,13 +358,21 @@ mod windows_impl;
 #[cfg(not(windows))]
 mod stub;
 
+#[cfg(target_os = "linux")]
+mod x11_impl;
+
 /// The one place the platform is chosen.
 #[cfg(windows)]
 pub fn platform() -> &'static dyn WindowPlatform {
     &windows_impl::Win32Platform
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn platform() -> &'static dyn WindowPlatform {
+    &x11_impl::X11Platform
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn platform() -> &'static dyn WindowPlatform {
     &stub::StubPlatform
 }

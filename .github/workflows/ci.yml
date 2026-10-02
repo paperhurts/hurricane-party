@@ -1,5 +1,8 @@
-# Gates on every pull request and on main. Windows only: this is a Windows-first
-# project (O7) and the platform layer does not compile anywhere else.
+# Gates on every pull request and on main. Windows is the shipping platform;
+# Linux, under XWayland, is being ported (D181, D182), and its job gates the
+# app and hp-control there so the port cannot quietly stop compiling. The
+# companion joins it when it is ported: its Windows-only input does not build
+# on Linux yet. The frontend is the same on both, so only Windows checks it.
 #
 # These are exactly the gates /land runs locally, and they agree by construction:
 # warnings are errors through [lints] in each Cargo.toml, and the compiler is
@@ -94,3 +97,49 @@ jobs:
       - name: vitest
         if: ${{ !cancelled() }}
         run: pnpm test
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # The Tauri v2 prerequisites, as tools/spike-linux/README.md lists them.
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Stub the sidecars so tauri-build can run
+        run: |
+          mkdir -p src-tauri/binaries
+          for t in yt-dlp deno ffmpeg; do : > "src-tauri/binaries/$t-x86_64-unknown-linux-gnu"; done
+
+      - name: Rust toolchain (pinned by rust-toolchain.toml)
+        run: |
+          rustup show
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+            crates/hp-control/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock', 'crates/hp-control/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: rustfmt (app)
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: clippy (app)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: clippy (hp-control)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --manifest-path crates/hp-control/Cargo.toml --all-targets
+      - name: cargo test (app)
+        if: ${{ !cancelled() }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: cargo test (hp-control)
+        if: ${{ !cancelled() }}
+        run: cargo test --manifest-path crates/hp-control/Cargo.toml
