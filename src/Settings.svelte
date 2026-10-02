@@ -529,6 +529,9 @@
   type CookieSource = { browser: string; profile: string | null; label: string; spec: string };
   let browsers = $state<CookieSource[]>([]);
   let reading = $state(false);
+  /** The steps to sign in, open under the Sign-in row (#187). */
+  let cookieHelp = $state(false);
+  let os = $state("windows");
   async function fromBrowser(spec: string) {
     if (!spec || reading) return;
     const browser = browsers.find((b) => b.spec === spec)?.label ?? spec;
@@ -634,6 +637,7 @@
     invoke<string>("get_cookies_file").then((c) => (cookies = c));
     invoke<OwnFfmpeg>("get_ffmpeg").then((f) => (ffmpeg = f));
     invoke<CookieSource[]>("cookie_browsers").then((b) => (browsers = b));
+    invoke<string>("os_name").then((o) => (os = o), () => {});
 
     // What changes elsewhere while this is open: Purricane's skin bringing its
     // theme, Main's calm pill (D132), a skin that would not load and was put
@@ -846,7 +850,42 @@
           {#if cookies}
             <button class="quiet" onclick={clearCookies} title="Stop using that file">&times;</button>
           {/if}
+          <button class="link" onclick={() => (cookieHelp = !cookieHelp)} aria-expanded={cookieHelp}>
+            {cookieHelp ? "Hide" : "How?"}
+          </button>
         </div>
+        {#if cookieHelp}
+          <!-- For a private list, or a song YouTube wants you signed in for.
+               Firefox only: it is the browser whose sign-in this app can read
+               on Windows and on Linux alike (D113). Written for a child to
+               follow, one thing to do a step, and what you should see. -->
+          <ol class="help">
+            <li>
+              Open <b>Firefox</b>, the orange fox.
+              {#if os === "linux"}
+                It is already on your computer, in the row of icons at the side of the screen.
+              {:else}
+                No Firefox? Ask a grown-up to get it from <b>firefox.com</b>.
+              {/if}
+            </li>
+            <li>At the very top, type <b>youtube.com</b> and press <b>Enter</b>.</li>
+            <li>
+              Click <b>Sign in</b>, in the top right corner. Sign in with the account that is allowed to watch
+              the song. Ask a grown-up if you need the password.
+            </li>
+            <li>When your picture shows in the top right corner, you are signed in. You can leave Firefox open.</li>
+            <li>Come back to this window. Next to <b>Sign-in</b>, click <b>From a browser…</b> and pick the one that starts with <b>firefox</b>.</li>
+            <li>
+              Wait a few seconds. The words at the bottom say they found <b>a YouTube sign-in</b>, and the button
+              says <b>Cookies ✓</b>.
+            </li>
+            <li>Now paste the song again. It will download.</li>
+          </ol>
+          <p class="note help-after">
+            If it says there is no sign-in, go back to step 3. If songs stop downloading after a few weeks, do
+            steps 5 and 6 again.
+          </p>
+        {/if}
         <div class="row">
           <span class="k">ffmpeg</span>
           <span class="val" class:warn={!!ffmpeg.path && !ffmpeg.present} title={ffmpeg.path || "The ffmpeg that ships with the app"}>
@@ -909,6 +948,10 @@
   select, input:not([type="checkbox"]) { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 3px; background: var(--surface);
                   color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
   .zip { width: 12ch; }
+  .help { margin: 4px 0 4px 84px; padding-left: 18px; font-size: 12px; line-height: 1.5; color: var(--text); }
+  .help li { margin: 4px 0; }
+  .help b { color: var(--accent); font-weight: 600; }
+  .note.help-after { margin-left: 84px; }
   button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 3px; white-space: nowrap; }
   button.quiet { border-color: transparent; color: color-mix(in srgb, var(--text) 58%, transparent); }
   button.quiet:hover:not(:disabled) { color: var(--text); }

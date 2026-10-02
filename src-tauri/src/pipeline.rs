@@ -547,40 +547,77 @@ fn chromium_root(browser: &str) -> Option<PathBuf> {
 /// Firefox lists its profiles in `profiles.ini`, by name and path. yt-dlp
 /// takes either; the name is what a person recognises.
 fn firefox_profiles() -> Vec<CookieSource> {
-    let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) else {
-        return Vec::new();
-    };
-    let root = appdata.join(r"Mozilla\Firefox");
-    let Ok(ini) = std::fs::read_to_string(root.join("profiles.ini")) else {
-        return Vec::new();
-    };
+    firefox_roots()
+        .into_iter()
+        .filter_map(|root| {
+            let ini = std::fs::read_to_string(root.join("profiles.ini")).ok()?;
+            Some(profiles_in(&ini, &root))
+        })
+        .flatten()
+        .filter(|(_, dir)| dir.join("cookies.sqlite").is_file())
+        .map(|(name, dir)| {
+            source(
+                "firefox",
+                Some(dir.to_string_lossy().into_owned()),
+                Some(name),
+            )
+        })
+        .collect()
+}
+
+/// Where Firefox keeps its profiles: `%APPDATA%\Mozilla\Firefox` on Windows;
+/// on Linux (#187) wherever the install put them, which on Ubuntu is the
+/// snap's folder, then Flatpak's, the classic `~/.mozilla`, and newer
+/// Firefox's XDG folder. Read from the environment, so neither platform
+/// needs a `cfg`: each lacks the other's variable.
+fn firefox_roots() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut name: Option<String> = None;
-    let mut path: Option<String> = None;
-    let flush =
-        |name: &mut Option<String>, path: &mut Option<String>, out: &mut Vec<CookieSource>| {
-            if let (Some(n), Some(p)) = (name.take(), path.take()) {
-                let dir = root.join(p.replace('/', "\\"));
-                if dir.join("cookies.sqlite").is_file() {
-                    out.push(source(
-                        "firefox",
-                        Some(dir.to_string_lossy().into_owned()),
-                        Some(n),
-                    ));
-                }
-            }
-        };
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        out.push(PathBuf::from(appdata).join("Mozilla").join("Firefox"));
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for rel in [
+            ".mozilla/firefox",
+            "snap/firefox/common/.mozilla/firefox",
+            ".var/app/org.mozilla.firefox/.mozilla/firefox",
+            ".config/mozilla/firefox",
+        ] {
+            out.push(rel.split('/').fold(home.clone(), |p, part| p.join(part)));
+        }
+    }
+    out
+}
+
+/// Each profile `profiles.ini` names, and its folder: `Path=` is relative to
+/// the ini's own folder unless `IsRelative=0`, and always written with `/`.
+fn profiles_in(ini: &str, root: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    let (mut name, mut path, mut relative) = (None::<String>, None::<String>, true);
+    let mut flush = |name: &mut Option<String>, path: &mut Option<String>, relative: &mut bool| {
+        if let (Some(n), Some(p)) = (name.take(), path.take()) {
+            let dir = if *relative {
+                p.split('/')
+                    .fold(root.to_path_buf(), |d, part| d.join(part))
+            } else {
+                PathBuf::from(p)
+            };
+            out.push((n, dir));
+        }
+        *relative = true;
+    };
     for line in ini.lines() {
         let line = line.trim();
         if line.starts_with('[') {
-            flush(&mut name, &mut path, &mut out);
+            flush(&mut name, &mut path, &mut relative);
         } else if let Some(v) = line.strip_prefix("Name=") {
             name = Some(v.to_string());
         } else if let Some(v) = line.strip_prefix("Path=") {
             path = Some(v.to_string());
+        } else if let Some(v) = line.strip_prefix("IsRelative=") {
+            relative = v != "0";
         }
     }
-    flush(&mut name, &mut path, &mut out);
+    flush(&mut name, &mut path, &mut relative);
     out
 }
 
@@ -955,6 +992,13 @@ pub(crate) fn explain(tail: &str, cookies: &Jar) -> Option<String> {
     {
         (
             "That video is members-only, so it needs an account that has it.",
+            true,
+        )
+    } else if tail.contains("The playlist does not exist") {
+        // What YouTube tells anyone not signed in as its owner about a
+        // private list, whether or not it exists (#187, found by hand).
+        (
+            "YouTube will not show that list. A private list looks like this to anyone not signed in as its owner.",
             true,
         )
     } else if tail.contains("Private video") {
@@ -2722,6 +2766,45 @@ mod tests {
         // Its own argv entry, so a path with spaces stays one argument.
         assert_eq!(with[at + 1], r"C:\keys\cookies.txt");
         assert_eq!(with.len(), none.len() + 2);
+    }
+
+    #[test]
+    fn firefox_profiles_are_read_from_their_ini_on_either_platform() {
+        let ini = "[Install4F96D1932A9F858E]\nDefault=9r8szp9h.default\n\n[Profile1]\nName=work\nIsRelative=0\nPath=/srv/ff/work\n\n[Profile0]\nName=default\nIsRelative=1\nPath=Profiles/9r8szp9h.default\nDefault=1\n\n[General]\nVersion=2\n";
+        let root = Path::new("/home/sid/snap/firefox/common/.mozilla/firefox");
+        let got = profiles_in(ini, root);
+        assert_eq!(
+            got,
+            vec![
+                ("work".to_string(), PathBuf::from("/srv/ff/work")),
+                (
+                    "default".to_string(),
+                    root.join("Profiles").join("9r8szp9h.default")
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_private_list_says_so_and_points_at_a_sign_in() {
+        let tail = "ERROR: [youtube:tab] PLQgrSvGgdsG2l-570g5QjrEzdGHvwBxmJ: YouTube said: The playlist does not exist.";
+        let said = explain(tail, &Jar::None).unwrap();
+        assert!(
+            said.starts_with("YouTube will not show that list."),
+            "{said}"
+        );
+        assert!(said.contains("cookies.txt"), "{said}");
+        let signed_out = explain(
+            tail,
+            &Jar::SignedOut {
+                with_session: vec!["firefox".into()],
+            },
+        )
+        .unwrap();
+        assert!(
+            signed_out.contains("firefox has one right now"),
+            "{signed_out}"
+        );
     }
 
     #[test]

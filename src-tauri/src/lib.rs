@@ -1071,6 +1071,12 @@ struct OwnFfmpeg {
     file: String,
 }
 
+/// Which system this is, for help written for it: `windows`, `linux`.
+#[tauri::command]
+fn os_name() -> &'static str {
+    std::env::consts::OS
+}
+
 #[tauri::command]
 fn get_ffmpeg(app: AppHandle) -> OwnFfmpeg {
     let path = {
@@ -2224,6 +2230,7 @@ pub fn run() {
             export_cookies_from_browser,
             get_cookies_file,
             get_ffmpeg,
+            os_name,
             media_server::media_base,
             set_ffmpeg,
             open_library_folder,
