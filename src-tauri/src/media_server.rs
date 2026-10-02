@@ -31,16 +31,12 @@ pub fn base() -> Option<String> {
     BASE.get().cloned()
 }
 
-/// 128 bits the OS chose: std seeds every `RandomState` from the OS's
-/// randomness, so two of them hashed give a secret without a dependency.
+/// 128 bits from the OS's random source. Not std's `RandomState`: two made
+/// on one thread are correlated, which a hash key may be and a secret may not.
 fn secret() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let half = |n: u64| {
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u64(n);
-        h.finish()
-    };
-    format!("{:016x}{:016x}", half(1), half(2))
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("the OS has no random source");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Start the server, once, where the platform needs it.
