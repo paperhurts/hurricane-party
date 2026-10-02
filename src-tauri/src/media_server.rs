@@ -232,37 +232,41 @@ mod tests {
             .collect()
     }
 
+    /// A path as the page sends it: absolute, percent-encoded as one segment.
+    fn enc(p: &Path) -> String {
+        percent_encoding::utf8_percent_encode(
+            p.to_str().unwrap(),
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string()
+    }
+
     #[test]
     fn only_the_secret_and_an_absolute_path_get_a_file() {
         let t = "abc123";
+        // Absolute on whatever runs the test: a drive letter on Windows.
+        let file = std::env::temp_dir().join("a b[1].mp3");
         let ok = parse(
             &req(
-                "GET /abc123/%2Fhome%2Fsid%2Fa%20b%5B1%5D.mp3 HTTP/1.1",
+                &format!("GET /abc123/{} HTTP/1.1", enc(&file)),
                 &["Range: bytes=0-"],
             ),
             t,
         )
         .unwrap();
-        assert_eq!(ok.path, PathBuf::from("/home/sid/a b[1].mp3"));
+        assert_eq!(ok.path, file);
         assert!(!ok.head);
         assert_eq!(ok.range.as_deref(), Some("bytes=0-"));
-        assert!(
-            parse(&req("HEAD /abc123/%2Fx.mp3 HTTP/1.1", &[]), t)
-                .unwrap()
-                .head
-        );
+        let head = format!("HEAD /abc123/{} HTTP/1.1", enc(&file));
+        assert!(parse(&req(&head, &[]), t).unwrap().head);
         // No secret, the wrong one, a relative path, a climb, another verb.
-        assert_eq!(parse(&req("GET /%2Fx.mp3 HTTP/1.1", &[]), t), None);
-        assert_eq!(parse(&req("GET /nope/%2Fx.mp3 HTTP/1.1", &[]), t), None);
-        assert_eq!(parse(&req("GET /abc123/x.mp3 HTTP/1.1", &[]), t), None);
-        assert_eq!(
-            parse(
-                &req("GET /abc123/%2Fa%2F..%2Fetc%2Fpasswd HTTP/1.1", &[]),
-                t
-            ),
-            None
-        );
-        assert_eq!(parse(&req("POST /abc123/%2Fx.mp3 HTTP/1.1", &[]), t), None);
+        let at = |line: String| parse(&req(&line, &[]), t);
+        assert_eq!(at(format!("GET /{} HTTP/1.1", enc(&file))), None);
+        assert_eq!(at(format!("GET /nope/{} HTTP/1.1", enc(&file))), None);
+        assert_eq!(at("GET /abc123/x.mp3 HTTP/1.1".into()), None);
+        let climb = std::env::temp_dir().join("a").join("..").join("passwd");
+        assert_eq!(at(format!("GET /abc123/{} HTTP/1.1", enc(&climb))), None);
+        assert_eq!(at(format!("POST /abc123/{} HTTP/1.1", enc(&file))), None);
         assert_eq!(parse(&[], t), None);
     }
 
