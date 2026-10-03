@@ -132,6 +132,13 @@ pub trait WindowPlatform: Send + Sync {
         true
     }
 
+    /// D185: must the player's media come over loopback HTTP rather than the
+    /// asset protocol? WebKitGTK plays through GStreamer, which cannot fetch
+    /// from a custom scheme; WebView2 can.
+    fn media_over_loopback(&self) -> bool {
+        false
+    }
+
     /// D182: is there one scale for the whole desktop? X has one, so a
     /// display coming or going can change the scale of every window at once,
     /// and the toolkit follows it without resizing anything; the engine

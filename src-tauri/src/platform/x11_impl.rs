@@ -272,6 +272,11 @@ impl WindowPlatform for X11Platform {
         false
     }
 
+    /// WebKitGTK's GStreamer cannot play from the asset protocol (D185).
+    fn media_over_loopback(&self) -> bool {
+        true
+    }
+
     /// X has one scale for the whole screen (D182).
     fn one_scale(&self) -> bool {
         true

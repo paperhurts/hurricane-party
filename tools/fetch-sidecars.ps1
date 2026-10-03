@@ -10,27 +10,37 @@
       ffmpeg  — extracts MP3 from the downloaded video (D3), and does yt-dlp's
                 merging, tagging and thumbnail conversion. yt-dlp's own build
                 (github.com/yt-dlp/FFmpeg-Builds), win64 GPL, pinned to one dated
-                autobuild and checked against its SHA-256 (D133).
+                autobuild (D133).
 
     Versions are PINNED (O11). A surprise yt-dlp bump the day before a storm is the
-    wrong failure. Bump deliberately, test, then commit the new pin, with
-    licenses/THIRD-PARTY-NOTICES.md and the matching licence text updated in the
-    same change: the release zip carries that folder (D133).
+    wrong failure. Every file comes from this project's own sidecars release, where
+    the exact archives are kept (D184): yt-dlp prunes its dated ffmpeg autobuilds
+    after a few weeks, which is how the first pin went 404. Each archive is checked
+    against its SHA-256 and each program against its own, so a machine holding any
+    other copy fetches this one without -Force.
+
+    To bump: fetch the new archives from their publishers, check them against the
+    publishers' checksums, upload them to a new sidecars-YYYY-MM release (a
+    pre-release, never latest: the download page reads latest), and change the
+    pins here and in fetch-sidecars.sh, with licenses/THIRD-PARTY-NOTICES.md and
+    the matching licence text updated in the same change: the release zip carries
+    that folder (D133).
 
     Tauri resolves externalBin by appending the target triple, so each file is
     named <tool>-x86_64-pc-windows-msvc.exe. binaries/ is gitignored.
 #>
 [CmdletBinding()]
 param(
-    [string]$YtDlpVersion = "2026.08.19",
-    [string]$DenoVersion  = "2.6.4",
-    # yt-dlp's ffmpeg build (D133): a dated autobuild, never "latest", which
-    # moves daily. The zip is checked against the SHA-256 yt-dlp publishes for
-    # it, and ffmpeg.exe against the one inside it, so a machine still holding
-    # an older ffmpeg fetches this one without -Force.
-    [string]$FfmpegUrl    = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-09-11-17-43/ffmpeg-N-126504-g1b8a2b690b-win64-gpl.zip",
-    [string]$FfmpegZipSha = "2d2b30a1e31bbc3dde699d95e699f6a32178febffdf2bf552e5d6384fed97859",
-    [string]$FfmpegExeSha = "c130d1abd89a5c832a51b2415fdccc4b8dafdb8055b8b7977c0ecd94148b7afc",
+    # The sidecars release (D184) and what it holds: yt-dlp 2026.08.19, deno
+    # 2.6.4, and yt-dlp's ffmpeg autobuild-2026-10-01-19-27.
+    [string]$Mirror       = "https://github.com/paperhurts/hurricane-party/releases/download/sidecars-2026-10",
+    [string]$YtDlpSha     = "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
+    [string]$DenoZip      = "deno-x86_64-pc-windows-msvc.zip",
+    [string]$DenoZipSha   = "0774ae74018ef970ac7364ecec5ef1689b2d67c177be8a541540ef106149d1d9",
+    [string]$DenoExeSha   = "58a59444d6318f933a9e115b4519df13d305b36818b724ca44aa2c4e7f42ad93",
+    [string]$FfmpegZip    = "ffmpeg-N-127083-g65a3870462-win64-gpl.zip",
+    [string]$FfmpegZipSha = "c10df25bfdd2f8ecfdbca2eefe6feb6391ae6d55c4d9795cf613ebd747d87ceb",
+    [string]$FfmpegExeSha = "763ba7b90492a41f5f57cb7c9e3f488de6c44507fa5bb36e9b8917e8c8355a81",
     [switch]$Force
 )
 
@@ -47,11 +57,11 @@ function Sha256($path) {
 }
 
 # The sidecar's destination when it needs fetching, or $null when it is there.
-# With -Sha, "there" means that exact file: anything else is fetched again.
-function Need($name, $Sha = "") {
+# "There" means that exact file: anything else is fetched again.
+function Need($name, $Sha) {
     $dest = Join-Path $binDir "$name-$triple.exe"
     if ((Test-Path $dest) -and -not $Force) {
-        if (-not $Sha -or (Sha256 $dest) -eq $Sha) {
+        if ((Sha256 $dest) -eq $Sha) {
             Write-Host "  $name already present, skipping (use -Force to refetch)" -ForegroundColor DarkGray
             return $null
         }
@@ -60,45 +70,47 @@ function Need($name, $Sha = "") {
     return $dest
 }
 
+# A download that is not the pinned file is refused, not shipped.
+function Fetch($file, $Sha) {
+    $out = Join-Path $tmp $file
+    Invoke-WebRequest -Uri "$Mirror/$file" -OutFile $out -UseBasicParsing
+    $got = Sha256 $out
+    if ($got -ne $Sha) {
+        throw "${file}: the download's SHA-256 is $got, not the pinned $Sha"
+    }
+    return $out
+}
+
+# One program out of a zip, checked against its own pin once it is out.
+function Unzip($zip, $exe, $dest, $Sha) {
+    $ex = Join-Path $tmp ([IO.Path]::GetFileNameWithoutExtension($zip))
+    Remove-Item -Recurse -Force $ex -ErrorAction SilentlyContinue
+    Expand-Archive -Path $zip -DestinationPath $ex -Force
+    Copy-Item (Get-ChildItem -Path $ex -Filter $exe -Recurse | Select-Object -First 1).FullName $dest -Force
+    if ((Sha256 $dest) -ne $Sha) {
+        throw "$exe in the pinned zip is not the pinned $exe"
+    }
+}
+
 # --- yt-dlp: a single exe, no extraction ------------------------------------
-$dest = Need "yt-dlp"
+$dest = Need "yt-dlp" $YtDlpSha
 if ($dest) {
-    $url = "https://github.com/yt-dlp/yt-dlp/releases/download/$YtDlpVersion/yt-dlp.exe"
-    Write-Host "fetching yt-dlp $YtDlpVersion" -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+    Write-Host "fetching yt-dlp" -ForegroundColor Cyan
+    Copy-Item (Fetch "yt-dlp.exe" $YtDlpSha) $dest -Force
 }
 
 # --- deno: zipped ------------------------------------------------------------
-$dest = Need "deno"
+$dest = Need "deno" $DenoExeSha
 if ($dest) {
-    $url = "https://github.com/denoland/deno/releases/download/v$DenoVersion/deno-$triple.zip"
-    $zip = Join-Path $tmp "deno.zip"
-    Write-Host "fetching deno $DenoVersion" -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-    $ex = Join-Path $tmp "deno"
-    Remove-Item -Recurse -Force $ex -ErrorAction SilentlyContinue
-    Expand-Archive -Path $zip -DestinationPath $ex -Force
-    Copy-Item (Get-ChildItem -Path $ex -Filter "deno.exe" -Recurse | Select-Object -First 1).FullName $dest -Force
+    Write-Host "fetching deno" -ForegroundColor Cyan
+    Unzip (Fetch $DenoZip $DenoZipSha) "deno.exe" $dest $DenoExeSha
 }
 
 # --- ffmpeg: zipped, nested directory ---------------------------------------
 $dest = Need "ffmpeg" $FfmpegExeSha
 if ($dest) {
-    $zip = Join-Path $tmp "ffmpeg.zip"
-    Write-Host "fetching ffmpeg (D133: yt-dlp's build, ~185 MB)" -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $FfmpegUrl -OutFile $zip -UseBasicParsing
-    # A download that is not the pinned build is refused, not shipped.
-    $got = Sha256 $zip
-    if ($got -ne $FfmpegZipSha) {
-        throw "ffmpeg: the download's SHA-256 is $got, not the pinned $FfmpegZipSha"
-    }
-    $ex = Join-Path $tmp "ffmpeg"
-    Remove-Item -Recurse -Force $ex -ErrorAction SilentlyContinue
-    Expand-Archive -Path $zip -DestinationPath $ex -Force
-    Copy-Item (Get-ChildItem -Path $ex -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1).FullName $dest -Force
-    if ((Sha256 $dest) -ne $FfmpegExeSha) {
-        throw "ffmpeg: ffmpeg.exe in the pinned zip is not the pinned exe"
-    }
+    Write-Host "fetching ffmpeg (D133: yt-dlp's build, ~190 MB)" -ForegroundColor Cyan
+    Unzip (Fetch $FfmpegZip $FfmpegZipSha) "ffmpeg.exe" $dest $FfmpegExeSha
 }
 
 # A dev build runs its sidecars from target\debug (and a local release build

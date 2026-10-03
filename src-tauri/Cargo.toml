@@ -28,6 +28,12 @@ serde_json = "1"
 tauri-plugin-shell = "2"
 thiserror = "2"
 url = "2"
+# Already in the tree under url. The loopback media server decodes the
+# file path from its request with it (D185).
+percent-encoding = "2"
+# Already in the tree. The media server's launch secret comes from the OS
+# through it (D185).
+getrandom = "0.3"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tokio = { version = "1", features = ["sync", "time", "macros", "net", "io-util"] }
 lofty = "0.25"
