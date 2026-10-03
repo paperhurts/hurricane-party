@@ -4,7 +4,7 @@ You picked true multi-window. That's now the single highest-risk component in th
 
 I recommended against it and you overruled me. Fair — the hybrid would have looked like Winamp without *being* Winamp, and the difference is the whole point. But I want to be straight about what it costs and, more usefully, how to find out early whether it's going to work.
 
-> **Where this stands.** The spike below ran and returned **go** (D45), cross-scale included (stage 6, O14), though stage 6 kept the windows at the primary display's size: resizing for the far display's scale was not built until D187; the engine it proved is `src-tauri/src/bond.rs` and `wm.rs`, built through v0.4a and v0.4b. What is left of this document is the spec that survived, with the decisions that corrected it cited where they did. When a sentence here reads as a plan, `decisions.md` says what was done.
+> **Where this stands.** The spike below ran and returned **go** (D45), cross-scale included (stage 6, O14), though stage 6 kept the windows at the primary display's size: resizing for the far display's scale was not built until D187, and which scale Windows actually gives a window at the seam is asked rather than assumed since D188; the engine it proved is `src-tauri/src/bond.rs` and `wm.rs`, built through v0.4a and v0.4b. What is left of this document is the spec that survived, with the decisions that corrected it cited where they did. When a sentence here reads as a plan, `decisions.md` says what was done.
 
 ---
 

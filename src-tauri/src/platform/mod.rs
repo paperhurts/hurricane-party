@@ -118,6 +118,26 @@ pub trait WindowPlatform: Send + Sync {
         None
     }
 
+    /// D188: the scale the window system draws this window at now, where each
+    /// display has its own (Windows: the window's DPI over 96). None where one
+    /// scale covers the desktop, and the engine's own answer is the truth.
+    ///
+    /// Windows, not the engine, decides which display a window belongs to, and
+    /// it does not always pick the display holding most of it: it keeps a
+    /// window where it was on a tie, and a little past one. So the engine asks.
+    /// A read of the window's own state; sends no message.
+    fn window_scale(&self, _w: NativeWindow) -> Option<f64> {
+        None
+    }
+
+    /// D188: put a window at `(x, y)` and make it `w x h`, in one call that
+    /// returns when the window is there, with any change of scale it caused
+    /// already made. False where there is no such call; the caller then uses
+    /// the toolkit's setters. Sends a message: D54 applies.
+    fn place(&self, _w: NativeWindow, _x: i32, _y: i32, _cx: i32, _cy: i32) -> bool {
+        false
+    }
+
     /// D182: does the window manager keep every window it places wholly
     /// inside the work area? Mutter does, one window at a time, so a group
     /// pushed past an edge would shear; the engine clamps the whole group

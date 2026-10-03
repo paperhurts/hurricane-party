@@ -7,14 +7,14 @@ use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, Volume, WindowPlatfor
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::HiDpi::{
-    AreDpiAwarenessContextsEqual, GetAwarenessFromDpiAwarenessContext,
+    AreDpiAwarenessContextsEqual, GetAwarenessFromDpiAwarenessContext, GetDpiForWindow,
     GetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     DPI_AWARENESS_PER_MONITOR_AWARE, DPI_AWARENESS_SYSTEM_AWARE, DPI_AWARENESS_UNAWARE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE,
+    SWP_NOSIZE, SWP_NOZORDER, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE,
 };
 
 mod tree;
@@ -163,6 +163,26 @@ impl WindowPlatform for Win32Platform {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
+    }
+
+    fn window_scale(&self, w: NativeWindow) -> Option<f64> {
+        // SAFETY: a read of the window's own DPI; sends no message. Zero for
+        // a handle that is not a window.
+        let dpi = unsafe { GetDpiForWindow(hwnd(w)) };
+        (dpi > 0).then(|| dpi as f64 / 96.0)
+    }
+
+    fn place(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool {
+        // SAFETY: see D54 on the trait. Not SWP_ASYNCWINDOWPOS, which tao's
+        // setters use: this waits for the window's thread, and a change of
+        // display the move causes (WM_DPICHANGED, and tao's resize for it)
+        // has happened by the time it returns, so a read of the DPI after it
+        // is the answer (D188). Position and size together, so the window is
+        // never at one without the other.
+        unsafe {
+            let _ = SetWindowPos(hwnd(w), None, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        true
     }
 
     fn is_minimized(&self, w: NativeWindow) -> bool {
