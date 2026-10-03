@@ -4,7 +4,7 @@ You picked true multi-window. That's now the single highest-risk component in th
 
 I recommended against it and you overruled me. Fair — the hybrid would have looked like Winamp without *being* Winamp, and the difference is the whole point. But I want to be straight about what it costs and, more usefully, how to find out early whether it's going to work.
 
-> **Where this stands.** The spike below ran and returned **go** (D45), cross-scale included (stage 6, O14); the engine it proved is `src-tauri/src/bond.rs` and `wm.rs`, built through v0.4a and v0.4b. What is left of this document is the spec that survived, with the decisions that corrected it cited where they did. When a sentence here reads as a plan, `decisions.md` says what was done.
+> **Where this stands.** The spike below ran and returned **go** (D45), cross-scale included (stage 6, O14), though stage 6 kept the windows at the primary display's size: resizing for the far display's scale was not built until D187; the engine it proved is `src-tauri/src/bond.rs` and `wm.rs`, built through v0.4a and v0.4b. What is left of this document is the spec that survived, with the decisions that corrected it cited where they did. When a sentence here reads as a plan, `decisions.md` says what was done.
 
 ---
 
@@ -240,7 +240,7 @@ The prediction was right and the magnitude was pessimistic.
 
 **Measured: four calls** (D44). Ownership get/set via `GWLP_HWNDPARENT` — the real gap, because Tauri exposes `owner()` on *builders* only and has no `set_owner` on a live window — plus `SetWindowPos` for D42's lazy application, plus the D37 DPI assertion. Everything else stages 0–5 needed was covered cross-platform and was already physical-first. **The trait is a file, not an archaeology project.**
 
-The spike returned **go** on the bond model (D45): drag costs one display frame with 0.2–0.8 px over the theoretical floor, owned HWNDs group z-order and re-parent in ~40 µs with no visual disturbance, and bonds form and break correctly with zero drift over twenty group drags and zero seam error across 61 splitter steps in both the model and the OS. The question that was left, cross-scale behaviour (stage 6, O14), was answered once a second display was attached: a bonded group crosses a 100%/150% boundary and returns bit-identical (O14, and the v0.0 row of the milestone table in `decisions.md`).
+The spike returned **go** on the bond model (D45): drag costs one display frame with 0.2–0.8 px over the theoretical floor, owned HWNDs group z-order and re-parent in ~40 µs with no visual disturbance, and bonds form and break correctly with zero drift over twenty group drags and zero seam error across 61 splitter steps in both the model and the OS. The question that was left, cross-scale behaviour (stage 6, O14), was answered once a second display was attached: a bonded group crosses a 100%/150% boundary and returns bit-identical (O14, and the v0.0 row of the milestone table in `decisions.md`). That pass held the windows at the 100% display's size on the far side, and so did the engine until D187: every drag frame pushed the size the drag began with, undoing Windows' resize for the new DPI, so on a 150% display a window was 275 × 116 with its chrome drawn at 150% and clipped. Now each window that crosses is re-derived for its display's scale, the group re-packed so seams stay flush, and a layout saved wrong heals at launch.
 
 ### The trap that nearly ate the signature interaction
 
