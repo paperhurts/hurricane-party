@@ -300,6 +300,9 @@ pub struct DragState {
     /// The scale each moving window was drawn at when the drag began, as the
     /// window system had it (D188): the scale its origin size is in.
     pub origin_scales: BTreeMap<WindowId, f64>,
+    /// The window whose title bar or seam was grabbed, raised last within
+    /// its group on the release (D193).
+    pub grabbed: WindowId,
 }
 
 impl WmState {
@@ -721,6 +724,10 @@ fn own_built(app: &AppHandle) {
                 .iter()
                 .filter_map(|id| Some((handle(*id), *s.layout.get(id)?)))
                 .collect(),
+            scales: CLASSIC
+                .iter()
+                .filter_map(|id| Some((handle(*id), *s.drawn_at.get(id)?)))
+                .collect(),
         }
     }; // D54: the lock is gone before any window call.
     apply_ownership(&plan);
@@ -991,6 +998,9 @@ pub struct OwnPlan {
     /// Where each window is laid out, to put one back that setting its
     /// owner moved to another scale all the same (D193).
     pub rects: Vec<(NativeWindow, Rect)>,
+    /// The scale each window is laid out for (`drawn_at`), which is what
+    /// the root is put at and what a window is put back to (D193).
+    pub scales: Vec<(NativeWindow, f64)>,
 }
 
 /// D41 + D42. Give every connected component its own hidden root, then force the
@@ -1024,9 +1034,18 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
         // it is raised last and therefore sits on top.
         order.sort_by_key(|c| c.contains(&a));
     }
+    // And within it the window touched last of all, so it is the one on top
+    // where its group's windows overlap (D193: the owner's hand test found
+    // the clicked Main behind the EQ).
     let raise = order
         .iter()
-        .flat_map(|c| c.iter().map(|id| state.handle(*id)))
+        .flat_map(|c| {
+            let mut ids: Vec<WindowId> = c.to_vec();
+            if let Some(a) = active {
+                ids.sort_by_key(|id| *id == a);
+            }
+            ids.into_iter().map(|id| state.handle(id))
+        })
         .collect();
 
     OwnPlan {
@@ -1037,42 +1056,70 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
             .iter()
             .filter_map(|id| Some((state.handle(*id), *state.layout.get(id)?)))
             .collect(),
+        scales: CLASSIC
+            .iter()
+            .filter_map(|id| Some((state.handle(*id), *state.drawn_at.get(id)?)))
+            .collect(),
     }
+}
+
+/// D193: the `(window, owner)` pairs of a plan whose owner is not already the
+/// one planned: the only ones to set, since setting an owner gives the window
+/// the owner's scale for a moment.
+fn owner_changes(
+    plan: &OwnPlan,
+    owner_of: impl Fn(NativeWindow) -> NativeWindow,
+) -> Vec<(NativeWindow, NativeWindow)> {
+    plan.owners
+        .iter()
+        .copied()
+        .filter(|(w, owner)| owner_of(*w) != *owner)
+        .collect()
 }
 
 /// Perform an [`OwnPlan`]. **Must be called with no lock held** (D54).
 pub fn apply_ownership(plan: &OwnPlan) {
     let p = platform::platform();
-    for (w, owner) in &plan.owners {
-        // D193: a window's owner is set only when it changes. Setting it gives
-        // the window the owner's scale for a moment, and the hidden roots sit
-        // wherever tao made them, on the primary display at 100 %: an 825
-        // stack dropped at Main x = 2285 went to 96 DPI as its ownership was
-        // re-applied on the release, tao shrank it to 550, and Windows judged
-        // the 550 to be mostly on the 100 % display, where it stayed.
-        if p.owner_of(*w) == *owner {
-            continue;
-        }
-        // And where it does change, the root goes first to a display at the
-        // scale the window is drawn at, so there is no other scale to give.
-        let before = p.window_scale(*w);
+    // D193: a window's owner is set only when it changes. Setting it gives
+    // the window the owner's scale for a moment, and the hidden roots sit
+    // wherever tao made them, on the primary display at 100 %: an 825 stack
+    // dropped at Main x = 2285 went to 96 DPI as its ownership was re-applied
+    // on the release, tao shrank it to 550, and Windows judged the 550 to be
+    // mostly on the 100 % display, where it stayed.
+    for (w, owner) in owner_changes(plan, |w| p.owner_of(w)) {
+        // The scale the window is laid out for, with any change of scale the
+        // drop that brought it here caused delivered first: a re-dock that
+        // also crossed the seam on its last frame is not yet at its new
+        // scale, and judged from the old one it was "put back" across.
+        p.pump(w);
+        let before = p.window_scale(w);
+        let target = plan
+            .scales
+            .iter()
+            .find(|(h, _)| *h == w)
+            .map(|(_, s)| *s)
+            .or(before);
+        // Where it changes, the root goes first to a display at the scale the
+        // window is at, so the change gives it no other scale. Not the one it
+        // is laid out for, where the two differ: that would push a window
+        // Windows has put elsewhere across, and `reconcile` follows Windows.
         if let Some(scale) = before {
             if let Some(m) = plan.monitors.iter().find(|m| same_scale(m.scale, scale)) {
-                p.place(*owner, m.work.x, m.work.y, 1, 1);
-                p.pump(*owner);
+                p.place(owner, m.work.x, m.work.y, 1, 1);
+                p.pump(owner);
             }
         }
-        p.set_owner(*w, *owner);
-        p.pump(*w);
-        // Read back: a window the change moved to another scale all the same
-        // (the root's own change not delivered yet, or no display at its
-        // scale cached) is put back where it is laid out, judged from the
-        // scale it was at (`land`).
-        if let (Some(b), Some(a)) = (before, p.window_scale(*w)) {
-            if !same_scale(a, b) {
+        p.set_owner(w, owner);
+        p.pump(w);
+        // Read back: a window that was at the scale it is laid out for and
+        // the change moved off it all the same (the root's own change not
+        // delivered yet, or no display at its scale cached) is put back,
+        // judged from that scale (`land`). One not there yet is `reconcile`'s.
+        if let (Some(b), Some(t), Some(a)) = (before, target, p.window_scale(w)) {
+            if same_scale(b, t) && !same_scale(a, t) {
                 eprintln!("wm: setting a window's owner moved it to another scale; put back");
-                if let Some((_, r)) = plan.rects.iter().find(|(h, _)| h == w) {
-                    land(p, *w, *r, a, b, &plan.monitors);
+                if let Some((_, r)) = plan.rects.iter().find(|(h, _)| *h == w) {
+                    land(p, w, *r, a, t, &plan.monitors);
                 }
             }
         }
@@ -1245,6 +1292,7 @@ pub fn drag_start(app: &AppHandle, id: WindowId) {
         origin_cursor,
         origin_unshaded,
         origin_scales,
+        grabbed: id,
     });
 }
 
@@ -1549,8 +1597,7 @@ pub fn drag_end(app: &AppHandle, release: bool) {
         }
         let layout = s.layout.clone();
         resync_spans(&mut s.graph, &layout);
-        let active = drag.moving.first().copied();
-        plan_ownership(&s, active)
+        plan_ownership(&s, Some(drag.grabbed))
     };
     apply_ownership(&plan);
     emit_state(app);
@@ -4324,8 +4371,57 @@ mod tests {
         let plan = plan_ownership(&s, Some(PLAYLIST));
         assert_eq!(*plan.raise.last().unwrap(), nw(12));
 
+        // And the touched window last within its group (D193).
         let plan = plan_ownership(&s, Some(MAIN));
-        assert_eq!(*plan.raise.last().unwrap(), nw(11));
+        assert_eq!(*plan.raise.last().unwrap(), nw(10));
+    }
+
+    #[test]
+    fn the_touched_window_is_raised_last_within_its_group() {
+        // D193: the owner clicked Main and found it behind the EQ.
+        let s = state_with(&[(MAIN, EQ), (EQ, PLAYLIST)]);
+        assert_eq!(
+            *plan_ownership(&s, Some(MAIN)).raise.last().unwrap(),
+            nw(10)
+        );
+        assert_eq!(*plan_ownership(&s, Some(EQ)).raise.last().unwrap(), nw(11));
+    }
+
+    #[test]
+    fn an_owner_already_set_is_left_alone() {
+        // D193: setting an owner gives the window the owner's scale for a
+        // moment, so only the ones that change are set.
+        let s = state_with(&[(MAIN, EQ)]);
+        let plan = plan_ownership(&s, Some(MAIN));
+        let all = owner_changes(&plan, |_| NativeWindow::NONE);
+        assert_eq!(all, plan.owners, "nothing owned yet: all of them");
+        let same = owner_changes(&plan, |w| {
+            plan.owners
+                .iter()
+                .find(|(h, _)| *h == w)
+                .map(|(_, o)| *o)
+                .unwrap()
+        });
+        assert!(same.is_empty(), "every owner already set: none");
+        // The playlist owned by some other root: only it is set.
+        let moved = owner_changes(&plan, |w| {
+            if w == nw(12) {
+                nw(99)
+            } else {
+                plan.owners
+                    .iter()
+                    .find(|(h, _)| *h == w)
+                    .map(|(_, o)| *o)
+                    .unwrap()
+            }
+        });
+        let playlist: Vec<_> = plan
+            .owners
+            .iter()
+            .copied()
+            .filter(|(h, _)| *h == nw(12))
+            .collect();
+        assert_eq!(moved, playlist);
     }
 
     #[test]
@@ -5646,6 +5742,7 @@ mod tests {
             origin_cursor: (0, 0),
             origin_unshaded: BTreeMap::new(),
             origin_scales: BTreeMap::new(),
+            grabbed: MAIN,
         });
         s.splitter = Some(SplitterState {
             bond: *s.graph.bond_between(MAIN, EQ).unwrap(),
