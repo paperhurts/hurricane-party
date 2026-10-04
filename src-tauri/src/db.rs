@@ -184,7 +184,10 @@ CREATE TABLE IF NOT EXISTS window_layout (
   w INTEGER NOT NULL, h INTEGER NOT NULL,
   shaded        INTEGER NOT NULL DEFAULT 0,
   visible       INTEGER NOT NULL DEFAULT 1,
-  monitor_id    TEXT
+  monitor_id    TEXT,
+  -- D191: the scale w and h were derived at, where each display has its
+  -- own. NULL in a row written before it was kept.
+  scale         REAL
 );
 
 CREATE TABLE IF NOT EXISTS window_bonds (
@@ -291,6 +294,12 @@ pub fn migrate(conn: &Connection) -> Result<(), DbError> {
             "DELETE FROM eq_presets WHERE for_track = 1 AND id NOT IN
                (SELECT eq_preset_id FROM media WHERE eq_preset_id IS NOT NULL);",
         )?;
+    }
+    // D191.
+    if has_column(conn, "window_layout", "window_id")?
+        && !has_column(conn, "window_layout", "scale")?
+    {
+        conn.execute_batch("ALTER TABLE window_layout ADD COLUMN scale REAL;")?;
     }
     if !has_column(conn, "playlists", "position")? {
         // The order a person already sees is creation order, so that is the
@@ -769,6 +778,35 @@ mod tests {
         assert!(has_column(&conn, "jobs", "not_before").unwrap());
         // Twice is a no-op.
         migrate(&conn).unwrap();
+    }
+
+    /// D191: a layout saved before the scale was kept gains the column, and
+    /// its rows read it as unknown.
+    #[test]
+    fn an_old_window_layout_gains_the_scale_its_sizes_are_in() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlists (id INTEGER PRIMARY KEY, position INTEGER);
+             CREATE TABLE window_layout (
+               window_id TEXT PRIMARY KEY,
+               x INTEGER NOT NULL, y INTEGER NOT NULL,
+               w INTEGER NOT NULL, h INTEGER NOT NULL,
+               shaded INTEGER NOT NULL DEFAULT 0,
+               visible INTEGER NOT NULL DEFAULT 1,
+               monitor_id TEXT);
+             INSERT INTO window_layout (window_id, x, y, w, h) VALUES ('main', 0, 0, 275, 116);",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        let scale: Option<f64> = conn
+            .query_row(
+                "SELECT scale FROM window_layout WHERE window_id = 'main'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(scale, None);
     }
 
     /// #164: a library made before the check existed gains the two columns a

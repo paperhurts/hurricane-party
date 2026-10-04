@@ -352,6 +352,14 @@
   // Which gesture the seam actually gave us. A seam with no resizable neighbour
   // degrades to a group move rather than offering a splitter that does nothing.
   let gesture: "splitter" | "move" | "resize" | "none" = "none";
+  // Which press the gesture belongs to (D191). Every start and end names
+  // its press, so Rust starts nothing for a press whose end it has already
+  // heard (invokes are separate requests, not ordered), and a reply from Rust
+  // that arrives after its gesture ended, or after the next one began, is for
+  // a gesture that is no longer this one and changes nothing. Numbered from a
+  // random base so a reloaded window never reuses one Rust has seen ended.
+  let lastSeq = Math.floor(Math.random() * 2 ** 31) * 1024;
+  let currentSeq = 0;
 
   function frame(fn: () => Promise<unknown>) {
     if (pending) return;
@@ -381,16 +389,18 @@
   // element — so the title bar never sees the double-click that toggles shade.
   // Waiting for the first move fixes both: a click that never moves takes no
   // capture at all, and dblclick behaves normally.
-  function arm(e: PointerEvent, begin: () => void) {
+  function arm(e: PointerEvent, begin: (seq: number) => void) {
     if (e.button !== 0) return;
     const root = document.documentElement;
     let started = false;
+    const seq = ++lastSeq;
+    currentSeq = seq;
 
     const onMove = () => {
       if (!started) {
         started = true;
         root.setPointerCapture(e.pointerId);
-        begin();
+        begin(seq);
       }
       if (gesture === "splitter") frame(() => invoke("wm_splitter_move"));
       else if (gesture === "move") frame(() => invoke("wm_drag_move"));
@@ -401,11 +411,13 @@
       root.removeEventListener("pointerup", onUp);
       root.removeEventListener("pointercancel", onUp);
       if (!started) return; // a plain click: leave click/dblclick alone
-      if (gesture === "splitter") invoke("wm_splitter_end");
-      else if (gesture === "move") invoke("wm_drag_end");
-      else if (gesture === "resize") invoke("wm_resize_end");
+      if (gesture === "splitter") invoke("wm_splitter_end", { label, seq });
+      else if (gesture === "move") invoke("wm_drag_end", { label, seq });
+      else if (gesture === "resize") invoke("wm_resize_end", { label, seq });
       gesture = "none";
       dragSide = null;
+      // A reply still on its way is for a gesture that has ended.
+      if (currentSeq === seq) currentSeq = 0;
     };
 
     root.addEventListener("pointermove", onMove);
@@ -447,9 +459,9 @@
     // The drag measures from the press, not from the first move it waits for
     // (D182).
     if (e.button === 0) invoke("wm_press");
-    arm(e, () => {
+    arm(e, (seq) => {
       gesture = "move";
-      invoke("wm_drag_start", { label });
+      invoke("wm_drag_start", { label, seq });
     });
   }
 
@@ -464,15 +476,17 @@
     // A seam that cannot resize is a move handle (D35), and a move measures
     // from the press (D182). Also replaces any press a title click left.
     if (e.button === 0) invoke("wm_press");
-    arm(e, () => {
+    arm(e, (seq) => {
       // Provisionally a move, so the frames arriving before Rust answers are
       // not dropped. Rust decides which it really is: a seam whose neighbours
       // cannot resize degrades to a group move (D35).
       gesture = "move";
       // Spelled out: after the assignment above TypeScript narrows `gesture`
       // to "move", and `typeof gesture` would carry that narrowing here.
-      invoke<"splitter" | "move" | "none">("wm_seam_down", { label, edge: side }).then((g) => {
-        if (gesture !== "none") {
+      invoke<"splitter" | "move" | "none">("wm_seam_down", { label, edge: side, seq }).then((g) => {
+        // D191: only for the gesture that asked. A late answer used to turn
+        // a later grip or title drag into a splitter, whose end never came.
+        if (seq === currentSeq && gesture !== "none") {
           gesture = g;
           if (g === "splitter") dragSide = side;
         }
@@ -503,11 +517,11 @@
     // Stop it here: the chrome underneath would otherwise start a raise, and
     // the seam bands share this corner.
     e.stopPropagation();
-    arm(e, () => {
+    arm(e, (seq) => {
       // Provisionally a resize; Rust says no if there is nothing to resize.
       gesture = "resize";
-      invoke<boolean>("wm_resize_start", { label }).then((ok) => {
-        if (!ok && gesture === "resize") gesture = "none";
+      invoke<boolean>("wm_resize_start", { label, seq }).then((ok) => {
+        if (!ok && seq === currentSeq && gesture === "resize") gesture = "none";
       });
     });
   }

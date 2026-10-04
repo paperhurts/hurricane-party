@@ -123,17 +123,20 @@ pub trait WindowPlatform: Send + Sync {
     /// scale covers the desktop, and the engine's own answer is the truth.
     ///
     /// Windows, not the engine, decides which display a window belongs to, and
-    /// it does not always pick the display holding most of it: it keeps a
-    /// window where it was on a tie, and a little past one. So the engine asks.
-    /// A read of the window's own state; sends no message.
+    /// it does not always pick the display holding most of it: on the owner's
+    /// desk it kept a window where it was on a tie, and a little past one
+    /// (measured, not documented). So the engine asks. A read of the window's
+    /// own state; sends no message.
     fn window_scale(&self, _w: NativeWindow) -> Option<f64> {
         None
     }
 
     /// D188: put a window at `(x, y)` and make it `w x h`, in one call that
-    /// returns when the window is there, with any change of scale it caused
-    /// already made. False where there is no such call; the caller then uses
-    /// the toolkit's setters. Sends a message: D54 applies.
+    /// returns when the window is there. A change of scale the move causes
+    /// may land after it returns (D191), so `window_scale` straight after is
+    /// a hint, not the answer. False where there is no such call; the caller
+    /// then uses the toolkit's setters. Called on the UI thread, which owns
+    /// the windows (D191); D54 applies all the same.
     fn place(&self, _w: NativeWindow, _x: i32, _y: i32, _cx: i32, _cy: i32) -> bool {
         false
     }

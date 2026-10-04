@@ -173,12 +173,14 @@ impl WindowPlatform for Win32Platform {
     }
 
     fn place(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool {
-        // SAFETY: see D54 on the trait. Not SWP_ASYNCWINDOWPOS, which tao's
-        // setters use: this waits for the window's thread, and a change of
-        // display the move causes (WM_DPICHANGED, and tao's resize for it)
-        // has happened by the time it returns, so a read of the DPI after it
-        // is the answer (D188). Position and size together, so the window is
-        // never at one without the other.
+        // SAFETY: see D54 on the trait. Called on the windows' own thread
+        // (D191), where it is synchronous, flag or no flag. Whether a change
+        // of display the move causes has been made by the time it returns is
+        // not documented, and on the owner's desk it often had not been: the
+        // DPI read straight after was the old one. So a read-back here is a
+        // hint, and `wm::reconcile` follows the change once it lands.
+        // Position and size together, so the window is never at one without
+        // the other.
         unsafe {
             let _ = SetWindowPos(hwnd(w), None, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
         }

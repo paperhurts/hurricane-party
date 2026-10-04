@@ -842,10 +842,15 @@ fn video_ready(app: AppHandle, id: i64) {
 
 /// Title-bar pointerdown. Snapshots the group and the cursor; everything after
 /// this is derived from that origin (D40).
+///
+/// `seq` names the press (D191): a start that arrives after its own end is
+/// for a gesture already over, and starts nothing.
 #[tauri::command]
-fn wm_drag_start(app: AppHandle, label: String) {
+fn wm_drag_start(app: AppHandle, label: String, seq: u64) {
     if let Some(id) = wm::id_of(&label) {
-        wm::drag_start(&app, id);
+        if wm::gesture_begins(&app, id, seq) {
+            wm::drag_start(&app, id);
+        }
     }
 }
 
@@ -864,8 +869,12 @@ fn wm_drag_move(app: AppHandle) {
 }
 
 #[tauri::command]
-fn wm_drag_end(app: AppHandle) {
-    wm::drag_end(&app);
+fn wm_drag_end(app: AppHandle, label: String, seq: u64) {
+    // D191: an end for another press than the live one is late, and leaves
+    // the live gesture alone.
+    if wm::id_of(&label).is_none_or(|id| wm::gesture_ends(&app, id, seq)) {
+        wm::drag_end(&app);
+    }
 }
 
 /// What a classic window asks for on mount.
@@ -892,10 +901,13 @@ fn wm_toggle_shade(app: AppHandle, label: String) {
 /// cannot resize is a move handle, so rather than offering a splitter and then
 /// doing nothing, the gesture degrades to a group move and says so.
 #[tauri::command]
-fn wm_seam_down(app: AppHandle, label: String, edge: String) -> &'static str {
+fn wm_seam_down(app: AppHandle, label: String, edge: String, seq: u64) -> &'static str {
     let (Some(id), Some(edge)) = (wm::id_of(&label), wm::edge_from_str(&edge)) else {
         return "none";
     };
+    if !wm::gesture_begins(&app, id, seq) {
+        return "none";
+    }
     if wm::splitter_start(&app, id, edge) {
         "splitter"
     } else {
@@ -910,8 +922,12 @@ fn wm_splitter_move(app: AppHandle) {
 }
 
 #[tauri::command]
-fn wm_splitter_end(app: AppHandle) {
-    wm::splitter_end(&app);
+fn wm_splitter_end(app: AppHandle, label: String, seq: u64) {
+    // D191: an end for another press than the live one is late, and leaves
+    // the live gesture alone.
+    if wm::id_of(&label).is_none_or(|id| wm::gesture_ends(&app, id, seq)) {
+        wm::splitter_end(&app);
+    }
 }
 
 /// Double-click on a seam. Breaking a bond in the middle of a chain splits one
@@ -951,9 +967,9 @@ fn wm_set_double(app: AppHandle, on: bool) {
 
 /// Corner grip on the playlist: pointerdown. False means nothing to resize.
 #[tauri::command]
-fn wm_resize_start(app: AppHandle, label: String) -> bool {
+fn wm_resize_start(app: AppHandle, label: String, seq: u64) -> bool {
     match wm::id_of(&label) {
-        Some(id) => wm::resize_start(&app, id),
+        Some(id) => wm::gesture_begins(&app, id, seq) && wm::resize_start(&app, id),
         None => false,
     }
 }
@@ -964,8 +980,12 @@ fn wm_resize_move(app: AppHandle) {
 }
 
 #[tauri::command]
-fn wm_resize_end(app: AppHandle) {
-    wm::resize_end(&app);
+fn wm_resize_end(app: AppHandle, label: String, seq: u64) {
+    // D191: an end for another press than the live one is late, and leaves
+    // the live gesture alone.
+    if wm::id_of(&label).is_none_or(|id| wm::gesture_ends(&app, id, seq)) {
+        wm::resize_end(&app);
+    }
 }
 
 /// #86: Main's minimise button. The whole group goes; see `wm::minimize_group`.
@@ -2058,7 +2078,9 @@ pub fn run() {
                 layout::ping(window.app_handle());
             }
             // D190: Windows changes a window's scale after the call that
-            // moved it has returned; the window engine follows it here.
+            // moved it has returned; the window engine follows it. D191: this
+            // only queues the following, which runs on this thread once tao's
+            // own resize for the new scale is done.
             if matches!(event, tauri::WindowEvent::ScaleFactorChanged { .. }) {
                 wm::scale_changed(window.app_handle());
             }
