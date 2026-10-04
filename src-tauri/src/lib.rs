@@ -2057,6 +2057,11 @@ pub fn run() {
             ) {
                 layout::ping(window.app_handle());
             }
+            // D190: Windows changes a window's scale after the call that
+            // moved it has returned; the window engine follows it here.
+            if matches!(event, tauri::WindowEvent::ScaleFactorChanged { .. }) {
+                wm::scale_changed(window.app_handle());
+            }
         })
         .setup(|app| {
             // D37: the gate, and it runs first. Every physical coordinate this

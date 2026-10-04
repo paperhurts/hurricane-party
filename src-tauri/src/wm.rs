@@ -254,6 +254,17 @@ pub struct WmState {
     /// 2x chrome (#47). Integer only: fractional chrome scaling is anti-scope.
     /// A bool rather than a factor so `Default` is 1x without a custom impl.
     pub double: bool,
+    /// D190: the scale each window's size in `layout` was derived at, where
+    /// each display has its own. A re-derive starts from it, never from the
+    /// scale the window system reports now: the two differ for as long as a
+    /// change of scale is on its way, and a size read at the wrong one is a
+    /// window 1.5 times too big or too small, for good.
+    pub drawn_at: BTreeMap<WindowId, f64>,
+    /// D190: a window changed scale during a drag; `drag_end` reconciles.
+    pub reconcile_pending: bool,
+    /// D190: when the recent reconciles ran, so a window Windows flips back
+    /// and forth stops being chased.
+    pub reconciles: Vec<std::time::Instant>,
     /// Set for the duration of a corner-grip resize of the playlist.
     pub resize: Option<ResizeState>,
     /// #86: the group is in the taskbar because Main's minimise put it there.
@@ -450,6 +461,12 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     let mut s = state.0.lock().unwrap();
     s.double = double;
     s.scale = scale;
+    // D190: what the heal above sized each window for. Where Windows puts a
+    // window at another scale once it is shown, the reconcile hears of it.
+    s.drawn_at = layout
+        .iter()
+        .map(|(id, r)| (*id, dpi_monitor(&monitors, *r).map_or(scale, |m| m.scale)))
+        .collect();
     s.monitors = monitors;
     s.layout = layout;
     s.graph = graph;
@@ -952,9 +969,11 @@ pub fn drag_start(app: &AppHandle, id: WindowId) {
     // critical section is the habit D54 is asking for.
     let cursor = platform::platform().cursor_pos();
     let moving = app.state::<Wm>().0.lock().unwrap().graph.component(id);
-    let origin_scales = os_scales(app, &moving);
+    let now = os_scales(app, &moving);
     let state = app.state::<Wm>();
     let mut s = state.0.lock().unwrap();
+    // D190: the origin's sizes are in the scale they were derived at.
+    let origin_scales = laid_out_at(&s, &now);
     let origin_layout = s.layout.clone();
     // The drag starts on the first pointermove, so the cursor has already
     // left the press by the time this runs; measuring from here would leave
@@ -1106,7 +1125,20 @@ fn drag_layout(
     }
     s.unshaded_h.extend(unshaded);
     s.layout = layout.clone();
+    s.drawn_at.extend(&targets);
     Some((layout, targets))
+}
+
+/// D190: the scale each window's size in the layout is in: the one it was
+/// derived at where each display has its own scale, and `now` where one
+/// scale covers the desktop and the engine's answer is the only one.
+fn laid_out_at(s: &WmState, now: &BTreeMap<WindowId, f64>) -> BTreeMap<WindowId, f64> {
+    if platform::platform().one_scale() {
+        return now.clone();
+    }
+    now.iter()
+        .map(|(id, n)| (*id, s.drawn_at.get(id).copied().unwrap_or(*n)))
+        .collect()
 }
 
 /// D188: the scale each window is drawn at now. The window system's answer
@@ -1246,6 +1278,98 @@ pub fn drag_end(app: &AppHandle) {
     };
     apply_ownership(&plan);
     emit_state(app);
+    save_now(app);
+    reconcile_if_pending(app);
+}
+
+/// D190: a change of scale heard while a gesture was under way, followed now
+/// that it is over.
+fn reconcile_if_pending(app: &AppHandle) {
+    let pending = std::mem::take(&mut app.state::<Wm>().0.lock().unwrap().reconcile_pending);
+    if pending {
+        reconcile(app);
+    }
+}
+
+/// D190: a window changed scale. Windows makes the change after the call
+/// that caused it has returned, so `push_settled`'s read-back can miss it,
+/// and a drop is the last push of a drag: the owner's playlist went to 100 %
+/// on the drop and the engine kept it at 150 %, and a stack dragged 48 px up
+/// on the seam went to 100 % entire, with gaps of 58 px between. So the
+/// change is heard as it lands and the layout follows it. Off the UI thread:
+/// this is heard before tao's own resize for the new scale, which the
+/// reconcile's placement has to come after.
+pub fn scale_changed(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || reconcile(&app));
+}
+
+/// D190: lay the windows out again for the scales the window system draws
+/// them at, where those are not the ones their sizes were derived at: each
+/// re-derived from the one to the other, the playlist keeping its steps,
+/// and each group re-packed from its top-left window, so seams close up
+/// again. No guessing here: the window system has already said. During a
+/// drag, a splitter or a grip, it waits for the end. A window Windows keeps
+/// flipping, which a size near the seam can make it do, is followed six
+/// times in two seconds and then left until the next drag.
+pub fn reconcile(app: &AppHandle) {
+    if platform::platform().one_scale() {
+        return;
+    }
+    for _ in 0..3 {
+        let now = os_scales(app, &CLASSIC);
+        let (layout, targets) = {
+            let state = app.state::<Wm>();
+            let mut s = state.0.lock().unwrap();
+            if s.drag.is_some() || s.splitter.is_some() || s.resize.is_some() {
+                s.reconcile_pending = true;
+                return;
+            }
+            let from = laid_out_at(&s, &now);
+            if from
+                .iter()
+                .all(|(id, f)| now.get(id).is_none_or(|n| same_scale(*f, *n)))
+            {
+                return;
+            }
+            let t = std::time::Instant::now();
+            s.reconciles
+                .retain(|at| t.duration_since(*at) < std::time::Duration::from_secs(2));
+            if s.reconciles.len() >= 6 {
+                eprintln!("wm: a window keeps changing scale; the layout follows it no further");
+                return;
+            }
+            s.reconciles.push(t);
+            let zoom = s.zoom();
+            let (layout, graph, unshaded) = rederive_whole(
+                &s,
+                zoom,
+                |l, g| {
+                    rederive_layout(
+                        l,
+                        g,
+                        &|id, _| {
+                            let f = from.get(&id).copied().unwrap_or(s.scale);
+                            (f, now.get(&id).copied().unwrap_or(f))
+                        },
+                        (zoom, zoom),
+                        &|r: &Rect| (r.x, r.y),
+                    )
+                },
+                &|id, _| now.get(&id).copied().unwrap_or(s.scale),
+            );
+            s.unshaded_h.extend(unshaded);
+            s.graph = graph;
+            s.layout = layout.clone();
+            s.drawn_at.extend(&now);
+            (layout, now)
+        }; // D54: the lock is gone before any window call.
+        let off = push_settled(app, &layout, &CLASSIC, &targets);
+        emit_state(app);
+        if off.is_empty() {
+            break;
+        }
+    }
     save_now(app);
 }
 
@@ -1471,6 +1595,7 @@ pub fn splitter_end(app: &AppHandle) {
         s.splitter = None;
     }
     save_now(app);
+    reconcile_if_pending(app);
 }
 
 // ---- corner grip --------------------------------------------------------------
@@ -1592,6 +1717,7 @@ pub fn resize_end(app: &AppHandle) {
     }
     emit_state(app);
     save_now(app);
+    reconcile_if_pending(app);
 }
 
 /// Double-click on a seam: demagnetize.
@@ -2550,11 +2676,13 @@ pub fn set_double(app: &AppHandle, on: bool) {
                 .get_or_insert_with(|| (s.layout.clone(), s.graph.clone(), s.unshaded_h.clone()))
                 .clone();
             (s.layout, s.graph, s.unshaded_h) = start;
+            let from = laid_out_at(&s, &now);
             let (targets, layout, (graph, unshaded)) =
-                rezoom_settled(&s, &now, &pinned, old_zoom, new_zoom);
+                rezoom_settled(&s, &from, &now, &pinned, old_zoom, new_zoom);
             s.unshaded_h.extend(unshaded);
             s.graph = graph;
             s.layout = layout.clone();
+            s.drawn_at.extend(&targets);
             s.double = on;
             (layout, targets)
         }; // D54: the lock is gone before any window call.
@@ -2578,11 +2706,13 @@ pub fn set_double(app: &AppHandle, on: bool) {
 }
 
 /// A re-zoom of the whole state, settled (D188): each window from the scale
-/// it is drawn at, `now`, to the one it will be once re-derived, rescued and
-/// kept in reach. The state is not changed; `set_double` commits it.
+/// its size is in, `from` (D190), to the one it will be drawn at once
+/// re-derived, rescued and kept in reach, judged from `now`, the scale it
+/// is drawn at. The state is not changed; `set_double` commits it.
 #[allow(clippy::type_complexity)]
 fn rezoom_settled(
     s: &WmState,
+    from: &BTreeMap<WindowId, f64>,
     now: &BTreeMap<WindowId, f64>,
     pinned: &BTreeMap<WindowId, f64>,
     old_zoom: f64,
@@ -2601,7 +2731,7 @@ fn rezoom_settled(
                     l,
                     g,
                     &|id, _| {
-                        let from = now.get(&id).copied().unwrap_or(s.scale);
+                        let from = from.get(&id).copied().unwrap_or(s.scale);
                         (from, t.get(&id).copied().unwrap_or(from))
                     },
                     (old_zoom, new_zoom),
@@ -2621,11 +2751,13 @@ fn rezoom_settled(
 /// down from Main's corner, and the EQ and playlist hung below DISPLAY1's
 /// bottom edge, where no display is. Their title bars were in reach, which
 /// is all D88 asks, but the person had not put them there. So a group every
-/// window of which was wholly on the work areas before the re-zoom, and is
-/// not after, is moved rigidly by the least that puts it back: up, left, or
-/// along to one display, whichever is shortest. A group already partly off
-/// before is where the person put it, and is left there. A drag is not
-/// affected.
+/// window of which was wholly on the displays before the re-zoom, over the
+/// taskbar included (the owner's call: a stack parked at the bottom edge is
+/// on screen), and is not wholly on the work areas after, is moved rigidly
+/// by the least that puts it back: up, left, or along to one display,
+/// whichever is shortest, clear of the taskbar. A group already partly off
+/// the displays before is where the person put it, and is left there. A
+/// drag is not affected.
 pub fn lift_onto_displays(
     before: &Layout,
     after: &Layout,
@@ -2633,9 +2765,10 @@ pub fn lift_onto_displays(
     monitors: &[MonitorInfo],
 ) -> Layout {
     let works: Vec<Rect> = monitors.iter().map(|m| m.work).collect();
-    let on = |l: &Layout, comp: &[WindowId]| {
+    let displays: Vec<Rect> = monitors.iter().map(|m| m.rect).collect();
+    let on = |l: &Layout, comp: &[WindowId], areas: &[Rect]| {
         comp.iter().filter_map(|id| l.get(id)).all(|r| {
-            let covered: i64 = works
+            let covered: i64 = areas
                 .iter()
                 .map(|n| {
                     let w = (r.right().min(n.right()) - r.x.max(n.x)).max(0) as i64;
@@ -2649,7 +2782,7 @@ pub fn lift_onto_displays(
     let mut out = after.clone();
     let ids: Vec<WindowId> = after.keys().copied().collect();
     for comp in graph.components(&ids) {
-        if !on(before, &comp) || on(after, &comp) {
+        if !on(before, &comp, &displays) || on(after, &comp, &works) {
             continue;
         }
         let Some(bounds) = bond::bounds(after, &comp) else {
@@ -4624,7 +4757,7 @@ mod tests {
             ..Default::default()
         };
         let now: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.5)).collect();
-        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &BTreeMap::new(), 1.0, 2.0);
+        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &now, &BTreeMap::new(), 1.0, 2.0);
         assert!(t.values().all(|s| *s == 1.5), "{t:?}");
         for id in CLASSIC {
             assert_eq!((out[&id].w, out[&id].h), (825, 348), "{id:?}");
@@ -4647,7 +4780,7 @@ mod tests {
             ..Default::default()
         };
         let now: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
-        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &BTreeMap::new(), 1.0, 2.0);
+        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &now, &BTreeMap::new(), 1.0, 2.0);
         assert!(t.values().all(|s| *s == 1.0), "{t:?}");
         assert_eq!(out[&PLAYLIST].bottom(), 1080, "lifted, not shoved right");
         assert_eq!(out[&MAIN].x, s.layout[&MAIN].x);
@@ -4662,6 +4795,57 @@ mod tests {
         let mut after = before.clone();
         bond::translate_group(&mut after, &[PLAYLIST], 0, 50);
         assert_eq!(lift_onto_displays(&before, &after, &g, &desk()), after);
+    }
+
+    #[test]
+    fn sizes_are_read_at_the_scale_they_were_laid_out_at_not_the_one_drawn() {
+        // The owner's second way into C: the engine has the stack at 150 %,
+        // 825 wide; Windows has put it at 100 % before the engine heard. The
+        // next drag lays it out from 150 % (D190), so it comes out 550 where
+        // reading 825 as 100 % gave a playlist steps too big, and a Main 413
+        // wide at 100 %.
+        let (mut frame, g) = initial_layout(1.5, 2.0);
+        let m = frame[&MAIN];
+        bond::translate_group(&mut frame, &CLASSIC, 1200 - m.x, 100 - m.y);
+        let now: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
+        let (t, out, _) = settle_scales(&CLASSIC, &now, &BTreeMap::new(), &desk(), |t| {
+            let scales = CLASSIC.iter().map(|id| (*id, (1.5, t[id]))).collect();
+            fit_to_displays(
+                &frame,
+                &CLASSIC,
+                &g,
+                &BTreeSet::new(),
+                &BTreeMap::new(),
+                &scales,
+                2.0,
+            )
+            .unwrap()
+        });
+        assert!(t.values().all(|s| *s == 1.0), "{t:?}");
+        for id in CLASSIC {
+            assert_eq!((out[&id].w, out[&id].h), (550, 232), "{id:?}");
+        }
+        assert!(bond::violations(&g, &out).is_empty());
+    }
+
+    #[test]
+    fn a_stack_parked_over_the_taskbar_is_lifted_clear_of_it() {
+        // The owner's call: resting on the screen's bottom edge, over the
+        // taskbar, is on screen. Doubled, it is lifted onto the work area.
+        let ms = vec![mon_tb(0, 0, 2560, 1080, 1.0, 48)];
+        let (mut before, g) = initial_layout(1.0, 1.0);
+        let m = before[&MAIN];
+        bond::translate_group(&mut before, &CLASSIC, 300 - m.x, 1080 - 3 * 116 - m.y);
+        let mut after = before.clone();
+        for (i, id) in CLASSIC.iter().enumerate() {
+            after.insert(
+                *id,
+                Rect::new(300, before[&MAIN].y + i as Px * 232, 550, 232),
+            );
+        }
+        let out = lift_onto_displays(&before, &after, &g, &ms);
+        assert_eq!(out[&PLAYLIST].bottom(), 1080 - 48);
+        assert!(bond::violations(&g, &out).is_empty());
     }
 
     #[test]
