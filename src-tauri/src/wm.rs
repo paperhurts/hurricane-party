@@ -986,7 +986,7 @@ pub fn press(app: &AppHandle) {
 /// D188: where each display has its own scale, the window system has the
 /// last word on which one a window is drawn at, so the frame is pushed, the
 /// scales read back, and any window the engine guessed wrong is pinned to
-/// the scale it got and the frame laid out again: a round or two at most.
+/// the scale it got and the frame laid out again, until the two agree.
 pub fn drag_move(app: &AppHandle) {
     let cursor = platform::platform().cursor_pos();
     let Some(moving) = app
@@ -1002,7 +1002,7 @@ pub fn drag_move(app: &AppHandle) {
     };
     let mut now = os_scales(app, &moving);
     let mut pinned = BTreeMap::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         let Some((layout, targets)) = drag_layout(app, cursor, &now, &pinned) else {
             return;
         };
@@ -1180,6 +1180,16 @@ fn push_settled(
         }
         if !p.place(h, r.x, r.y, r.w, r.h) {
             push_to_os(app, layout, &[id]);
+            continue;
+        }
+        // The exact size can move a window too. The owner's drop with the
+        // playlist 825 x 609 on the seam, hanging below DISPLAY1: the engine
+        // judged it mostly on 150 %, Windows put it at 100 % and shrank it
+        // to 550 x 406, and the engine, never told, kept 825 and read the
+        // 550 as 150 % on the next drag, a playlist that grew every time.
+        let got = p.window_scale(h).unwrap_or(to);
+        if !same_scale(got, to) {
+            off.insert(id, got);
         }
     }
     off
@@ -2531,7 +2541,7 @@ pub fn set_double(app: &AppHandle, on: bool) {
     let mut now = os_scales(app, &CLASSIC);
     let mut pinned = BTreeMap::new();
     let mut before = None;
-    for round in 0..3 {
+    for round in 0..4 {
         let (layout, targets) = {
             let state = app.state::<Wm>();
             let mut s = state.0.lock().unwrap();
@@ -2600,8 +2610,61 @@ fn rezoom_settled(
             },
             &|id, _| t.get(&id).copied().unwrap_or(s.scale),
         );
+        let l = lift_onto_displays(&s.layout, &l, &g, &s.monitors);
         (l, (g, u))
     })
+}
+
+/// D189: a group that a re-zoom grew off the displays is lifted back on.
+///
+/// The owner's 1x to 2x at the foot of DISPLAY1 on the seam: the stack grew
+/// down from Main's corner, and the EQ and playlist hung below DISPLAY1's
+/// bottom edge, where no display is. Their title bars were in reach, which
+/// is all D88 asks, but the person had not put them there. So a group every
+/// window of which was wholly on the work areas before the re-zoom, and is
+/// not after, is moved rigidly by the least that puts it back: up, left, or
+/// along to one display, whichever is shortest. A group already partly off
+/// before is where the person put it, and is left there. A drag is not
+/// affected.
+pub fn lift_onto_displays(
+    before: &Layout,
+    after: &Layout,
+    graph: &WindowGraph,
+    monitors: &[MonitorInfo],
+) -> Layout {
+    let works: Vec<Rect> = monitors.iter().map(|m| m.work).collect();
+    let on = |l: &Layout, comp: &[WindowId]| {
+        comp.iter().filter_map(|id| l.get(id)).all(|r| {
+            let covered: i64 = works
+                .iter()
+                .map(|n| {
+                    let w = (r.right().min(n.right()) - r.x.max(n.x)).max(0) as i64;
+                    let h = (r.bottom().min(n.bottom()) - r.y.max(n.y)).max(0) as i64;
+                    w * h
+                })
+                .sum();
+            covered >= r.w as i64 * r.h as i64
+        })
+    };
+    let mut out = after.clone();
+    let ids: Vec<WindowId> = after.keys().copied().collect();
+    for comp in graph.components(&ids) {
+        if !on(before, &comp) || on(after, &comp) {
+            continue;
+        }
+        let Some(bounds) = bond::bounds(after, &comp) else {
+            continue;
+        };
+        let Some((dx, dy)) = works
+            .iter()
+            .map(|w| contain_translation(bounds, merged_rect_for(&works, *w, bounds)))
+            .min_by_key(|(dx, dy)| dx.abs() + dy.abs())
+        else {
+            continue;
+        };
+        bond::translate_group(&mut out, &comp, dx, dy);
+    }
+    out
 }
 
 /// The scale a layout was saved at, read from Main's width (D182): Main is
@@ -4567,6 +4630,38 @@ mod tests {
             assert_eq!((out[&id].w, out[&id].h), (825, 348), "{id:?}");
         }
         assert!(bond::violations(&g2, &out).is_empty());
+    }
+
+    #[test]
+    fn a_stack_doubled_at_the_foot_of_a_display_is_lifted_back_on() {
+        // The owner's 1x to 2x on the seam at DISPLAY1's foot: Main mostly
+        // on DISPLAY1, the stack reaching DISPLAY1's bottom edge.
+        let (mut l, g) = initial_layout(1.0, 1.0);
+        let m = l[&MAIN];
+        bond::translate_group(&mut l, &CLASSIC, 2560 - 400 - m.x, 1080 - 3 * 116 - m.y);
+        let s = WmState {
+            layout: l,
+            graph: g,
+            monitors: desk(),
+            scale: 1.0,
+            ..Default::default()
+        };
+        let now: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
+        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &BTreeMap::new(), 1.0, 2.0);
+        assert!(t.values().all(|s| *s == 1.0), "{t:?}");
+        assert_eq!(out[&PLAYLIST].bottom(), 1080, "lifted, not shoved right");
+        assert_eq!(out[&MAIN].x, s.layout[&MAIN].x);
+        assert!(bond::violations(&g2, &out).is_empty());
+    }
+
+    #[test]
+    fn a_group_already_partly_off_the_displays_stays_where_it_was_put() {
+        let (mut before, g) = initial_layout(1.0, 1.0);
+        let m = before[&MAIN];
+        bond::translate_group(&mut before, &CLASSIC, 100 - m.x, 1000 - m.y);
+        let mut after = before.clone();
+        bond::translate_group(&mut after, &[PLAYLIST], 0, 50);
+        assert_eq!(lift_onto_displays(&before, &after, &g, &desk()), after);
     }
 
     #[test]
