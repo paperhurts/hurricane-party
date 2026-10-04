@@ -407,7 +407,7 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     let drawn_at: BTreeMap<WindowId, f64> = if fresh {
         layout.keys().map(|id| (*id, fresh_scale)).collect()
     } else {
-        launch_scales(&layout, &graph, &monitors, scale, zoom, &stored)
+        launch_scales(&layout, &graph, &monitors, scale, zoom, &stored, &shaded)
             .into_iter()
             .filter_map(|(id, (saved, target))| saved.map(|_| (id, target)))
             .collect()
@@ -422,7 +422,9 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     // for its display (every build before D187 left one so on a second
     // display) is re-derived in place instead.
     if per_display && !fresh {
-        if let Some((l, g)) = heal_saved_sizes(&layout, &graph, &monitors, scale, zoom, &stored) {
+        if let Some((l, g)) =
+            heal_saved_sizes(&layout, &graph, &monitors, scale, zoom, &stored, &shaded)
+        {
             eprintln!("wm: the layout was saved at sizes its displays do not draw; re-derived");
             (layout, graph) = (l, g);
             for (id, h) in unshaded_h.iter_mut() {
@@ -503,6 +505,72 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// D192: the classic windows just built, laid out again for the scale Windows
+/// gave each where that is not the one it was laid out for, and every window
+/// whose rect is not the layout's put there, until a read finds nothing to
+/// do; before `register` reads them back. `register` takes the window
+/// system's rects as the truth and drops any bond they do not keep (D58), so
+/// a window left at another scale's size here is a group come apart at
+/// launch. The same following `reconcile` does (`follow_scales`), and the
+/// same placing; four rounds at most, ending on a read.
+fn settle_built(app: &AppHandle) {
+    let p = platform::platform();
+    if p.one_scale() {
+        return;
+    }
+    let windows: Vec<(WindowId, NativeWindow, tauri::WebviewWindow)> = CLASSIC
+        .iter()
+        .filter_map(|id| {
+            let win = app.get_webview_window(label_of(*id))?;
+            Some((*id, platform::handle_of(&win), win))
+        })
+        .collect();
+    for _ in 0..4 {
+        for (_, h, _) in &windows {
+            p.pump(*h);
+        }
+        let now: BTreeMap<WindowId, f64> = windows
+            .iter()
+            .filter_map(|(id, h, _)| Some((*id, p.window_scale(*h)?)))
+            .collect();
+        if now.is_empty() {
+            return;
+        }
+        let (layout, followed) = {
+            let state = app.state::<Wm>();
+            let mut s = state.0.lock().unwrap();
+            let followed = follow_scales(
+                &mut s,
+                &now,
+                &BTreeSet::new(),
+                std::time::Instant::now(),
+                true,
+                p.confines_to_work_area(),
+            );
+            (s.layout.clone(), followed)
+        }; // D54: the lock is gone before any window call.
+        if followed.rescaled {
+            eprintln!("wm: Windows drew a window at another scale as it was built; followed");
+        }
+        let mut placed = false;
+        for (id, h, win) in &windows {
+            let (Some(r), Some((pos, size))) = (layout.get(id), platform::rect_of(win)) else {
+                continue;
+            };
+            if (pos.x, pos.y, size.width as Px, size.height as Px) != (r.x, r.y, r.w, r.h) {
+                if !p.place(*h, r.x, r.y, r.w, r.h) {
+                    push_to_os(app, &layout, &[*id]);
+                }
+                placed = true;
+            }
+        }
+        if !followed.rescaled && !placed {
+            return;
+        }
+    }
+    eprintln!("wm: the classic windows had not settled after four rounds at launch");
+}
+
 /// Build the three classic windows plus their hidden roots.
 ///
 /// Sizes are declared in `PhysicalSize`, never the logical config keys (D38):
@@ -513,11 +581,17 @@ pub fn seed_state(app: &AppHandle) -> tauri::Result<()> {
 pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
     // Placed from the layout seeded before any window existed, so the model and
     // the screen start out saying the same thing.
-    let (seeded, zoom) = {
+    let (seeded, zoom, drawn_at, monitors) = {
         let state = app.state::<Wm>();
         let s = state.0.lock().unwrap();
-        (s.layout.clone(), s.zoom())
+        (
+            s.layout.clone(),
+            s.zoom(),
+            s.drawn_at.clone(),
+            s.monitors.clone(),
+        )
     };
+    let p = platform::platform();
 
     for id in CLASSIC.iter() {
         let win =
@@ -544,13 +618,36 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
                 .visible(false)
                 .build()?;
 
-        // D52: position, THEN size. Crossing a DPI boundary is not a pure move
-        // — Windows sends WM_DPICHANGED and tao rescales to preserve logical
-        // size, so size-then-position leaves the window 1.5x too big.
         let r = seeded[id];
-        win.set_position(PhysicalPosition::new(r.x, r.y))?;
-        platform::hold_size(&win, r.w as u32, r.h as u32);
-        win.set_size(PhysicalSize::new(r.w as u32, r.h as u32))?;
+        // D192: where each display has its own scale, Windows is to judge the
+        // saved rect from the scale its size is in, as it did while the app
+        // ran (`land`). Moved first and sized after (D52), the window crossed
+        // the seam at tao's default 800 x 600 and was judged on that: the
+        // stack the owner left at 100 % on the seam came back 367 x 155 with
+        // every bond dropped.
+        let h = platform::handle_of(&win);
+        let placed = match p.window_scale(h) {
+            Some(now) => {
+                // A window whose size's scale could not be told is laid out
+                // for the display holding most of it.
+                let to = drawn_at
+                    .get(id)
+                    .copied()
+                    .unwrap_or_else(|| dpi_monitor(&monitors, r).map_or(now, |m| m.scale));
+                land(p, h, r, now, to, &monitors);
+                true
+            }
+            None => false,
+        };
+        if !placed {
+            // D52: position, THEN size. Crossing a DPI boundary is not a pure
+            // move — Windows sends WM_DPICHANGED and tao rescales to preserve
+            // logical size, so size-then-position leaves the window 1.5x too
+            // big.
+            win.set_position(PhysicalPosition::new(r.x, r.y))?;
+            platform::hold_size(&win, r.w as u32, r.h as u32);
+            win.set_size(PhysicalSize::new(r.w as u32, r.h as u32))?;
+        }
         // #47: the webview's own zoom factor, not a CSS zoom. The page lays
         // out at 275 x 116 as always and the browser renders it doubled, so
         // pointer maths, rects and the canvas backing store all agree.
@@ -581,7 +678,48 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
             .build()?;
     }
 
+    // D192: last, after every webview is built (building one pumps messages,
+    // which can deliver a change of scale), and directly before `register`.
+    settle_built(app);
     Ok(())
+}
+
+/// D192: put a just-built window at `r`, laid out for scale `to`, so that
+/// Windows judges `r` from `to`, as it would have while the app ran. The
+/// window is made at the scale `now` of wherever the window system put it.
+/// Where that is not `to`, it first goes wholly onto the display at `to`
+/// nearest `r`, at its size at `now`, so Windows gives it `to` and tao's
+/// resize for that makes it about `r`'s size; judged from anything else, a
+/// stack left at 150 % half over the 100 % display came back at 100 %.
+/// Then `r` exactly, judged from `to`, the tie rule included. A change of
+/// scale is delivered as each placement is made (`pump`); what Windows
+/// decides otherwise, `settle_built` follows.
+fn land(
+    p: &dyn platform::WindowPlatform,
+    h: NativeWindow,
+    r: Rect,
+    now: f64,
+    to: f64,
+    monitors: &[MonitorInfo],
+) {
+    if !same_scale(now, to) {
+        let centre = |q: Rect| (q.x as i64 + q.w as i64 / 2, q.y as i64 + q.h as i64 / 2);
+        let (cx, cy) = centre(r);
+        let near = monitors
+            .iter()
+            .filter(|m| same_scale(m.scale, to))
+            .min_by_key(|m| {
+                let (mx, my) = centre(m.work);
+                (mx - cx).pow(2) + (my - cy).pow(2)
+            });
+        if let Some(m) = near {
+            let e = sized_for(r, to, now);
+            p.place(h, m.work.x, m.work.y, e.w.min(m.work.w), e.h.min(m.work.h));
+            p.pump(h);
+        }
+    }
+    p.place(h, r.x, r.y, r.w, r.h);
+    p.pump(h);
 }
 
 /// Reveal the windows, once the graph behind them is real.
@@ -1288,13 +1426,17 @@ pub fn resync_spans(graph: &mut WindowGraph, layout: &Layout) {
 
 /// End a drag: form whatever bonds the final position earned, then re-apply the
 /// ownership topology so the new group shape is real in the z-order too.
-pub fn drag_end(app: &AppHandle) {
+pub fn drag_end(app: &AppHandle, release: bool) {
     // The webview drops a pointermove while the last one is still in flight
     // (Classic.svelte's `frame`), so the final position can arrive only as the
     // release. One last move from the real cursor puts the group where the
     // pointer let go; a move is computed from the drag's origin, so a repeat
-    // costs nothing (up to 24 px short without it, D182).
-    drag_move(app);
+    // costs nothing (up to 24 px short without it, D182). Only on a release:
+    // a drag whose release was lost is ended when the pointer comes back,
+    // wherever that is, and is left where its last frame put it (D192).
+    if release {
+        drag_move(app);
+    }
     let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
@@ -1334,7 +1476,14 @@ pub fn drag_end(app: &AppHandle) {
 /// own end has been heard: a start overtaken by its end would leave a drag,
 /// splitter or grip recorded that nothing ends, and `reconcile` waiting.
 pub fn gesture_begins(app: &AppHandle, id: WindowId, seq: u64) -> bool {
-    begins(&mut app.state::<Wm>().0.lock().unwrap(), id, seq)
+    begins(&app.state::<Wm>().0.lock().unwrap(), id, seq)
+}
+
+/// D192: the gesture for press `seq` in window `id` has started, so it is
+/// the live one. Only once it has: a grip Rust refuses is no gesture, and
+/// taking the live slot for it left an older press's late end ignored.
+pub fn gesture_started(app: &AppHandle, id: WindowId, seq: u64) {
+    started(&mut app.state::<Wm>().0.lock().unwrap(), id, seq);
 }
 
 /// D191: the gesture for press `seq` in window `id` has ended. False when
@@ -1344,12 +1493,12 @@ pub fn gesture_ends(app: &AppHandle, id: WindowId, seq: u64) -> bool {
     ends(&mut app.state::<Wm>().0.lock().unwrap(), id, seq)
 }
 
-fn begins(s: &mut WmState, id: WindowId, seq: u64) -> bool {
-    if s.ended.get(&id).is_some_and(|e| e.contains(&seq)) {
-        return false;
-    }
+fn begins(s: &WmState, id: WindowId, seq: u64) -> bool {
+    !s.ended.get(&id).is_some_and(|e| e.contains(&seq))
+}
+
+fn started(s: &mut WmState, id: WindowId, seq: u64) {
     s.live = Some((id, seq));
-    true
 }
 
 fn ends(s: &mut WmState, id: WindowId, seq: u64) -> bool {
@@ -2632,8 +2781,9 @@ pub fn heal_saved_sizes(
     fallback: f64,
     zoom: f64,
     stored: &BTreeMap<WindowId, f64>,
+    shaded: &BTreeSet<WindowId>,
 ) -> Option<(Layout, WindowGraph)> {
-    let scales = launch_scales(layout, graph, monitors, fallback, zoom, stored);
+    let scales = launch_scales(layout, graph, monitors, fallback, zoom, stored, shaded);
     if scales
         .values()
         .all(|(saved, target)| saved.is_none_or(|s| same_scale(s, *target)))
@@ -2677,6 +2827,7 @@ pub fn launch_scales(
     fallback: f64,
     zoom: f64,
     stored: &BTreeMap<WindowId, f64>,
+    shaded: &BTreeSet<WindowId>,
 ) -> BTreeMap<WindowId, (Option<f64>, f64)> {
     // A size rounded once (D40) reads back a hair off its scale.
     let snap = |s: f64| {
@@ -2687,24 +2838,46 @@ pub fn launch_scales(
             .unwrap_or(s)
     };
     let area = |r: &Rect| dpi_monitor(monitors, *r).map_or(fallback, |m| m.scale);
+    let read = |id: WindowId| -> Option<f64> {
+        let r = layout.get(&id)?;
+        (!is_resizable(id) && r.w > 0).then(|| snap(r.w as f64 / (CHROME_W * zoom)))
+    };
+    // Sizes are read from the rows, which are stored expanded; the scale a
+    // window will be drawn at is judged where it will be put, which for a
+    // shaded window is its strip (D192): a shaded Main at 100 % whose
+    // expanded rect would hang below DISPLAY1 onto DISPLAY2 was judged 150 %.
+    let mut placed = layout.clone();
+    for id in CLASSIC {
+        if !shaded.contains(&id) {
+            continue;
+        }
+        let Some(r) = layout.get(&id) else { continue };
+        let at = read(id)
+            .or_else(|| stored.get(&id).copied().map(snap))
+            .unwrap_or_else(|| area(r));
+        apply_shade(
+            &mut placed,
+            graph,
+            id,
+            bond::d40::physical(SHADE_H * zoom, at),
+        );
+    }
     let mut out = BTreeMap::new();
     for comp in graph.components(&CLASSIC) {
-        let read = |id: WindowId| -> Option<f64> {
-            let r = layout.get(&id)?;
-            (!is_resizable(id) && r.w > 0).then(|| snap(r.w as f64 / (CHROME_W * zoom)))
-        };
         let group = comp.iter().find_map(|id| read(*id));
-        let group_right = comp.iter().all(|id| match (read(*id), layout.get(id)) {
+        let group_right = comp.iter().all(|id| match (read(*id), placed.get(id)) {
             (Some(s), Some(r)) => same_scale(s, launch_scale(monitors, *r, Some(s), fallback)),
             _ => true,
         });
         for id in &comp {
-            let Some(r) = layout.get(id) else { continue };
+            let (Some(r), Some(at)) = (layout.get(id), placed.get(id)) else {
+                continue;
+            };
             let saved = read(*id)
                 .or_else(|| stored.get(id).copied().map(snap))
                 .or_else(|| {
                     let fits = |scale: f64| playlist_fits(*r, scale, zoom);
-                    let here = area(r);
+                    let here = area(at);
                     match group {
                         Some(_) if group_right && fits(here) => Some(here),
                         Some(g) => Some(g),
@@ -2720,7 +2893,7 @@ pub fn launch_scales(
                         }
                     }
                 });
-            let target = launch_scale(monitors, *r, saved, fallback);
+            let target = launch_scale(monitors, *at, saved, fallback);
             out.insert(*id, (saved, target));
         }
     }
@@ -5270,11 +5443,20 @@ mod tests {
     fn a_group_across_the_seam_is_saved_at_its_own_scales_and_left_alone() {
         let (l, g) = straddle();
         let stored = BTreeMap::from([(MAIN, 1.0), (PLAYLIST, 1.5)]);
-        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored).is_none());
+        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored, &BTreeSet::new()).is_none());
         // A row from before the scale was kept: the playlist's size is one it
         // can have at 150 % and not at Main's 100 %, so it is read as 150 %.
         // Main's width said 100 % for it, and it grew steps every launch.
-        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new()).is_none());
+        assert!(heal_saved_sizes(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
         // The mirror, a playlist at 100 % beside Main at 150 %, is not shrunk.
         let mirror = Layout::from([
             (PLAYLIST, Rect::new(2010, 100, 550, 406)),
@@ -5282,7 +5464,16 @@ mod tests {
         ]);
         let mut mg = WindowGraph::new();
         mg.insert(Bond::new(PLAYLIST, MAIN, Edge::Right, (100, 448)));
-        assert!(heal_saved_sizes(&mirror, &mg, &desk(), 1.0, 2.0, &BTreeMap::new()).is_none());
+        assert!(heal_saved_sizes(
+            &mirror,
+            &mg,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
     }
 
     #[test]
@@ -5294,11 +5485,21 @@ mod tests {
         assert!(playlist_fits(l[&PLAYLIST], 1.0, 2.0) && playlist_fits(l[&PLAYLIST], 1.5, 2.0));
         // An older row: it fits where it is, so it was sized there. Read at
         // Main's 100 % it grew to 1350 x 522.
-        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new()).is_none());
+        assert!(heal_saved_sizes(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
         // Saved at 100 %'s size on DISPLAY2, its row saying so: healed to
         // 150 %, its seven steps and two kept.
         let stored = BTreeMap::from([(MAIN, 1.0), (PLAYLIST, 1.0)]);
-        let (out, _) = heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored).expect("wrong");
+        let (out, _) =
+            heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored, &BTreeSet::new()).expect("wrong");
         assert_eq!((out[&PLAYLIST].w, out[&PLAYLIST].h), (1350, 522));
         assert_eq!(out[&MAIN], l[&MAIN]);
     }
@@ -5308,9 +5509,16 @@ mod tests {
         // v1.5: the playlist dragged alone onto DISPLAY2 kept 100 %'s
         // 550 x 406. With no Main or EQ to read, nothing healed it.
         let l = Layout::from([(PLAYLIST, Rect::new(3000, 100, 550, 406))]);
-        let (out, _) =
-            heal_saved_sizes(&l, &WindowGraph::new(), &desk(), 1.0, 2.0, &BTreeMap::new())
-                .expect("it was wrong");
+        let (out, _) = heal_saved_sizes(
+            &l,
+            &WindowGraph::new(),
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )
+        .expect("it was wrong");
         assert_eq!((out[&PLAYLIST].w, out[&PLAYLIST].h), (825, 609));
     }
 
@@ -5321,7 +5529,7 @@ mod tests {
         let m = l[&MAIN];
         bond::translate_group(&mut l, &CLASSIC, 2285 - m.x, 100 - m.y);
         let stored: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
-        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored).is_none());
+        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored, &BTreeSet::new()).is_none());
         assert_eq!(launch_scale(&desk(), l[&MAIN], Some(1.0), 1.0), 1.0);
         // An older row has only the area to go by, and the last of the
         // largest is DISPLAY2.
@@ -5378,23 +5586,24 @@ mod tests {
     #[test]
     fn a_start_heard_after_its_own_end_starts_nothing() {
         let mut s = stacked();
-        assert!(begins(&mut s, EQ, 7));
+        assert!(begins(&s, EQ, 7));
+        started(&mut s, EQ, 7);
         assert!(ends(&mut s, EQ, 7));
-        assert!(!begins(&mut s, EQ, 7), "its end came first");
+        assert!(!begins(&s, EQ, 7), "its end came first");
         // Two ends heard before a start that was overtaken by both.
         assert!(ends(&mut s, EQ, 8));
         assert!(ends(&mut s, EQ, 9));
-        assert!(!begins(&mut s, EQ, 8));
-        assert!(begins(&mut s, EQ, 10), "the next press is its own");
-        assert!(begins(&mut s, MAIN, 7), "another window's press");
+        assert!(!begins(&s, EQ, 8));
+        assert!(begins(&s, EQ, 10), "the next press is its own");
+        assert!(begins(&s, MAIN, 7), "another window's press");
     }
 
     #[test]
     fn a_late_end_leaves_the_live_gesture_alone() {
         let mut s = stacked();
-        assert!(begins(&mut s, EQ, 1));
+        started(&mut s, EQ, 1);
         // Press 2 in Main starts before press 1's end is heard.
-        assert!(begins(&mut s, MAIN, 2));
+        started(&mut s, MAIN, 2);
         assert!(!ends(&mut s, EQ, 1), "press 1's end is late");
         assert_eq!(s.live, Some((MAIN, 2)));
         assert!(ends(&mut s, MAIN, 2));
@@ -5511,8 +5720,25 @@ mod tests {
         let (mut l, g) = initial_layout(1.0, 2.0);
         let m = l[&MAIN];
         bond::translate_group(&mut l, &CLASSIC, 2285 - m.x, 100 - m.y);
-        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new()).is_none());
-        let sc = launch_scales(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new());
+        assert!(heal_saved_sizes(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
+        let sc = launch_scales(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        );
         assert!(sc.values().all(|v| *v == (Some(1.0), 1.0)), "{sc:?}");
     }
 
@@ -5524,8 +5750,16 @@ mod tests {
         let pl = l[&PLAYLIST];
         l.insert(PLAYLIST, Rect::new(pl.x, pl.y, 900, 348));
         bond::translate_group(&mut l, &CLASSIC, 2800, 0);
-        let (out, _) =
-            heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new()).expect("wrong");
+        let (out, _) = heal_saved_sizes(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )
+        .expect("wrong");
         assert_eq!((out[&MAIN].w, out[&MAIN].h), (825, 348));
         assert_eq!((out[&PLAYLIST].w, out[&PLAYLIST].h), (1350, 522));
     }
@@ -5536,9 +5770,50 @@ mod tests {
         // and no scale recorded for it, so it is told again next launch.
         let l = Layout::from([(PLAYLIST, Rect::new(3000, 100, 560, 400))]);
         let g = WindowGraph::new();
-        let sc = launch_scales(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new());
+        let sc = launch_scales(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        );
         assert_eq!(sc[&PLAYLIST].0, None);
-        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new()).is_none());
+        assert!(heal_saved_sizes(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn a_shaded_window_is_judged_where_its_strip_will_be() {
+        // D192: a shaded 2x Main at 100 % at (2200, 1000). Its strip, 550 x
+        // 28, is mostly on DISPLAY1; its expanded rect, as the row stores
+        // it, would hang below DISPLAY1's foot onto DISPLAY2.
+        let l = Layout::from([(MAIN, Rect::new(2200, 1000, 550, 232))]);
+        let g = WindowGraph::new();
+        let shaded = BTreeSet::from([MAIN]);
+        let sc = launch_scales(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new(), &shaded);
+        assert_eq!(sc[&MAIN], (Some(1.0), 1.0));
+        assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &BTreeMap::new(), &shaded).is_none());
+        // Judged expanded, it was 150 %.
+        let sc = launch_scales(
+            &l,
+            &g,
+            &desk(),
+            1.0,
+            2.0,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        );
+        assert_eq!(sc[&MAIN], (Some(1.0), 1.5));
     }
 
     #[test]
@@ -5600,8 +5875,16 @@ mod tests {
     fn a_layout_saved_at_the_wrong_size_on_150_percent_heals_at_launch() {
         // What every build before D187 saved after a drag onto DISPLAY2.
         let (origin, now, g) = stack_moved(1.0, 3, 2800, 200);
-        let healed =
-            heal_saved_sizes(&now, &g, &desk(), 1.0, 1.0, &BTreeMap::new()).expect("it was wrong");
+        let healed = heal_saved_sizes(
+            &now,
+            &g,
+            &desk(),
+            1.0,
+            1.0,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )
+        .expect("it was wrong");
         let fitted = fit(&origin, &now, &g, 1.0).unwrap();
         assert_eq!(healed.0, fitted, "the same sizes a drag there gives now");
         assert_eq!(
@@ -5609,10 +5892,26 @@ mod tests {
             (now[&MAIN].x, now[&MAIN].y)
         );
         // And a layout that already fits its displays is left alone.
-        assert!(
-            heal_saved_sizes(&healed.0, &healed.1, &desk(), 1.0, 1.0, &BTreeMap::new()).is_none()
-        );
-        assert!(heal_saved_sizes(&origin, &g, &desk(), 1.0, 1.0, &BTreeMap::new()).is_none());
+        assert!(heal_saved_sizes(
+            &healed.0,
+            &healed.1,
+            &desk(),
+            1.0,
+            1.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
+        assert!(heal_saved_sizes(
+            &origin,
+            &g,
+            &desk(),
+            1.0,
+            1.0,
+            &BTreeMap::new(),
+            &BTreeSet::new()
+        )
+        .is_none());
     }
 
     #[test]

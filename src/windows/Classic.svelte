@@ -351,7 +351,8 @@
   let pending = false;
   // Which gesture the seam actually gave us. A seam with no resizable neighbour
   // degrades to a group move rather than offering a splitter that does nothing.
-  let gesture: "splitter" | "move" | "resize" | "none" = "none";
+  type Gesture = "splitter" | "move" | "resize" | "none";
+  let gesture: Gesture = "none";
   // Which press the gesture belongs to (D191). Every start and end names
   // its press, so Rust starts nothing for a press whose end it has already
   // heard (invokes are separate requests, not ordered), and a reply from Rust
@@ -395,35 +396,83 @@
     let started = false;
     const seq = ++lastSeq;
     currentSeq = seq;
+    // Every press starts clean; an older press whose release never came keeps
+    // its own kind in `mine` (D192).
+    gesture = "none";
+    dragSide = null;
+    // The gesture this press got, kept here as well as in `gesture`: once a
+    // newer press has begun, `gesture` is that press's (D192).
+    let mine: Gesture = "none";
 
-    const onMove = () => {
+    const detach = () => {
+      root.removeEventListener("pointermove", onMove);
+      root.removeEventListener("pointerup", onUp);
+      root.removeEventListener("pointercancel", onUp);
+      root.removeEventListener("lostpointercapture", onLost);
+    };
+    const onMove = (ev: PointerEvent) => {
+      // D192: a press whose release never came (Alt+Tab, before or after the
+      // first move) leaves its listeners here. With the button up, or once a
+      // newer press has begun, it is over: ended under its own press. Another
+      // pointer's move (a pen hovering in range during a mouse drag) says
+      // nothing about this one's button.
+      if (currentSeq !== seq) {
+        onUp();
+        return;
+      }
+      if (ev.pointerId !== e.pointerId) return;
+      if ((ev.buttons & 1) === 0) {
+        onUp();
+        return;
+      }
       if (!started) {
         started = true;
         root.setPointerCapture(e.pointerId);
         begin(seq);
       }
+      mine = gesture;
       if (gesture === "splitter") frame(() => invoke("wm_splitter_move"));
       else if (gesture === "move") frame(() => invoke("wm_drag_move"));
       else if (gesture === "resize") frame(() => invoke("wm_resize_move"));
     };
-    const onUp = () => {
-      root.removeEventListener("pointermove", onMove);
-      root.removeEventListener("pointerup", onUp);
-      root.removeEventListener("pointercancel", onUp);
+    // `ev` is the release, when there is one: only a real release moves the
+    // group to where the pointer let go (D192).
+    const onUp = (ev?: PointerEvent) => {
+      if (ev && ev.pointerId !== e.pointerId) return;
+      detach();
+      const release = ev?.type === "pointerup";
       if (!started) return; // a plain click: leave click/dblclick alone
-      if (gesture === "splitter") invoke("wm_splitter_end", { label, seq });
-      else if (gesture === "move") invoke("wm_drag_end", { label, seq });
-      else if (gesture === "resize") invoke("wm_resize_end", { label, seq });
+      const current = currentSeq === seq;
+      const kind = current ? gesture : mine;
+      // Ended under its own press, so Rust ends it if it is still live and
+      // leaves alone the newer press's if that one has begun.
+      if (kind === "splitter") invoke("wm_splitter_end", { label, seq });
+      else if (kind === "move") invoke("wm_drag_end", { label, seq, release });
+      else if (kind === "resize") invoke("wm_resize_end", { label, seq });
+      // The shared state is the newer press's once there is one. Before
+      // D192 a lost release's handler cleared it under the next press, whose
+      // own release then sent no end at all.
+      if (!current) return;
       gesture = "none";
       dragSide = null;
       // A reply still on its way is for a gesture that has ended.
-      if (currentSeq === seq) currentSeq = 0;
+      currentSeq = 0;
+    };
+
+    // The release can be lost (capture taken away by Alt+Tab or a system
+    // dialog); <html> losing the capture ends the gesture as a release would.
+    // Only <html>'s own: the event bubbles, and a child's capture changing
+    // hands is not this gesture's.
+    const onLost = (ev: PointerEvent) => {
+      if (ev.target === root && ev.pointerId === e.pointerId) onUp();
     };
 
     root.addEventListener("pointermove", onMove);
     root.addEventListener("pointerup", onUp);
     root.addEventListener("pointercancel", onUp);
+    root.addEventListener("lostpointercapture", onLost);
   }
+
 
   // ---- title bar: always a group move ----
 

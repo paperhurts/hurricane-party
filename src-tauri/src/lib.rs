@@ -850,6 +850,7 @@ fn wm_drag_start(app: AppHandle, label: String, seq: u64) {
     if let Some(id) = wm::id_of(&label) {
         if wm::gesture_begins(&app, id, seq) {
             wm::drag_start(&app, id);
+            wm::gesture_started(&app, id, seq);
         }
     }
 }
@@ -868,12 +869,14 @@ fn wm_drag_move(app: AppHandle) {
     wm::drag_move(&app);
 }
 
+/// The end of a drag. `release` is whether the pointer was let go here,
+/// rather than the drag being ended late, its release lost (D192).
 #[tauri::command]
-fn wm_drag_end(app: AppHandle, label: String, seq: u64) {
+fn wm_drag_end(app: AppHandle, label: String, seq: u64, release: bool) {
     // D191: an end for another press than the live one is late, and leaves
     // the live gesture alone.
     if wm::id_of(&label).is_none_or(|id| wm::gesture_ends(&app, id, seq)) {
-        wm::drag_end(&app);
+        wm::drag_end(&app, release);
     }
 }
 
@@ -908,12 +911,14 @@ fn wm_seam_down(app: AppHandle, label: String, edge: String, seq: u64) -> &'stat
     if !wm::gesture_begins(&app, id, seq) {
         return "none";
     }
-    if wm::splitter_start(&app, id, edge) {
+    let got = if wm::splitter_start(&app, id, edge) {
         "splitter"
     } else {
         wm::drag_start(&app, id);
         "move"
-    }
+    };
+    wm::gesture_started(&app, id, seq);
+    got
 }
 
 #[tauri::command]
@@ -969,7 +974,13 @@ fn wm_set_double(app: AppHandle, on: bool) {
 #[tauri::command]
 fn wm_resize_start(app: AppHandle, label: String, seq: u64) -> bool {
     match wm::id_of(&label) {
-        Some(id) => wm::gesture_begins(&app, id, seq) && wm::resize_start(&app, id),
+        Some(id) => {
+            let ok = wm::gesture_begins(&app, id, seq) && wm::resize_start(&app, id);
+            if ok {
+                wm::gesture_started(&app, id, seq);
+            }
+            ok
+        }
         None => false,
     }
 }

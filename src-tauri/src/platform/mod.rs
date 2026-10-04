@@ -141,6 +141,12 @@ pub trait WindowPlatform: Send + Sync {
         false
     }
 
+    /// D192: deliver a change of scale the window system has waiting for this
+    /// window now, rather than whenever the UI thread next pumps messages.
+    /// Only at launch, on the UI thread, while the windows are hidden. Nothing
+    /// where there is nothing to deliver.
+    fn pump(&self, _w: NativeWindow) {}
+
     /// D182: does the window manager keep every window it places wholly
     /// inside the work area? Mutter does, one window at a time, so a group
     /// pushed past an edge would shear; the engine clamps the whole group
