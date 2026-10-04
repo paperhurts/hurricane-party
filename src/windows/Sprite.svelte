@@ -380,12 +380,21 @@
     };
     const root = document.documentElement;
     const move = (ev: PointerEvent) => {
+      // D192: only this pointer, and only with its button down. A release
+      // lost to Alt+Tab left the slider following the hover, scrubbing the
+      // song or turning the volume; the first move with the button up ends it.
+      if (ev.pointerId !== e.pointerId) return;
+      if ((ev.buttons & 1) === 0) {
+        up();
+        return;
+      }
       // Past a few pixels this press is a drag, and cannot be the first half
       // of a double click.
       if (Math.abs(ev.clientX - lastDown.x) > NEAR || Math.abs(ev.clientY - lastDown.y) > NEAR) lastDown.moved = true;
       at(ev);
     };
-    const up = () => {
+    const up = (ev?: PointerEvent) => {
+      if (ev && ev.pointerId !== e.pointerId) return;
       root.removeEventListener("pointermove", move);
       root.removeEventListener("pointerup", up);
       root.removeEventListener("pointercancel", up);

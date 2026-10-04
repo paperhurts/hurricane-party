@@ -976,9 +976,7 @@ fn wm_resize_start(app: AppHandle, label: String, seq: u64) -> bool {
     match wm::id_of(&label) {
         Some(id) => {
             let ok = wm::gesture_begins(&app, id, seq) && wm::resize_start(&app, id);
-            if ok {
-                wm::gesture_started(&app, id, seq);
-            }
+            wm::gesture_started_if(&app, id, seq, ok);
             ok
         }
         None => false,

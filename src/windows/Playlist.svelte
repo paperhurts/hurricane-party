@@ -237,7 +237,18 @@
     // not break double-click, which is read from press timing above.
     row.setPointerCapture(e.pointerId);
 
+    // The listeners are on <html>, the capture on the row: a captured move
+    // still bubbles there, and one that is not (the capture lost with a
+    // release, to Alt+Tab) reaches it wherever the pointer is (D193).
+    const root = document.documentElement;
     const onMove = (ev: PointerEvent) => {
+      // D192: only this pointer, and only with its button down. A release
+      // lost to Alt+Tab is no drop: the drag is dropped, the order unchanged.
+      if (ev.pointerId !== e.pointerId) return;
+      if ((ev.buttons & 1) === 0) {
+        cancel();
+        return;
+      }
       if (!dragging) {
         if (Math.abs(ev.clientY - startY) < 4) return;
         dragging = true;
@@ -254,10 +265,34 @@
       }
       dropAt = at;
     };
-    const onUp = () => {
-      row.removeEventListener("pointermove", onMove);
-      row.removeEventListener("pointerup", onUp);
-      row.removeEventListener("pointercancel", onUp);
+    const detach = () => {
+      root.removeEventListener("pointermove", onMove);
+      root.removeEventListener("pointerup", onUp);
+      root.removeEventListener("pointercancel", onCancel);
+      row.removeEventListener("lostpointercapture", onLost);
+    };
+    // A drag that ends without its release, cancelled or lost, moves nothing.
+    const cancel = () => {
+      detach();
+      try {
+        row.releasePointerCapture(e.pointerId);
+      } catch {
+        // The capture is gone already; nothing to release.
+      }
+      dragId = null;
+      dropAt = null;
+    };
+    const onCancel = (ev: PointerEvent) => {
+      if (ev.pointerId === e.pointerId) cancel();
+    };
+    // After a release the capture goes too, but onUp has detached this by
+    // then; before one, the capture taken away is the release lost.
+    const onLost = (ev: PointerEvent) => {
+      if (ev.target === row && ev.pointerId === e.pointerId) cancel();
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      detach();
       if (!dragging) return;
       const at = dropAt ?? i;
       dragId = null;
@@ -266,9 +301,10 @@
       const dest = at > i ? at - 1 : at;
       if (dest !== i) emitTo("library", "queue:move", { from: t.position, to: dest }).catch(() => {});
     };
-    row.addEventListener("pointermove", onMove);
-    row.addEventListener("pointerup", onUp);
-    row.addEventListener("pointercancel", onUp);
+    root.addEventListener("pointermove", onMove);
+    root.addEventListener("pointerup", onUp);
+    root.addEventListener("pointercancel", onCancel);
+    row.addEventListener("lostpointercapture", onLost);
   }
 
   // ---- what the skin draws (#3, D99) ----

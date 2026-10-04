@@ -678,10 +678,52 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
             .build()?;
     }
 
+    // D193: each window's owner set now, before the settle, so a change of
+    // scale it causes is seen there; `register`'s own setting then finds the
+    // owners already set and leaves them.
+    own_built(app);
     // D192: last, after every webview is built (building one pumps messages,
     // which can deliver a change of scale), and directly before `register`.
     settle_built(app);
     Ok(())
+}
+
+/// D193: the owners `register` will give the windows just built, given them
+/// now, from the seeded graph and the roots just built, the same way
+/// `plan_ownership` assigns them.
+fn own_built(app: &AppHandle) {
+    let roots: Vec<NativeWindow> = ROOT_LABELS
+        .iter()
+        .filter_map(|l| app.get_webview_window(l))
+        .map(|w| platform::handle_of(&w))
+        .collect();
+    if roots.is_empty() {
+        return;
+    }
+    let handle = |id: WindowId| {
+        app.get_webview_window(label_of(id))
+            .map(|w| platform::handle_of(&w))
+            .unwrap_or(NativeWindow::NONE)
+    };
+    let plan = {
+        let state = app.state::<Wm>();
+        let s = state.0.lock().unwrap();
+        let mut owners = Vec::new();
+        for (i, comp) in s.graph.components(&CLASSIC).iter().enumerate() {
+            let root = roots[i.min(roots.len() - 1)];
+            owners.extend(comp.iter().map(|id| (handle(*id), root)));
+        }
+        OwnPlan {
+            owners,
+            raise: Vec::new(),
+            monitors: s.monitors.clone(),
+            rects: CLASSIC
+                .iter()
+                .filter_map(|id| Some((handle(*id), *s.layout.get(id)?)))
+                .collect(),
+        }
+    }; // D54: the lock is gone before any window call.
+    apply_ownership(&plan);
 }
 
 /// D192: put a just-built window at `r`, laid out for scale `to`, so that
@@ -691,7 +733,7 @@ pub fn build_classic_windows(app: &AppHandle) -> tauri::Result<()> {
 /// nearest `r`, at its size at `now`, so Windows gives it `to` and tao's
 /// resize for that makes it about `r`'s size; judged from anything else, a
 /// stack left at 150 % half over the 100 % display came back at 100 %.
-/// Then `r` exactly, judged from `to`, the tie rule included. A change of
+/// Then `r` exactly, judged from `to`, as while the app ran. A change of
 /// scale is delivered as each placement is made (`pump`); what Windows
 /// decides otherwise, `settle_built` follows.
 fn land(
@@ -938,12 +980,17 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
 
 /// What to do about ownership, computed under the lock. Performing it is a
 /// separate step that must run with the lock released (D54).
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct OwnPlan {
     /// `(window, owner)` pairs.
     pub owners: Vec<(NativeWindow, NativeWindow)>,
     /// Windows to force to the top, in order, bottom group first.
     pub raise: Vec<NativeWindow>,
+    /// The displays, for putting a hidden root where its window is (D193).
+    pub monitors: Vec<MonitorInfo>,
+    /// Where each window is laid out, to put one back that setting its
+    /// owner moved to another scale all the same (D193).
+    pub rects: Vec<(NativeWindow, Rect)>,
 }
 
 /// D41 + D42. Give every connected component its own hidden root, then force the
@@ -982,14 +1029,53 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
         .flat_map(|c| c.iter().map(|id| state.handle(*id)))
         .collect();
 
-    OwnPlan { owners, raise }
+    OwnPlan {
+        owners,
+        raise,
+        monitors: state.monitors.clone(),
+        rects: CLASSIC
+            .iter()
+            .filter_map(|id| Some((state.handle(*id), *state.layout.get(id)?)))
+            .collect(),
+    }
 }
 
 /// Perform an [`OwnPlan`]. **Must be called with no lock held** (D54).
 pub fn apply_ownership(plan: &OwnPlan) {
     let p = platform::platform();
     for (w, owner) in &plan.owners {
+        // D193: a window's owner is set only when it changes. Setting it gives
+        // the window the owner's scale for a moment, and the hidden roots sit
+        // wherever tao made them, on the primary display at 100 %: an 825
+        // stack dropped at Main x = 2285 went to 96 DPI as its ownership was
+        // re-applied on the release, tao shrank it to 550, and Windows judged
+        // the 550 to be mostly on the 100 % display, where it stayed.
+        if p.owner_of(*w) == *owner {
+            continue;
+        }
+        // And where it does change, the root goes first to a display at the
+        // scale the window is drawn at, so there is no other scale to give.
+        let before = p.window_scale(*w);
+        if let Some(scale) = before {
+            if let Some(m) = plan.monitors.iter().find(|m| same_scale(m.scale, scale)) {
+                p.place(*owner, m.work.x, m.work.y, 1, 1);
+                p.pump(*owner);
+            }
+        }
         p.set_owner(*w, *owner);
+        p.pump(*w);
+        // Read back: a window the change moved to another scale all the same
+        // (the root's own change not delivered yet, or no display at its
+        // scale cached) is put back where it is laid out, judged from the
+        // scale it was at (`land`).
+        if let (Some(b), Some(a)) = (before, p.window_scale(*w)) {
+            if !same_scale(a, b) {
+                eprintln!("wm: setting a window's owner moved it to another scale; put back");
+                if let Some((_, r)) = plan.rects.iter().find(|(h, _)| h == w) {
+                    land(p, *w, *r, a, b, &plan.monitors);
+                }
+            }
+        }
     }
     for w in &plan.raise {
         p.raise_no_activate(*w);
@@ -1499,6 +1585,18 @@ fn begins(s: &WmState, id: WindowId, seq: u64) -> bool {
 
 fn started(s: &mut WmState, id: WindowId, seq: u64) {
     s.live = Some((id, seq));
+}
+
+/// D192: the gesture for press `seq` has started if Rust accepted it, and
+/// only then is it the live one.
+pub fn gesture_started_if(app: &AppHandle, id: WindowId, seq: u64, accepted: bool) {
+    start_if(&mut app.state::<Wm>().0.lock().unwrap(), id, seq, accepted);
+}
+
+fn start_if(s: &mut WmState, id: WindowId, seq: u64, accepted: bool) {
+    if accepted {
+        started(s, id, seq);
+    }
 }
 
 fn ends(s: &mut WmState, id: WindowId, seq: u64) -> bool {
@@ -2671,21 +2769,20 @@ pub fn dpi_monitor(monitors: &[MonitorInfo], r: Rect) -> Option<MonitorInfo> {
         let h = (r.bottom().min(n.bottom()) - r.y.max(n.y)).max(0) as i64;
         w * h
     };
-    monitors
-        .iter()
-        .filter(|m| overlap(m) > 0)
-        .max_by_key(|m| overlap(m))
+    // The first of the largest, as Windows picks on a tie (D193).
+    let best = monitors.iter().map(overlap).max().filter(|a| *a > 0);
+    best.and_then(|b| monitors.iter().find(|m| overlap(m) == b))
         .copied()
         .or_else(|| nearest_monitor(monitors, r))
 }
 
-/// D188: the scale a window drawn at `current` is at once put at `r`: the
-/// scale of the display holding most of it, unless a display at the scale it
-/// is at holds as much. Windows keeps a window where it was on a tie (the
-/// owner's hand test, a 550 window split 275/275 across 100 % and 150 %), so
-/// the engine does too; picking the last of the largest, as `dpi_monitor`
-/// does, left the engine at 150 % and the window at 100 % with gaps between.
-pub fn sticky_scale(monitors: &[MonitorInfo], r: Rect, current: f64) -> f64 {
+/// D188: the scale a window is drawn at once put at `r`: the scale of the
+/// display holding most of it, and on a tie the first display listed. D188
+/// kept a window at the scale it was at on a tie, from one measurement
+/// taken from 100 %; D193's probes found Windows giving the first display
+/// on a tie from either scale. `current` answers only where there are no
+/// displays to judge by.
+pub fn judged_scale(monitors: &[MonitorInfo], r: Rect, current: f64) -> f64 {
     let overlap = |m: &MonitorInfo| {
         let n = m.rect;
         let w = (r.right().min(n.right()) - r.x.max(n.x)).max(0) as i64;
@@ -2695,12 +2792,6 @@ pub fn sticky_scale(monitors: &[MonitorInfo], r: Rect, current: f64) -> f64 {
     let Some(best) = monitors.iter().map(overlap).max().filter(|a| *a > 0) else {
         return nearest_monitor(monitors, r).map_or(current, |m| m.scale);
     };
-    if monitors
-        .iter()
-        .any(|m| same_scale(m.scale, current) && overlap(m) == best)
-    {
-        return current;
-    }
     monitors
         .iter()
         .find(|m| overlap(m) == best)
@@ -2754,7 +2845,7 @@ pub fn settle_scales<T>(
             };
             next.insert(
                 *id,
-                sticky_scale(monitors, sized_for(*r, targets[id], *cur), *cur),
+                judged_scale(monitors, sized_for(*r, targets[id], *cur), *cur),
             );
         }
         if next == targets {
@@ -2901,15 +2992,13 @@ pub fn launch_scales(
 }
 
 /// D191: the scale a restored window will be drawn at, as the launch judges
-/// it: from the scale its saved size is in, the way Windows keeps a window
-/// on a tie (`sticky_scale`); by the display holding most of it where that
-/// cannot be told. A stack left at 100 % split evenly on the seam came back
-/// 150 % and grew, judged by the last display of the largest.
+/// it: as Windows judges it (`judged_scale`), the first display of the
+/// largest on a tie (D193). A stack left at 100 % split evenly on the seam
+/// came back 150 % and grew, judged by the last display of the largest.
+/// `saved`, the scale its size is in, answers only where there are no
+/// displays to judge by; `fallback` where that cannot be told either.
 pub fn launch_scale(monitors: &[MonitorInfo], r: Rect, saved: Option<f64>, fallback: f64) -> f64 {
-    match saved {
-        Some(s) if !monitors.is_empty() => sticky_scale(monitors, r, s),
-        _ => dpi_monitor(monitors, r).map_or(fallback, |m| m.scale),
-    }
+    judged_scale(monitors, r, saved.unwrap_or(fallback))
 }
 
 /// Whether `r` is a size the playlist can have at `scale` and `zoom`: its
@@ -5230,14 +5319,16 @@ mod tests {
     }
 
     #[test]
-    fn a_window_split_evenly_keeps_the_scale_it_has() {
+    fn a_window_split_evenly_goes_to_the_first_display() {
         // The owner's drop at the 50/50 point: Main at x = 2285, 275 on each
-        // side. Windows kept it at 100 %; the engine said 150 %.
+        // side. Windows kept it at 100 %; the engine said 150 %. And from
+        // 150 % on the same tie, D193's probes found Windows giving 100 %.
         let ms = desk();
         let even = Rect::new(2285, 68, 550, 232);
-        assert_eq!(sticky_scale(&ms, even, 1.0), 1.0);
-        assert_eq!(sticky_scale(&ms, even, 1.5), 1.5);
-        assert_eq!(sticky_scale(&ms, Rect::new(2286, 68, 550, 232), 1.0), 1.5);
+        assert_eq!(judged_scale(&ms, even, 1.0), 1.0);
+        assert_eq!(judged_scale(&ms, even, 1.5), 1.0);
+        assert_eq!(dpi_monitor(&ms, even).unwrap().scale, 1.0);
+        assert_eq!(judged_scale(&ms, Rect::new(2286, 68, 550, 232), 1.0), 1.5);
         // So the stack dropped there stays the size it is, with no gaps.
         let (_, frame, g) = stack_moved(2.0, 0, 2285 - 120, 0);
         let (t, out) = settled(&frame, &g, 1.0, 2.0);
@@ -5523,7 +5614,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stack_saved_on_a_tie_comes_back_at_the_scale_it_was_saved_at() {
+    fn a_stack_saved_on_a_tie_comes_back_on_the_first_display() {
         // Main split 275 / 275 at x = 2285, which Windows kept at 100 %.
         let (mut l, g) = initial_layout(1.0, 2.0);
         let m = l[&MAIN];
@@ -5531,9 +5622,10 @@ mod tests {
         let stored: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
         assert!(heal_saved_sizes(&l, &g, &desk(), 1.0, 2.0, &stored, &BTreeSet::new()).is_none());
         assert_eq!(launch_scale(&desk(), l[&MAIN], Some(1.0), 1.0), 1.0);
-        // An older row has only the area to go by, and the last of the
-        // largest is DISPLAY2.
-        assert_eq!(launch_scale(&desk(), l[&MAIN], None, 1.0), 1.5);
+        // Whatever it was saved at: Windows gives the first display.
+        assert_eq!(launch_scale(&desk(), l[&MAIN], Some(1.5), 1.5), 1.0);
+        // An older row the same: the first of the largest is DISPLAY1.
+        assert_eq!(launch_scale(&desk(), l[&MAIN], None, 1.5), 1.0);
     }
 
     #[test]
@@ -5610,6 +5702,21 @@ mod tests {
         assert_eq!(s.live, None);
         // With nothing live, an end still ends whatever Rust started.
         assert!(ends(&mut s, PLAYLIST, 3));
+    }
+
+    #[test]
+    fn a_start_rust_refuses_does_not_take_the_live_press() {
+        // D192: a grip Rust refuses (nothing to resize) is no gesture. The
+        // lingering press it would have displaced still ends when its late
+        // end comes.
+        let mut s = stacked();
+        start_if(&mut s, EQ, 1, true);
+        assert!(begins(&s, PLAYLIST, 5), "not stale");
+        start_if(&mut s, PLAYLIST, 5, false);
+        assert_eq!(s.live, Some((EQ, 1)), "refused, so not live");
+        assert!(ends(&mut s, EQ, 1));
+        start_if(&mut s, PLAYLIST, 6, true);
+        assert_eq!(s.live, Some((PLAYLIST, 6)));
     }
 
     /// The owner's desk with a 48 px taskbar on each display.
@@ -5714,9 +5821,9 @@ mod tests {
     }
 
     #[test]
-    fn an_older_row_on_a_tie_keeps_the_scale_its_sizes_say() {
+    fn an_older_row_on_a_tie_comes_back_on_the_first_display() {
         // Saved before the scale was kept: Main's width says 100 %, and the
-        // tie keeps it there, as Windows did.
+        // tie goes to DISPLAY1, as Windows did.
         let (mut l, g) = initial_layout(1.0, 2.0);
         let m = l[&MAIN];
         bond::translate_group(&mut l, &CLASSIC, 2285 - m.x, 100 - m.y);

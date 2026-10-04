@@ -122,11 +122,11 @@ pub trait WindowPlatform: Send + Sync {
     /// display has its own (Windows: the window's DPI over 96). None where one
     /// scale covers the desktop, and the engine's own answer is the truth.
     ///
-    /// Windows, not the engine, decides which display a window belongs to, and
-    /// it does not always pick the display holding most of it: on the owner's
-    /// desk it kept a window where it was on a tie, and a little past one
-    /// (measured, not documented). So the engine asks. A read of the window's
-    /// own state; sends no message.
+    /// Windows, not the engine, decides which display a window belongs to:
+    /// mostly the one holding most of it, the first display on a tie (D193,
+    /// measured, not documented), and a window's owner can give it its own
+    /// for a moment. So the engine asks. A read of the window's own state;
+    /// sends no message.
     fn window_scale(&self, _w: NativeWindow) -> Option<f64> {
         None
     }
@@ -143,8 +143,8 @@ pub trait WindowPlatform: Send + Sync {
 
     /// D192: deliver a change of scale the window system has waiting for this
     /// window now, rather than whenever the UI thread next pumps messages.
-    /// Only at launch, on the UI thread, while the windows are hidden. Nothing
-    /// where there is nothing to deliver.
+    /// On the UI thread only: at launch, and when a window's owner is set
+    /// (D193). Nothing where there is nothing to deliver.
     fn pump(&self, _w: NativeWindow) {}
 
     /// D182: does the window manager keep every window it places wholly
