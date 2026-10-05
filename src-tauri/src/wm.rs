@@ -998,8 +998,9 @@ pub struct OwnPlan {
     /// Where each window is laid out, to put one back that setting its
     /// owner moved to another scale all the same (D193).
     pub rects: Vec<(NativeWindow, Rect)>,
-    /// The scale each window is laid out for (`drawn_at`), which is what
-    /// the root is put at and what a window is put back to (D193).
+    /// The scale each window is laid out for (`drawn_at`): what the
+    /// read-back judges against and puts a window back to (D193). The root
+    /// is put at the scale the window is at, not this.
     pub scales: Vec<(NativeWindow, f64)>,
 }
 
@@ -1063,6 +1064,19 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
     }
 }
 
+/// D193: whether setting a window's owner moved it off the scale it is laid
+/// out for, and so is to be put back: the scale it is at now and the one to
+/// put it back to. Only a window that was at that scale before the change
+/// (`before`, read once the drop's own change was delivered): one not there
+/// yet is still crossing, and `reconcile` follows where it lands; judging it
+/// from the scale it had been at "put back" a correct crossing. `laid_out`
+/// is `drawn_at`, or where there is none the scale it was at.
+fn put_back(before: Option<f64>, laid_out: Option<f64>, after: Option<f64>) -> Option<(f64, f64)> {
+    let (b, a) = (before?, after?);
+    let t = laid_out.unwrap_or(b);
+    (same_scale(b, t) && !same_scale(a, t)).then_some((a, t))
+}
+
 /// D193: the `(window, owner)` pairs of a plan whose owner is not already the
 /// one planned: the only ones to set, since setting an owner gives the window
 /// the owner's scale for a moment.
@@ -1093,12 +1107,7 @@ pub fn apply_ownership(plan: &OwnPlan) {
         // scale, and judged from the old one it was "put back" across.
         p.pump(w);
         let before = p.window_scale(w);
-        let target = plan
-            .scales
-            .iter()
-            .find(|(h, _)| *h == w)
-            .map(|(_, s)| *s)
-            .or(before);
+        let laid_out = plan.scales.iter().find(|(h, _)| *h == w).map(|(_, s)| *s);
         // Where it changes, the root goes first to a display at the scale the
         // window is at, so the change gives it no other scale. Not the one it
         // is laid out for, where the two differ: that would push a window
@@ -1115,12 +1124,10 @@ pub fn apply_ownership(plan: &OwnPlan) {
         // the change moved off it all the same (the root's own change not
         // delivered yet, or no display at its scale cached) is put back,
         // judged from that scale (`land`). One not there yet is `reconcile`'s.
-        if let (Some(b), Some(t), Some(a)) = (before, target, p.window_scale(w)) {
-            if same_scale(b, t) && !same_scale(a, t) {
-                eprintln!("wm: setting a window's owner moved it to another scale; put back");
-                if let Some((_, r)) = plan.rects.iter().find(|(h, _)| *h == w) {
-                    land(p, w, *r, a, t, &plan.monitors);
-                }
+        if let Some((now, to)) = put_back(before, laid_out, p.window_scale(w)) {
+            eprintln!("wm: setting a window's owner moved it to another scale; put back");
+            if let Some((_, r)) = plan.rects.iter().find(|(h, _)| *h == w) {
+                land(p, w, *r, now, to, &plan.monitors);
             }
         }
     }
@@ -1587,17 +1594,7 @@ pub fn drag_end(app: &AppHandle, release: bool) {
             return;
         };
 
-        let others: Vec<WindowId> = CLASSIC
-            .iter()
-            .copied()
-            .filter(|c| !drag.moving.contains(c))
-            .collect();
-        for b in bonds_on_release(&drag.origin_layout, &s.layout, &drag.moving, &others) {
-            s.graph.insert(b);
-        }
-        let layout = s.layout.clone();
-        resync_spans(&mut s.graph, &layout);
-        plan_ownership(&s, Some(drag.grabbed))
+        finish_drag(&mut s, &drag)
     };
     apply_ownership(&plan);
     emit_state(app);
@@ -1657,6 +1654,23 @@ fn ends(s: &mut WmState, id: WindowId, seq: u64) -> bool {
         s.live = None;
     }
     current
+}
+
+/// A drag released: the bonds it earned, the spans resynced, and the
+/// ownership and z-order to apply, the grabbed window raised last within
+/// its group (D193).
+fn finish_drag(s: &mut WmState, drag: &DragState) -> OwnPlan {
+    let others: Vec<WindowId> = CLASSIC
+        .iter()
+        .copied()
+        .filter(|c| !drag.moving.contains(c))
+        .collect();
+    for b in bonds_on_release(&drag.origin_layout, &s.layout, &drag.moving, &others) {
+        s.graph.insert(b);
+    }
+    let layout = s.layout.clone();
+    resync_spans(&mut s.graph, &layout);
+    plan_ownership(s, Some(drag.grabbed))
 }
 
 /// D191: a gesture is starting, so any other one still recorded is stale:
@@ -4422,6 +4436,46 @@ mod tests {
             .filter(|(h, _)| *h == nw(12))
             .collect();
         assert_eq!(moved, playlist);
+    }
+
+    #[test]
+    fn a_window_the_owner_moved_off_its_scale_is_put_back_and_a_crossing_is_not() {
+        // (before, laid out, after) -> put back from, to.
+        let table = [
+            // At its scale, and the owner gave it another: put back.
+            ((Some(1.5), Some(1.5), Some(1.0)), Some((1.0, 1.5))),
+            // Still crossing when the owner was set, and it got there.
+            ((Some(1.0), Some(1.5), Some(1.5)), None),
+            // Still crossing, not there yet: `reconcile`'s.
+            ((Some(1.0), Some(1.5), Some(1.0)), None),
+            // Nothing changed.
+            ((Some(1.5), Some(1.5), Some(1.5)), None),
+            // No laid-out scale recorded: judged from the one it was at.
+            ((Some(1.5), None, Some(1.0)), Some((1.0, 1.5))),
+            ((Some(1.5), None, Some(1.5)), None),
+            // Where the window system gives no scale, nothing.
+            ((None, Some(1.5), Some(1.0)), None),
+            ((Some(1.5), Some(1.5), None), None),
+        ];
+        for ((b, t, a), want) in table {
+            assert_eq!(put_back(b, t, a), want, "{b:?} {t:?} {a:?}");
+        }
+    }
+
+    #[test]
+    fn a_drag_raises_the_window_grabbed_last_within_its_group() {
+        // Dragged by the EQ's title bar: the EQ on top on the release, not
+        // Main, the group's first.
+        let mut s = state_with(&[(MAIN, EQ), (EQ, PLAYLIST)]);
+        let drag = DragState {
+            moving: CLASSIC.to_vec(),
+            origin_layout: s.layout.clone(),
+            origin_cursor: (0, 0),
+            origin_unshaded: BTreeMap::new(),
+            origin_scales: BTreeMap::new(),
+            grabbed: EQ,
+        };
+        assert_eq!(*finish_drag(&mut s, &drag).raise.last().unwrap(), nw(11));
     }
 
     #[test]
