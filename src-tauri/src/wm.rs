@@ -4509,7 +4509,8 @@ mod tests {
     /// D193: a window system that holds a change of scale back until it is
     /// pumped, gives a window put on a display that display's scale, and
     /// gives a window its owner's scale when its owner is set, as the owner's
-    /// desk did.
+    /// desk did. A change still held then lands at the next pump, as the
+    /// re-dock D193 records was put back after it had.
     #[derive(Default)]
     struct HeldBack {
         monitors: Vec<MonitorInfo>,
@@ -4531,7 +4532,6 @@ mod tests {
             let given = self.scale.borrow().get(&owner).copied();
             if let Some(s) = given {
                 self.scale.borrow_mut().insert(w, s);
-                self.held.borrow_mut().remove(&w);
             }
         }
         fn lift(&self, _w: NativeWindow) {}
@@ -4578,9 +4578,10 @@ mod tests {
         fake.held.borrow_mut().insert(nw(12), 1.5);
         apply_ownership_on(&fake, &plan);
         assert_eq!(fake.owner(nw(12)), nw(91));
-        // Read before the change was delivered, the root was put at 100 %
-        // and the owner pulled the playlist back across.
         assert_eq!(fake.scale(nw(12)), Some(1.5));
+        // Read before the change was delivered, the scale was 100 % and the
+        // root went to DISPLAY1: a 100 % owner for a window on DISPLAY2.
+        assert_eq!(fake.scale(nw(91)), Some(1.5));
     }
 
     #[test]
