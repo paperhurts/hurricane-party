@@ -743,8 +743,8 @@ fn own_built(app: &AppHandle) {
 /// Then `r` exactly, judged from `to`, as while the app ran. A change of
 /// scale is delivered as each placement is made (`pump`); what Windows
 /// decides otherwise, `settle_built` follows.
-fn land(
-    p: &dyn platform::WindowPlatform,
+fn land<P: OwnerOps + ?Sized>(
+    p: &P,
     h: NativeWindow,
     r: Rect,
     now: f64,
@@ -763,12 +763,12 @@ fn land(
             });
         if let Some(m) = near {
             let e = sized_for(r, to, now);
-            p.place(h, m.work.x, m.work.y, e.w.min(m.work.w), e.h.min(m.work.h));
-            p.pump(h);
+            p.put(h, m.work.x, m.work.y, e.w.min(m.work.w), e.h.min(m.work.h));
+            p.deliver(h);
         }
     }
-    p.place(h, r.x, r.y, r.w, r.h);
-    p.pump(h);
+    p.put(h, r.x, r.y, r.w, r.h);
+    p.deliver(h);
 }
 
 /// Reveal the windows, once the graph behind them is real.
@@ -1093,20 +1093,58 @@ fn owner_changes(
 
 /// Perform an [`OwnPlan`]. **Must be called with no lock held** (D54).
 pub fn apply_ownership(plan: &OwnPlan) {
-    let p = platform::platform();
+    apply_ownership_on(platform::platform(), plan);
+}
+
+/// The window calls setting ownership and putting a window back make, so
+/// the order they are made in can be tested against a window system that
+/// holds a change of scale back until it is pumped (D193). Named apart from
+/// [`platform::WindowPlatform`]'s, which every window system has through
+/// the blanket impl below.
+pub trait OwnerOps {
+    fn owner(&self, w: NativeWindow) -> NativeWindow;
+    fn own(&self, w: NativeWindow, owner: NativeWindow);
+    fn lift(&self, w: NativeWindow);
+    fn scale(&self, w: NativeWindow) -> Option<f64>;
+    fn put(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool;
+    fn deliver(&self, w: NativeWindow);
+}
+
+impl<T: platform::WindowPlatform + ?Sized> OwnerOps for T {
+    fn owner(&self, w: NativeWindow) -> NativeWindow {
+        self.owner_of(w)
+    }
+    fn own(&self, w: NativeWindow, owner: NativeWindow) {
+        self.set_owner(w, owner);
+    }
+    fn lift(&self, w: NativeWindow) {
+        self.raise_no_activate(w);
+    }
+    fn scale(&self, w: NativeWindow) -> Option<f64> {
+        self.window_scale(w)
+    }
+    fn put(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool {
+        self.place(w, x, y, cx, cy)
+    }
+    fn deliver(&self, w: NativeWindow) {
+        self.pump(w);
+    }
+}
+
+fn apply_ownership_on<P: OwnerOps + ?Sized>(p: &P, plan: &OwnPlan) {
     // D193: a window's owner is set only when it changes. Setting it gives
     // the window the owner's scale for a moment, and the hidden roots sit
     // wherever tao made them, on the primary display at 100 %: an 825 stack
     // dropped at Main x = 2285 went to 96 DPI as its ownership was re-applied
     // on the release, tao shrank it to 550, and Windows judged the 550 to be
     // mostly on the 100 % display, where it stayed.
-    for (w, owner) in owner_changes(plan, |w| p.owner_of(w)) {
+    for (w, owner) in owner_changes(plan, |w| p.owner(w)) {
         // The scale the window is laid out for, with any change of scale the
         // drop that brought it here caused delivered first: a re-dock that
         // also crossed the seam on its last frame is not yet at its new
         // scale, and judged from the old one it was "put back" across.
-        p.pump(w);
-        let before = p.window_scale(w);
+        p.deliver(w);
+        let before = p.scale(w);
         let laid_out = plan.scales.iter().find(|(h, _)| *h == w).map(|(_, s)| *s);
         // Where it changes, the root goes first to a display at the scale the
         // window is at, so the change gives it no other scale. Not the one it
@@ -1114,17 +1152,17 @@ pub fn apply_ownership(plan: &OwnPlan) {
         // Windows has put elsewhere across, and `reconcile` follows Windows.
         if let Some(scale) = before {
             if let Some(m) = plan.monitors.iter().find(|m| same_scale(m.scale, scale)) {
-                p.place(owner, m.work.x, m.work.y, 1, 1);
-                p.pump(owner);
+                p.put(owner, m.work.x, m.work.y, 1, 1);
+                p.deliver(owner);
             }
         }
-        p.set_owner(w, owner);
-        p.pump(w);
+        p.own(w, owner);
+        p.deliver(w);
         // Read back: a window that was at the scale it is laid out for and
         // the change moved off it all the same (the root's own change not
         // delivered yet, or no display at its scale cached) is put back,
         // judged from that scale (`land`). One not there yet is `reconcile`'s.
-        if let Some((now, to)) = put_back(before, laid_out, p.window_scale(w)) {
+        if let Some((now, to)) = put_back(before, laid_out, p.scale(w)) {
             eprintln!("wm: setting a window's owner moved it to another scale; put back");
             if let Some((_, r)) = plan.rects.iter().find(|(h, _)| *h == w) {
                 land(p, w, *r, now, to, &plan.monitors);
@@ -1132,7 +1170,7 @@ pub fn apply_ownership(plan: &OwnPlan) {
         }
     }
     for w in &plan.raise {
-        p.raise_no_activate(*w);
+        p.lift(*w);
     }
 }
 
@@ -4453,6 +4491,12 @@ mod tests {
             // No laid-out scale recorded: judged from the one it was at.
             ((Some(1.5), None, Some(1.0)), Some((1.0, 1.5))),
             ((Some(1.5), None, Some(1.5)), None),
+            // The mirror, laid out at 100 %.
+            ((Some(1.0), Some(1.0), Some(1.5)), Some((1.5, 1.0))),
+            ((Some(1.5), Some(1.0), Some(1.0)), None),
+            ((Some(1.5), Some(1.0), Some(1.5)), None),
+            ((Some(1.0), Some(1.0), Some(1.0)), None),
+            ((Some(1.0), None, Some(1.5)), Some((1.5, 1.0))),
             // Where the window system gives no scale, nothing.
             ((None, Some(1.5), Some(1.0)), None),
             ((Some(1.5), Some(1.5), None), None),
@@ -4460,6 +4504,104 @@ mod tests {
         for ((b, t, a), want) in table {
             assert_eq!(put_back(b, t, a), want, "{b:?} {t:?} {a:?}");
         }
+    }
+
+    /// D193: a window system that holds a change of scale back until it is
+    /// pumped, gives a window put on a display that display's scale, and
+    /// gives a window its owner's scale when its owner is set, as the owner's
+    /// desk did.
+    #[derive(Default)]
+    struct HeldBack {
+        monitors: Vec<MonitorInfo>,
+        scale: std::cell::RefCell<BTreeMap<NativeWindow, f64>>,
+        held: std::cell::RefCell<BTreeMap<NativeWindow, f64>>,
+        owner: std::cell::RefCell<BTreeMap<NativeWindow, NativeWindow>>,
+    }
+
+    impl OwnerOps for HeldBack {
+        fn owner(&self, w: NativeWindow) -> NativeWindow {
+            self.owner
+                .borrow()
+                .get(&w)
+                .copied()
+                .unwrap_or(NativeWindow::NONE)
+        }
+        fn own(&self, w: NativeWindow, owner: NativeWindow) {
+            self.owner.borrow_mut().insert(w, owner);
+            let given = self.scale.borrow().get(&owner).copied();
+            if let Some(s) = given {
+                self.scale.borrow_mut().insert(w, s);
+                self.held.borrow_mut().remove(&w);
+            }
+        }
+        fn lift(&self, _w: NativeWindow) {}
+        fn scale(&self, w: NativeWindow) -> Option<f64> {
+            self.scale.borrow().get(&w).copied()
+        }
+        fn put(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool {
+            let s = judged_scale(&self.monitors, Rect::new(x, y, cx, cy), 1.0);
+            self.held.borrow_mut().insert(w, s);
+            true
+        }
+        fn deliver(&self, w: NativeWindow) {
+            let held = self.held.borrow_mut().remove(&w);
+            if let Some(s) = held {
+                self.scale.borrow_mut().insert(w, s);
+            }
+        }
+    }
+
+    /// The demagnetised playlist re-docked into a 150 % group on DISPLAY2,
+    /// the snap carrying it across the seam on the release frame.
+    fn redock(plan_monitors: Vec<MonitorInfo>) -> (HeldBack, OwnPlan) {
+        let (pl, root) = (nw(12), nw(91));
+        let fake = HeldBack {
+            monitors: desk(),
+            ..Default::default()
+        };
+        fake.scale.borrow_mut().insert(root, 1.0);
+        let plan = OwnPlan {
+            owners: vec![(pl, root)],
+            raise: vec![],
+            monitors: plan_monitors,
+            rects: vec![(pl, Rect::new(2600, 464, 825, 609))],
+            scales: vec![(pl, 1.5)],
+        };
+        (fake, plan)
+    }
+
+    #[test]
+    fn a_crossing_is_delivered_before_the_owner_is_set() {
+        // The release frame put it on DISPLAY2; the change is held back.
+        let (fake, plan) = redock(desk());
+        fake.scale.borrow_mut().insert(nw(12), 1.0);
+        fake.held.borrow_mut().insert(nw(12), 1.5);
+        apply_ownership_on(&fake, &plan);
+        assert_eq!(fake.owner(nw(12)), nw(91));
+        // Read before the change was delivered, the root was put at 100 %
+        // and the owner pulled the playlist back across.
+        assert_eq!(fake.scale(nw(12)), Some(1.5));
+    }
+
+    #[test]
+    fn a_window_the_owner_pulled_off_its_scale_is_put_back() {
+        // No display at 150 % in the plan's list (a scale changed in the
+        // settings a moment ago): the root stays at 100 % and gives the
+        // playlist 100 %; it is put back where it is laid out.
+        let (fake, plan) = redock(vec![desk()[0]]);
+        fake.scale.borrow_mut().insert(nw(12), 1.5);
+        apply_ownership_on(&fake, &plan);
+        assert_eq!(fake.scale(nw(12)), Some(1.5));
+    }
+
+    #[test]
+    fn an_owner_already_set_is_not_set_again() {
+        let (fake, plan) = redock(desk());
+        fake.scale.borrow_mut().insert(nw(12), 1.5);
+        fake.owner.borrow_mut().insert(nw(12), nw(91));
+        apply_ownership_on(&fake, &plan);
+        assert_eq!(fake.scale(nw(12)), Some(1.5));
+        assert_eq!(fake.scale(nw(91)), Some(1.0), "the root was not moved");
     }
 
     #[test]
