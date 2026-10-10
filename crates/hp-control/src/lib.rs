@@ -26,11 +26,23 @@ pub use viz::{Depth, Frame, Include, VizParams};
 /// guessing at what a future client meant.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// The control pipe. A Windows name; the POSIX paths in control-api.md land
-/// when a port does. Not `cfg`-gated: a name is a string on every platform,
-/// and the app selects its transport behind `platform/pipe.rs`, so this crate
-/// carries no platform conditionals at all (#20).
+/// The control pipe, by its Windows name. Not `cfg`-gated: a name is a
+/// string on every platform, and the app selects its transport behind
+/// `platform/pipe.rs`, so this crate carries no platform conditionals at all
+/// (#20). Where there are Unix domain sockets instead, `socket_path` says
+/// where the socket for a name is.
 pub const PIPE_NAME: &str = r"\\.\pipe\hurricane-party";
+
+/// Where the socket for a pipe named here is, on a system with Unix domain
+/// sockets (#187): the name after `\\.\pipe\`, with `.sock`, in `dir`.
+/// `dir` is the platform's: `$XDG_RUNTIME_DIR` on Linux, so the control
+/// socket is `$XDG_RUNTIME_DIR/hurricane-party.sock` (control-api.md) and a
+/// viz stream `hurricane-party-viz-7f3a.sock` beside it. Pure, so the
+/// player and a client agree on it without either knowing the other's OS.
+pub fn socket_path(pipe: &str, dir: &std::path::Path) -> std::path::PathBuf {
+    let base = pipe.strip_prefix(r"\\.\pipe\").unwrap_or(pipe);
+    dir.join(format!("{base}.sock"))
+}
 
 /// Not part of the pipe protocol: the one name the player and its own
 /// desktop companion share outside it (#192, D161). The companion holds a
@@ -537,6 +549,20 @@ pub fn hello_result(app_version: &str, granted: &[&str]) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_pipe_name_is_a_socket_in_the_runtime_dir() {
+        let dir = std::path::Path::new("/run/user/1000");
+        assert_eq!(
+            socket_path(PIPE_NAME, dir),
+            dir.join("hurricane-party.sock")
+        );
+        assert_eq!(
+            socket_path(&viz::pipe_name(0x7f3a), dir),
+            dir.join("hurricane-party-viz-7f3a.sock")
+        );
+    }
+
     use super::*;
 
     fn req(json: &str) -> Request {

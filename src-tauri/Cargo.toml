@@ -80,6 +80,14 @@ windows = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+# Where there are Unix domain sockets, the control and viz sockets (#187):
+# socket2 for the viz socket's send buffer, which tokio does not reach, and
+# libc for the user the sockets are kept to. Both already in the tree under
+# tokio's dependents, at these versions.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+socket2 = "0.6"
+
 # Linux, under XWayland (D181, D182). Both are already in the tree under tao
 # and tauri, at these versions, so naming them adds nothing to the build: gtk
 # for the size request a non-resizable window needs, x11-dl for the window

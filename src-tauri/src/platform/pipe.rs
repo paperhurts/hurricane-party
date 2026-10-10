@@ -7,9 +7,11 @@
 //! it: the control pipe's NDJSON and each viz subscriber's binary frames are
 //! byte streams; framing is the caller's.
 //!
-//! On Windows this is `tokio`'s named-pipe server. The stub for everything
-//! else refuses to listen, which is honest: nothing else builds today (O7),
-//! and a POSIX socket lands with a port rather than as dead code here.
+//! On Windows this is `tokio`'s named-pipe server. Where there are Unix
+//! domain sockets it is a socket at `hp_control::socket_path` for the name,
+//! in `$XDG_RUNTIME_DIR` (#187): the paths control-api.md has named since
+//! protocol 1 was frozen (D151). A listener is made once and accepts each
+//! client in turn on both.
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -29,7 +31,7 @@ pub struct ListenOptions {
     pub out_buffer: u32,
 }
 
-pub use imp::{listen, Listener};
+pub use imp::{endpoint, listen, Listener};
 
 #[cfg(windows)]
 mod imp {
@@ -37,46 +39,239 @@ mod imp {
     use std::io;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
-    /// One pipe instance, created and waiting. Windows semantics: an instance
-    /// serves one client, so the caller creates the next one after `accept`.
-    pub struct Listener(NamedPipeServer);
+    /// The pipe, with an instance always waiting. An instance serves one
+    /// client, so the next is created as each one connects, *before* it is
+    /// handed over: a client never finds nothing listening.
+    pub struct Listener {
+        waiting: NamedPipeServer,
+        name: String,
+        opts: ListenOptions,
+    }
 
-    /// Create an instance of `name`, ready for a client. Created *before* the
-    /// caller replies with the name, so a client never finds nothing listening.
-    pub fn listen(name: &str, opts: ListenOptions) -> io::Result<Listener> {
+    fn instance(name: &str, opts: ListenOptions) -> io::Result<NamedPipeServer> {
         let mut o = ServerOptions::new();
         if opts.out_buffer > 0 {
             o.out_buffer_size(opts.out_buffer);
         }
-        Ok(Listener(o.create(name)?))
+        o.create(name)
+    }
+
+    /// What a client opens: on Windows, the pipe's name itself.
+    pub fn endpoint(name: &str) -> String {
+        name.to_string()
+    }
+
+    /// Create the first instance of `name`, ready for a client. Created
+    /// *before* the caller replies with the name.
+    pub fn listen(name: &str, opts: ListenOptions) -> io::Result<Listener> {
+        Ok(Listener {
+            waiting: instance(name, opts)?,
+            name: name.to_string(),
+            opts,
+        })
     }
 
     impl Listener {
-        /// Wait for a client, then hand the connected stream over.
-        pub async fn accept(self) -> io::Result<Conn> {
-            self.0.connect().await?;
-            Ok(Box::new(self.0))
+        /// Wait for a client, then hand the connected stream over. An
+        /// instance a connect failed on is replaced, so the next call waits
+        /// on a good one.
+        pub async fn accept(&mut self) -> io::Result<Conn> {
+            if let Err(e) = self.waiting.connect().await {
+                self.waiting = instance(&self.name, self.opts)?;
+                return Err(e);
+            }
+            let next = instance(&self.name, self.opts)?;
+            Ok(Box::new(std::mem::replace(&mut self.waiting, next)))
         }
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 mod imp {
     use super::{Conn, ListenOptions};
     use std::io;
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+    use std::path::PathBuf;
+    use tokio::net::UnixListener;
 
-    pub struct Listener;
+    /// The socket, bound at its path until it is dropped.
+    pub struct Listener {
+        socket: UnixListener,
+        path: PathBuf,
+        opts: ListenOptions,
+    }
 
-    pub fn listen(_name: &str, _opts: ListenOptions) -> io::Result<Listener> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "no local IPC transport on this platform yet (control-api.md names the POSIX socket paths)",
-        ))
+    fn me() -> u32 {
+        // SAFETY: no arguments, cannot fail.
+        unsafe { libc::geteuid() }
+    }
+
+    /// Where the sockets are: `$XDG_RUNTIME_DIR`, which the session makes
+    /// for this user alone. Without one (a bare `su`, a cron job), a folder
+    /// of this user's own in the temp folder, `hurricane-party-<uid>`: never
+    /// the shared temp folder itself, where another user could connect in
+    /// the moment before the socket's mode is set, or put a socket of their
+    /// own at the path first.
+    fn dir() -> PathBuf {
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .filter(|d| d.is_absolute())
+            .unwrap_or_else(|| std::env::temp_dir().join(format!("hurricane-party-{}", me())))
+    }
+
+    /// Make the folder if it is the fallback, and refuse one that is not
+    /// this user's alone: owned by someone else, a symbolic link, or open to
+    /// others.
+    fn private_dir() -> io::Result<PathBuf> {
+        let d = dir();
+        if !d.exists() {
+            std::fs::DirBuilder::new().mode(0o700).create(&d)?;
+        }
+        let meta = std::fs::symlink_metadata(&d)?;
+        if !meta.is_dir() || meta.uid() != me() || meta.mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} is not this user's alone", d.display()),
+            ));
+        }
+        Ok(d)
+    }
+
+    fn path_of(name: &str) -> PathBuf {
+        hp_control::socket_path(name, &dir())
+    }
+
+    /// What a client opens: the socket's path.
+    pub fn endpoint(name: &str) -> String {
+        path_of(name).to_string_lossy().into_owned()
+    }
+
+    /// Bind the socket for `name`, ready for clients, before the caller
+    /// replies with it. A socket left at the path by a player that did not
+    /// shut down (a power cut, a kill) is taken over; one that a running
+    /// player answers on is not, and neither is anything there that is not a
+    /// socket.
+    pub fn listen(name: &str, opts: ListenOptions) -> io::Result<Listener> {
+        let path = hp_control::socket_path(name, &private_dir()?);
+        if let Ok(meta) = std::fs::symlink_metadata(&path) {
+            if !meta.file_type().is_socket() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} is there and is not a socket", path.display()),
+                ));
+            }
+            if std::os::unix::net::UnixStream::connect(&path).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!("another player is listening at {}", path.display()),
+                ));
+            }
+            std::fs::remove_file(&path)?;
+        }
+        let socket = UnixListener::bind(&path)?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        Ok(Listener { socket, path, opts })
     }
 
     impl Listener {
-        pub async fn accept(self) -> io::Result<Conn> {
-            Err(io::Error::from(io::ErrorKind::Unsupported))
+        /// Wait for a client, then hand the connected stream over. Only this
+        /// user's own programs: the folder already keeps everyone else out,
+        /// and this holds even if it did not.
+        pub async fn accept(&mut self) -> io::Result<Conn> {
+            let (stream, _) = self.socket.accept().await?;
+            if stream.peer_cred()?.uid() != me() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "a client of another user was turned away",
+                ));
+            }
+            if self.opts.out_buffer > 0 {
+                // The kernel doubles it and keeps a floor of its own; a few
+                // frames' worth is still what it holds, not 200 KB of them.
+                socket2::SockRef::from(&stream)
+                    .set_send_buffer_size(self.opts.out_buffer as usize)?;
+            }
+            Ok(Box::new(stream))
         }
+    }
+
+    impl Drop for Listener {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A name of this test's own, so a player running beside the tests is
+    /// not touched.
+    fn name(what: &str) -> String {
+        format!(r"\\.\pipe\hp-test-{}-{what}", std::process::id())
+    }
+
+    fn run<F: std::future::Future>(f: F) -> F::Output {
+        tauri::async_runtime::block_on(f)
+    }
+
+    #[test]
+    fn a_client_reaches_the_socket_at_its_endpoint_and_each_is_accepted() {
+        run(async {
+            let n = name("echo");
+            let mut l = listen(&n, ListenOptions { out_buffer: 4096 }).unwrap();
+            for _ in 0..2 {
+                let mut c = tokio::net::UnixStream::connect(endpoint(&n)).await.unwrap();
+                let mut s = l.accept().await.unwrap();
+                s.write_all(b"hi\n").await.unwrap();
+                let mut got = [0u8; 3];
+                c.read_exact(&mut got).await.unwrap();
+                assert_eq!(&got, b"hi\n");
+            }
+            let path = endpoint(&n);
+            drop(l);
+            assert!(!std::path::Path::new(&path).exists());
+        });
+    }
+
+    /// A player killed without shutting down leaves its socket; the next one
+    /// takes it over.
+    #[test]
+    fn a_socket_left_by_a_player_that_died_is_taken_over() {
+        run(async {
+            let n = name("stale");
+            let path = endpoint(&n);
+            // std's listener does not remove its path when dropped.
+            drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
+            assert!(std::path::Path::new(&path).exists());
+            let mut l = listen(&n, ListenOptions::default()).unwrap();
+            let _c = tokio::net::UnixStream::connect(&path).await.unwrap();
+            l.accept().await.unwrap();
+        });
+    }
+
+    #[test]
+    fn a_running_players_socket_is_left_alone() {
+        run(async {
+            let n = name("live");
+            let _first = listen(&n, ListenOptions::default()).unwrap();
+            let e = listen(&n, ListenOptions::default()).err().unwrap();
+            assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse);
+            assert!(std::path::Path::new(&endpoint(&n)).exists());
+        });
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_socket_is_never_removed() {
+        run(async {
+            let n = name("file");
+            let path = endpoint(&n);
+            std::fs::write(&path, b"mine").unwrap();
+            assert!(listen(&n, ListenOptions::default()).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"mine");
+            std::fs::remove_file(&path).unwrap();
+        });
     }
 }
