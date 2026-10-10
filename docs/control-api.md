@@ -18,7 +18,7 @@ The fastest way in is the example: [`examples/viz_bars.py`](../examples/viz_bars
 | Platform | Control channel |
 |---|---|
 | Windows | `\\.\pipe\hurricane-party` |
-| Linux | `$XDG_RUNTIME_DIR/hurricane-party.sock`, a Unix domain socket (#187). Without `$XDG_RUNTIME_DIR`, in the temp folder |
+| Linux | `$XDG_RUNTIME_DIR/hurricane-party.sock`, a Unix domain socket (#187). Without `$XDG_RUNTIME_DIR`, in a folder of the user's own in the temp folder, `hurricane-party-<uid>`. Only the user's own programs are let in |
 | macOS | `~/Library/Caches/hurricane-party.sock` (likewise, when the player runs there, #187) |
 
 **Local only, by design** (D9, D11, D29). The pipe is not a network port, and the player opens no connection for any of this. A rig on another machine (a Raspberry Pi behind an LED strip, say) is fed by a program the person runs on the player's machine, which reads the viz stream and forwards it however it likes. That relay is theirs; the player stays offline.

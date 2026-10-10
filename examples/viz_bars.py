@@ -17,6 +17,7 @@ import os
 import socket
 import struct
 import sys
+import tempfile
 
 # Where the player listens (docs/control-api.md): a named pipe on Windows, a
 # Unix domain socket on Linux and macOS.
@@ -25,7 +26,9 @@ if sys.platform == "win32":
 elif sys.platform == "darwin":
     CONTROL = os.path.expanduser("~/Library/Caches/hurricane-party.sock")
 else:
-    CONTROL = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "hurricane-party.sock")
+    RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or os.path.join(
+        tempfile.gettempdir(), f"hurricane-party-{os.geteuid()}")
+    CONTROL = os.path.join(RUNTIME, "hurricane-party.sock")
 # magic, timestamp_us, n_bands, depth, flags, reserved, level_peak, level_rms
 HEADER = struct.Struct("<4sQBBBBBB")
 RAMP = " .:-=+*#%@"

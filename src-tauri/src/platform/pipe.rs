@@ -90,7 +90,7 @@ mod imp {
 mod imp {
     use super::{Conn, ListenOptions};
     use std::io;
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
     use std::path::PathBuf;
     use tokio::net::UnixListener;
 
@@ -101,14 +101,40 @@ mod imp {
         opts: ListenOptions,
     }
 
+    fn me() -> u32 {
+        // SAFETY: no arguments, cannot fail.
+        unsafe { libc::geteuid() }
+    }
+
     /// Where the sockets are: `$XDG_RUNTIME_DIR`, which the session makes
-    /// for this user alone. Without one (a bare `su`, a cron job), the temp
-    /// folder; the socket itself is made this user's alone either way.
+    /// for this user alone. Without one (a bare `su`, a cron job), a folder
+    /// of this user's own in the temp folder, `hurricane-party-<uid>`: never
+    /// the shared temp folder itself, where another user could connect in
+    /// the moment before the socket's mode is set, or put a socket of their
+    /// own at the path first.
     fn dir() -> PathBuf {
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .filter(|d| d.is_absolute())
-            .unwrap_or_else(std::env::temp_dir)
+            .unwrap_or_else(|| std::env::temp_dir().join(format!("hurricane-party-{}", me())))
+    }
+
+    /// Make the folder if it is the fallback, and refuse one that is not
+    /// this user's alone: owned by someone else, a symbolic link, or open to
+    /// others.
+    fn private_dir() -> io::Result<PathBuf> {
+        let d = dir();
+        if !d.exists() {
+            std::fs::DirBuilder::new().mode(0o700).create(&d)?;
+        }
+        let meta = std::fs::symlink_metadata(&d)?;
+        if !meta.is_dir() || meta.uid() != me() || meta.mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} is not this user's alone", d.display()),
+            ));
+        }
+        Ok(d)
     }
 
     fn path_of(name: &str) -> PathBuf {
@@ -126,7 +152,7 @@ mod imp {
     /// player answers on is not, and neither is anything there that is not a
     /// socket.
     pub fn listen(name: &str, opts: ListenOptions) -> io::Result<Listener> {
-        let path = path_of(name);
+        let path = hp_control::socket_path(name, &private_dir()?);
         if let Ok(meta) = std::fs::symlink_metadata(&path) {
             if !meta.file_type().is_socket() {
                 return Err(io::Error::new(
@@ -148,9 +174,17 @@ mod imp {
     }
 
     impl Listener {
-        /// Wait for a client, then hand the connected stream over.
+        /// Wait for a client, then hand the connected stream over. Only this
+        /// user's own programs: the folder already keeps everyone else out,
+        /// and this holds even if it did not.
         pub async fn accept(&mut self) -> io::Result<Conn> {
             let (stream, _) = self.socket.accept().await?;
+            if stream.peer_cred()?.uid() != me() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "a client of another user was turned away",
+                ));
+            }
             if self.opts.out_buffer > 0 {
                 // The kernel doubles it and keeps a floor of its own; a few
                 // frames' worth is still what it holds, not 200 KB of them.
