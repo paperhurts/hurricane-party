@@ -1,8 +1,9 @@
 //! Linux, as an X11 client: under XWayland on a Wayland desktop (D181), or on
 //! an X session. Measured on GNOME by the spike (`spike-linux.md`, D182).
 //!
-//! The window calls are real; the rest (processes, folders, drives) are the
-//! stub's until the port reaches them.
+//! The window calls are X's; processes, folders and drives are Linux's own,
+//! in `procs`, `tree` and `drives`. The companion's leave event is still the
+//! stub's until the port reaches the companion.
 //!
 //! Xlib is loaded at run time through `x11-dl`, and each thread opens its own
 //! connection: Xlib is not thread-safe without `XInitThreads`, and the window
@@ -16,6 +17,10 @@ use std::ffi::CString;
 use std::os::raw::{c_long, c_uchar, c_ulong};
 use std::ptr;
 use x11_dl::xlib;
+
+mod drives;
+mod procs;
+mod tree;
 
 pub struct X11Platform;
 
@@ -283,7 +288,7 @@ impl WindowPlatform for X11Platform {
     }
 
     fn kill_tree(&self, pid: u32) {
-        StubPlatform.kill_tree(pid)
+        procs::kill_tree(pid)
     }
 
     fn spawn_quiet(
@@ -311,7 +316,18 @@ impl WindowPlatform for X11Platform {
     }
 
     fn open_folder(&self, path: &std::path::Path) -> Result<(), String> {
-        StubPlatform.open_folder(path)
+        // The desktop's own "open", as Explorer's is on Windows: whatever
+        // file manager the person has. Not waited on: xdg-open hands over
+        // and returns, but a file manager it starts in its place does not.
+        let mut child = std::process::Command::new("xdg-open")
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("couldn't run xdg-open: {e}"))?;
+        std::thread::spawn(move || child.wait());
+        Ok(())
     }
 
     fn watch_tree(
@@ -319,22 +335,22 @@ impl WindowPlatform for X11Platform {
         root: &std::path::Path,
         on_event: Box<dyn FnMut(TreeEvent) + Send>,
     ) -> Result<TreeWatch, String> {
-        StubPlatform.watch_tree(root, on_event)
+        tree::watch(root, on_event)
     }
 
     fn in_use(&self, path: &std::path::Path) -> bool {
-        StubPlatform.in_use(path)
+        procs::in_use(path)
     }
 
     fn disk_space(&self, path: &std::path::Path) -> Option<DiskSpace> {
-        StubPlatform.disk_space(path)
+        drives::disk_space(path)
     }
 
     fn volume_of(&self, path: &std::path::Path) -> Option<Volume> {
-        StubPlatform.volume_of(path)
+        drives::volume_of(path)
     }
 
     fn mounts_of(&self, id: &str) -> Vec<std::path::PathBuf> {
-        StubPlatform.mounts_of(id)
+        drives::mounts_of(id)
     }
 }
