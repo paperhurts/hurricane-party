@@ -13,15 +13,31 @@ print swapped for your strip's library. The player never reaches out: an LED
 rig elsewhere on the network is fed by a program like this one, running here.
 """
 import json
+import os
+import socket
 import struct
 import sys
 
-# The macOS and Linux socket paths are in docs/control-api.md, for when the
-# player runs there.
-CONTROL = r"\\.\pipe\hurricane-party"
+# Where the player listens (docs/control-api.md): a named pipe on Windows, a
+# Unix domain socket on Linux and macOS.
+if sys.platform == "win32":
+    CONTROL = r"\\.\pipe\hurricane-party"
+elif sys.platform == "darwin":
+    CONTROL = os.path.expanduser("~/Library/Caches/hurricane-party.sock")
+else:
+    CONTROL = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "hurricane-party.sock")
 # magic, timestamp_us, n_bands, depth, flags, reserved, level_peak, level_rms
 HEADER = struct.Struct("<4sQBBBBBB")
 RAMP = " .:-=+*#%@"
+
+
+def connect(path):
+    """Open a pipe or socket the player named, as an unbuffered byte stream."""
+    if sys.platform == "win32":
+        return open(path, "r+b", buffering=0)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(path)
+    return s.makefile("rwb", buffering=0)
 
 
 def ask(pipe, msg):
@@ -42,7 +58,7 @@ def ask(pipe, msg):
 def main():
     limit = int(sys.argv[sys.argv.index("--frames") + 1]) if "--frames" in sys.argv else None
     try:
-        control = open(CONTROL, "r+b", buffering=0)
+        control = connect(CONTROL)
     except OSError:
         sys.exit("couldn't reach hurricane-party: is it running?")
     with control:
@@ -52,7 +68,7 @@ def main():
                                "bands": 32, "rate_hz": 30, "depth": "u8"})["stream"]
 
     shown, buf = 0, b""
-    with open(stream, "rb", buffering=0) as viz:
+    with connect(stream) as viz:
         while limit is None or shown < limit:
             chunk = viz.read(4096)
             if not chunk:

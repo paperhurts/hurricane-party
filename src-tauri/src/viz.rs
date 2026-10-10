@@ -238,7 +238,7 @@ pub fn subscribe(app: &AppHandle, params: VizParams) -> Result<String, String> {
     };
 
     let max_frame = viz::HEADER_LEN + params.bands as usize * params.depth.bytes_per_band();
-    let listener = pipe::listen(
+    let mut listener = pipe::listen(
         &name,
         pipe::ListenOptions {
             out_buffer: (2 * max_frame) as u32,
@@ -290,7 +290,9 @@ pub fn subscribe(app: &AppHandle, params: VizParams) -> Result<String, String> {
         notify_demand(&app, &hub);
     });
 
-    Ok(name)
+    // What the client opens: the name on Windows, the socket's path where
+    // there are sockets.
+    Ok(pipe::endpoint(&name))
 }
 
 /// The `viz_frame` command body: headers for the scalars, raw bytes for the
