@@ -7,14 +7,15 @@ use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, Volume, WindowPlatfor
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::HiDpi::{
-    AreDpiAwarenessContextsEqual, GetAwarenessFromDpiAwarenessContext,
+    AreDpiAwarenessContextsEqual, GetAwarenessFromDpiAwarenessContext, GetDpiForWindow,
     GetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     DPI_AWARENESS_PER_MONITOR_AWARE, DPI_AWARENESS_SYSTEM_AWARE, DPI_AWARENESS_UNAWARE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowLongPtrW, IsIconic, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE,
+    DispatchMessageW, GetCursorPos, GetWindowLongPtrW, IsIconic, PeekMessageW, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, GWLP_HWNDPARENT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, MSG,
+    PM_NOREMOVE, PM_REMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, WM_DPICHANGED,
 };
 
 mod tree;
@@ -162,6 +163,54 @@ impl WindowPlatform for Win32Platform {
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
+        }
+    }
+
+    fn window_scale(&self, w: NativeWindow) -> Option<f64> {
+        // SAFETY: a read of the window's own DPI; sends no message. Zero for
+        // a handle that is not a window.
+        let dpi = unsafe { GetDpiForWindow(hwnd(w)) };
+        (dpi > 0).then(|| dpi as f64 / 96.0)
+    }
+
+    fn place(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool {
+        // SAFETY: see D54 on the trait. Called on the windows' own thread
+        // (D191), where it is synchronous, flag or no flag. Whether a change
+        // of display the move causes has been made by the time it returns is
+        // not documented, and on the owner's desk it often had not been: the
+        // DPI read straight after was the old one. So a read-back here is a
+        // hint, and `wm::reconcile` follows the change once it lands.
+        // Position and size together, so the window is never at one without
+        // the other.
+        unsafe {
+            let _ = SetWindowPos(hwnd(w), None, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        true
+    }
+
+    fn pump(&self, w: NativeWindow) {
+        // SAFETY: on the window's own thread (launch, D192). A peek that
+        // removes nothing still delivers any message sent to the thread's
+        // windows and waiting; then only this window's posted WM_DPICHANGED,
+        // if Windows posted one, is taken and dispatched, to tao's handler.
+        // Nothing else is taken off the queue.
+        unsafe {
+            let mut msg = MSG::default();
+            let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+            for _ in 0..4 {
+                if !PeekMessageW(
+                    &mut msg,
+                    Some(hwnd(w)),
+                    WM_DPICHANGED,
+                    WM_DPICHANGED,
+                    PM_REMOVE,
+                )
+                .as_bool()
+                {
+                    break;
+                }
+                let _ = DispatchMessageW(&msg);
+            }
         }
     }
 

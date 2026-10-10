@@ -30,12 +30,20 @@ using System.Runtime.InteropServices;
 public static class HpInput {
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extra);
 }
 "@
-[void][HpInput]::SetProcessDPIAware()
+# Per-monitor-v2, as the app is (D37): system-aware sees a 150% display
+# scaled, and reported a 550 px window there as 367 (D187). -4 is
+# DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2; Windows before 1703 lacks it.
+try {
+    if (-not [HpInput]::SetProcessDpiAwarenessContext([IntPtr](-4))) { [void][HpInput]::SetProcessDPIAware() }
+} catch {
+    [void][HpInput]::SetProcessDPIAware()
+}
 $DOWN = 0x0002; $UP = 0x0004
 
 function Press { [HpInput]::mouse_event($DOWN, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40; [HpInput]::mouse_event($UP, 0, 0, 0, [IntPtr]::Zero) }

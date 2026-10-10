@@ -37,6 +37,7 @@ public static class Shot {
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
@@ -56,7 +57,14 @@ public static class Shot {
 }
 "@
 
-[void][Shot]::SetProcessDPIAware()
+# Per-monitor-v2, as the app is (D37): system-aware sees a 150% display
+# scaled, and reported a 550 px window there as 367 (D187). -4 is
+# DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2; Windows before 1703 lacks it.
+try {
+    if (-not [Shot]::SetProcessDpiAwarenessContext([IntPtr](-4))) { [void][Shot]::SetProcessDPIAware() }
+} catch {
+    [void][Shot]::SetProcessDPIAware()
+}
 
 $proc = Get-Process -Name hurricane-party -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $proc) { Write-Error "hurricane-party is not running"; exit 1 }
