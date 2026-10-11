@@ -86,6 +86,8 @@ pub trait WindowPlatform: Send + Sync {
     /// are owned by a hidden root and not by each other (D41), so topmost does
     /// not propagate along ownership the way a raise does. Lifting only the
     /// shaded Main window would leave its bonded neighbours behind other apps.
+    /// Applied through the ownership plan on every apply, after the owners and
+    /// before the raise, and again to a window shown again (D196).
     fn set_topmost(&self, w: NativeWindow, on: bool);
 
     /// D57: is this window minimized?
