@@ -461,9 +461,9 @@ fn rewrite(tx: &rusqlite::Transaction, playlist_id: i64, order: &[i64]) -> Resul
     Ok(())
 }
 
-/// Close the gaps left by a route other than `remove_item`: a track taken out of
-/// the library takes its memberships with it (the schema cascades), and the
-/// positions it held stay empty until this runs (#78).
+/// Close the gaps a removal leaves: the row `remove_item` took out, or a track
+/// taken out of the library, which takes its memberships with it (the schema
+/// cascades) and leaves the positions it held empty until this runs (#78).
 pub(crate) fn compact(tx: &rusqlite::Transaction, playlist_id: i64) -> Result<(), DbError> {
     let order = positions(tx, playlist_id)?;
     rewrite(tx, playlist_id, &order)

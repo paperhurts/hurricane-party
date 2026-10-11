@@ -25,9 +25,11 @@
 
   let queue = $state<Queue>({ name: "", listId: null, items: [] });
   let nowId = $state<number | null>(null);
-  // The row picked, by its key, so of a track in the list twice the copy
-  // clicked is the one REM and Delete take (#252).
-  let selectedKey = $state<string | null>(null);
+  // The row picked: its key, so of a track in the list twice the copy clicked
+  // is the one REM and Delete take, and its track, so a row id SQLite hands
+  // out again to another track is not it (#252, D197).
+  let picked = $state<{ key: string; id: number } | null>(null);
+  const isPicked = (t: Item) => picked != null && rowKey(t) === picked.key && t.id === picked.id;
 
   // The play order's switches as the library holds them (#115). The library
   // owns the order (D74); these buttons only ask it to change, and show what
@@ -42,8 +44,26 @@
   // the person pointing at it, and a change-only report never said so. The
   // library hears the track, which is what the play order walks (D97).
   function pick(t: Item) {
-    selectedKey = rowKey(t);
+    picked = { key: rowKey(t), id: t.id };
     emitTo("library", "queue:select", t.id).catch(() => {});
+  }
+
+  // A list drawn anew. The pick stays its row while that row is there; when
+  // the queue has become another list it follows its track into it, as the
+  // library's pick does (D97); otherwise it is let go, and the library told,
+  // so Play never starts on a row nobody can see is chosen (#252).
+  function drawn(next: Queue) {
+    const switched = next.listId !== queue.listId;
+    queue = next;
+    const p = picked;
+    if (!p || next.items.some(isPicked)) return;
+    const same = switched ? next.items.find((t) => t.id === p.id) : undefined;
+    if (same) {
+      picked = { key: rowKey(same), id: same.id };
+    } else {
+      picked = null;
+      emitTo("library", "queue:select", null).catch(() => {});
+    }
   }
   // $state, so the effects below hear a new list when the rows are rebuilt.
   let rowsEl = $state<HTMLDivElement | undefined>();
@@ -78,7 +98,7 @@
   let nowLine = $derived(
     now ? (now.uploader ? `${now.uploader} — ${now.title}` : now.title) : queue.name || "Library",
   );
-  let selectedItem = $derived(queue.items.find((t) => rowKey(t) === selectedKey) ?? null);
+  let selectedItem = $derived(queue.items.find(isPicked) ?? null);
   // Only a playlist made by hand has rows to remove; the library is not a
   // list, and a smart playlist's rule decides its rows (#165).
   let handList = $derived(queue.listId != null && !queue.smart);
@@ -86,9 +106,7 @@
 
   $effect(() => {
     const subs = [
-      listen<Queue>("queue:set", (e) => {
-        queue = e.payload;
-      }),
+      listen<Queue>("queue:set", (e) => drawn(e.payload)),
       listen<{ id: number | null; playing: boolean }>("player:now", (e) => {
         nowId = e.payload.id;
       }),
@@ -356,7 +374,7 @@
   function onKey(e: KeyboardEvent) {
     const items = queue.items;
     if (items.length === 0) return;
-    const i = items.findIndex((t) => rowKey(t) === selectedKey);
+    const i = items.findIndex(isPicked);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const j = i < 0 ? 0 : Math.min(items.length - 1, Math.max(0, i + (e.key === "ArrowDown" ? 1 : -1)));
@@ -398,14 +416,14 @@
       <div
         class="row"
         class:now={t.id === nowId}
-        class:sel={rowKey(t) === selectedKey}
+        class:sel={isPicked(t)}
         class:lifted={dragKey === rowKey(t)}
         class:drop-before={dragKey != null && dropAt === i}
         class:drop-after={dragKey != null && dropAt === queue.items.length && i === queue.items.length - 1}
         data-idx={i}
         data-item={t.item}
         role="option"
-        aria-selected={rowKey(t) === selectedKey}
+        aria-selected={isPicked(t)}
         tabindex="-1"
         onpointerdown={(e) => rowDown(e, t)}
         title={t.title}
