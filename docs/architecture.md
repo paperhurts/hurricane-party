@@ -139,6 +139,10 @@ CREATE TABLE playlist_items (
 -- reorder cannot be a naive sequence of UPDATEs — it collides mid-statement. SQLite has
 -- no deferred UNIQUE. Reorder in one transaction, shifting affected rows to negative
 -- positions first, then writing final values. Write it once, in a helper, and test it.
+-- A window names a row by its rowid (`item`), never its position: an edit is
+-- (playlist_id, rowid, media_id), a move names the rows it was dropped between, and
+-- Rust finds them where they are now, in one transaction (D197). Nothing may VACUUM or
+-- rebuild this table without first giving it an explicit id column.
 
 -- survives power loss. this is the point.
 CREATE TABLE jobs (
@@ -260,7 +264,7 @@ in `playlists.rule_json`, read into a typed `smart::Rule` that refuses a field i
 know: words in title and artist, kind, added within N days, longer or shorter than, root,
 one of the library's four orders, and a limit. Every condition must hold. `playlist::items`
 reads the library and applies the rule in Rust, so the queue, SEL and the playlist window
-see a smart list as they see any other, and `add`, `remove` and `reorder` refuse one. The
+see a smart list as they see any other, and `add`, `remove_item` and `move_item` refuse one. The
 words fold exactly as the search box does; both sides are tested on `src/lib/fold.cases.json`.
 
 ### Equalizer spec
