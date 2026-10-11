@@ -15,9 +15,35 @@ use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, Volume, WindowPlatfor
 use std::ffi::CString;
 use std::os::raw::{c_long, c_uchar, c_ulong};
 use std::ptr;
+use std::sync::Mutex;
 use x11_dl::xlib;
 
 pub struct X11Platform;
+
+/// The windows this process has floated (D196). Mutter raises a window on
+/// every `_NET_WM_STATE_ABOVE` message, a removal too, without asking which
+/// application has the focus; the ownership plan sinks every window outside
+/// a shaded Main's group on every apply, so a window never floated is not
+/// told to stop, or an apply made while another app is in front (the
+/// launch's `confirm_layout`, a drag ended by its lost release) would lift
+/// it over that app.
+static FLOATED: Mutex<Vec<c_ulong>> = Mutex::new(Vec::new());
+
+/// Whether to tell the window manager `on` for window `w`, given the windows
+/// `floated` so far, which it keeps: a float always, so one the window
+/// manager dropped comes back; a sink only for a window that was floated.
+fn worth_saying(floated: &mut Vec<c_ulong>, w: c_ulong, on: bool) -> bool {
+    let was = floated.contains(&w);
+    if on {
+        if !was {
+            floated.push(w);
+        }
+        true
+    } else {
+        floated.retain(|f| *f != w);
+        was
+    }
+}
 
 thread_local! {
     /// This thread's Xlib and display, opened on first use and kept for the
@@ -174,9 +200,10 @@ impl WindowPlatform for X11Platform {
     }
 
     /// D61 as EWMH has it: ask the window manager to add or remove
-    /// `_NET_WM_STATE_ABOVE`, a client message to the root.
+    /// `_NET_WM_STATE_ABOVE`, a client message to the root. A removal only
+    /// for a window this process floated (D196, `FLOATED`).
     fn set_topmost(&self, w: NativeWindow, on: bool) {
-        if w.is_none() {
+        if w.is_none() || !worth_saying(&mut FLOATED.lock().unwrap(), w.0 as c_ulong, on) {
             return;
         }
         with_x(|x, d| unsafe {
@@ -336,5 +363,25 @@ impl WindowPlatform for X11Platform {
 
     fn mounts_of(&self, id: &str) -> Vec<std::path::PathBuf> {
         StubPlatform.mounts_of(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_window_never_floated_is_not_told_to_sink() {
+        // D196: on Mutter the removal would raise it over the focused app.
+        let mut floated = Vec::new();
+        assert!(!worth_saying(&mut floated, 7, false));
+        assert!(worth_saying(&mut floated, 7, true));
+        assert!(
+            worth_saying(&mut floated, 7, true),
+            "said again, so a float the window manager dropped comes back"
+        );
+        assert!(worth_saying(&mut floated, 7, false));
+        assert!(!worth_saying(&mut floated, 7, false), "sunk already");
+        assert!(floated.is_empty());
     }
 }

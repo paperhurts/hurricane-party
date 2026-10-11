@@ -1014,9 +1014,9 @@ pub struct OwnPlan {
 /// none of it can lift a window above another application's foreground window
 /// without stealing focus, which we will not do.
 pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
-    // Only before `build_classic_windows` has made the roots. On X11 they are
-    // three NONE handles, not none (D182): filtering those out here would
-    // silently stop every float on Linux (D196).
+    // Only before `register` has read the roots. On X11 they are three NONE
+    // handles, not none (D182): filtering those out here would silently stop
+    // every float on Linux (D196).
     if state.roots.is_empty() {
         return OwnPlan::default();
     }
@@ -1184,7 +1184,9 @@ fn apply_ownership_on<P: OwnerOps + ?Sized>(p: &P, plan: &OwnPlan) {
     // the raise, because HWND_TOPMOST lifts a window to the top of the
     // topmost band: after it, it would undo the touched-window-last order
     // (D193). The raise re-stacks every window straight after, so a float
-    // re-asserted on a click changes nothing in the z-order.
+    // re-asserted on a click changes nothing in the z-order. On X11 a window
+    // this process never floated is not sunk at all, since Mutter raises a
+    // window on any change of state (x11_impl's `FLOATED`).
     for (w, on) in &plan.topmost {
         p.float(*w, *on);
     }
