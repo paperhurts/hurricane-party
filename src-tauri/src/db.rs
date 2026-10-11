@@ -111,7 +111,9 @@ CREATE TABLE IF NOT EXISTS playlists (
 
 -- The unique (playlist_id, position) invariant is real and worth keeping, but
 -- SQLite has no deferred UNIQUE, so a reorder cannot be a naive sequence of
--- UPDATEs. See `playlist::reorder` for the two-phase form.
+-- UPDATEs. See `playlist::rewrite` for the two-phase form. A row's rowid is
+-- its identity to the windows (D197): nothing may VACUUM or rebuild this table
+-- without first giving it an explicit id column.
 CREATE TABLE IF NOT EXISTS playlist_items (
   playlist_id   INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
   media_id      INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,

@@ -1335,27 +1335,35 @@ fn add_tracks_to_playlist(
     playlist::add_many(&mut conn, playlist_id, &media_ids)
 }
 
+/// Take a row out of a hand list. The row is named by its id and its track,
+/// and found where it is now, so an edit made before the last one was drawn
+/// back still takes the row pointed at (#252, D197). False when it has gone.
 #[tauri::command]
-fn remove_from_playlist(
+fn remove_playlist_item(
     app: AppHandle,
     playlist_id: i64,
-    position: i64,
-) -> Result<(), db::DbError> {
+    item: i64,
+    media_id: i64,
+) -> Result<bool, db::DbError> {
     let state = app.state::<Db>();
     let mut conn = state.0.lock().unwrap();
-    playlist::remove(&mut conn, playlist_id, position)
+    playlist::remove_item(&mut conn, playlist_id, item, media_id)
 }
 
+/// Move a row of a hand list to the place between the rows it was dropped
+/// between, all found where they are now (#252, D197). False when nothing
+/// moved.
 #[tauri::command]
-fn reorder_playlist(
+fn move_playlist_item(
     app: AppHandle,
     playlist_id: i64,
-    from: i64,
-    to: i64,
-) -> Result<(), db::DbError> {
+    item: i64,
+    media_id: i64,
+    place: playlist::Place,
+) -> Result<bool, db::DbError> {
     let state = app.state::<Db>();
     let mut conn = state.0.lock().unwrap();
-    playlist::reorder(&mut conn, playlist_id, from, to)
+    playlist::move_item(&mut conn, playlist_id, item, media_id, place)
 }
 
 // ---- settings ---------------------------------------------------------------
@@ -2200,8 +2208,8 @@ pub fn run() {
             playlist_items,
             add_to_playlist,
             add_tracks_to_playlist,
-            remove_from_playlist,
-            reorder_playlist,
+            remove_playlist_item,
+            move_playlist_item,
             get_concurrency,
             set_concurrency,
             get_play_mode,

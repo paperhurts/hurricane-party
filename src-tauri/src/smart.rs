@@ -281,6 +281,7 @@ mod tests {
             root_id: 1,
             path: String::new(),
             position: None,
+            item: None,
             integrity: None,
         }
     }

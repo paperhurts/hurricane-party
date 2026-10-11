@@ -52,21 +52,3 @@ export function sayOut(rows: readonly OnRoot[], roots: readonly RootPresence[], 
     ? `${tracks} on ${names(labels)} won't play until ${drives ? "it's" : "they're"} plugged in.`
     : `${tracks} ${one ? "is" : "are"} hidden: ${one ? "it's" : "they're"} on ${names(labels)}, which ${drives ? "isn't" : "aren't"} plugged in.`;
 }
-
-/**
- * Where a row dropped among the rows a list shows lands in the whole list, as
- * the index `reorder_playlist` takes: a place in the list with the moved row
- * taken out. `order` is every position in the list, in order; `shown` the
- * positions showing; `from` the moved row's; `dest` the index it was dropped
- * at among the showing rows, the moved one taken out. It lands just before the
- * showing row it was dropped above, or just after the last showing row. With
- * nothing hidden that is `dest` itself, so a list with its drive out can be
- * put in order without the hidden rows moving from where they are.
- */
-export function placeAmong(order: readonly number[], shown: readonly number[], from: number, dest: number): number {
-  const rest = order.filter((p) => p !== from);
-  const seen = shown.filter((p) => p !== from);
-  if (!seen.length) return Math.max(0, order.indexOf(from));
-  const at = dest < seen.length ? rest.indexOf(seen[dest]) : rest.indexOf(seen[seen.length - 1]) + 1;
-  return at < 0 ? dest : at;
-}

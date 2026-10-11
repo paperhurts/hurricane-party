@@ -39,9 +39,24 @@ pub struct MediaRow {
     pub path: String,
     /// Present only when the row came from a playlist query.
     pub position: Option<i64>,
+    /// The row's own id, its `playlist_items` rowid, in the hand list it was
+    /// read from (#252, D197): what an edit names, since a list may hold a
+    /// track twice. None in the library and in a smart list.
+    pub item: Option<i64>,
     /// What the last integrity check made of it (#164, D142): `changed`,
     /// `unreadable`, or nothing at all.
     pub integrity: Option<String>,
+}
+
+/// Where a moved row is dropped, by the rows on either side of the line
+/// (#252, D197): `before` the row it was dropped above (None at the bottom),
+/// `after` the row above the line (None at the top). Rows, not indexes, so a
+/// drop drawn before the last edit came back still lands where it was made.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
+pub struct Place {
+    pub before: Option<i64>,
+    pub after: Option<i64>,
 }
 
 const MEDIA_SELECT: &str = "
@@ -64,6 +79,7 @@ fn row_to_media(r: &rusqlite::Row, position: Option<i64>) -> rusqlite::Result<Me
             .to_string_lossy()
             .to_string(),
         position,
+        item: None,
         integrity: r.get("integrity")?,
     })
 }
@@ -350,7 +366,7 @@ pub fn items(conn: &Connection, playlist_id: i64) -> Result<Vec<MediaRow>, DbErr
         return Ok(smart::select(&rule, &candidates(conn)?, db::now()));
     }
     let sql = format!(
-        "{MEDIA_SELECT}, i.position FROM playlist_items i
+        "{MEDIA_SELECT}, i.position, i.rowid AS item FROM playlist_items i
          JOIN media m ON m.id = i.media_id
          JOIN library_roots r ON r.id = m.root_id
          WHERE i.playlist_id = ?1 ORDER BY i.position"
@@ -358,7 +374,9 @@ pub fn items(conn: &Connection, playlist_id: i64) -> Result<Vec<MediaRow>, DbErr
     let mut st = conn.prepare(&sql)?;
     let rows = st.query_map([playlist_id], |r| {
         let pos: i64 = r.get("position")?;
-        row_to_media(r, Some(pos))
+        let mut m = row_to_media(r, Some(pos))?;
+        m.item = Some(r.get("item")?);
+        Ok(m)
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -443,7 +461,7 @@ fn rewrite(tx: &rusqlite::Transaction, playlist_id: i64, order: &[i64]) -> Resul
     Ok(())
 }
 
-/// Close the gaps left by a route other than `remove`: a track taken out of
+/// Close the gaps left by a route other than `remove_item`: a track taken out of
 /// the library takes its memberships with it (the schema cascades), and the
 /// positions it held stay empty until this runs (#78).
 pub(crate) fn compact(tx: &rusqlite::Transaction, playlist_id: i64) -> Result<(), DbError> {
@@ -458,40 +476,73 @@ fn positions(conn: &Connection, playlist_id: i64) -> Result<Vec<i64>, DbError> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-pub fn remove(conn: &mut Connection, playlist_id: i64, position: i64) -> Result<(), DbError> {
-    by_hand(conn, playlist_id)?;
+/// Take one row out of a hand list (#252, D197): the row `item` of list
+/// `playlist_id`, holding track `media_id`, wherever it is now. All three
+/// must match, since SQLite may hand a deleted row's id out again: a row
+/// already gone is nothing to do, never the row that slid into its place.
+/// Returns whether a row went.
+pub fn remove_item(
+    conn: &mut Connection,
+    playlist_id: i64,
+    item: i64,
+    media_id: i64,
+) -> Result<bool, DbError> {
     let tx = conn.transaction()?;
-    tx.execute(
-        "DELETE FROM playlist_items WHERE playlist_id = ?1 AND position = ?2",
-        params![playlist_id, position],
+    by_hand(&tx, playlist_id)?;
+    let gone = tx.execute(
+        "DELETE FROM playlist_items WHERE rowid = ?1 AND playlist_id = ?2 AND media_id = ?3",
+        params![item, playlist_id, media_id],
     )?;
+    if gone == 0 {
+        return Ok(false);
+    }
     // Close the gap so positions stay dense.
-    let remaining: Vec<i64> = {
-        let mut st = tx.prepare(
-            "SELECT position FROM playlist_items WHERE playlist_id = ?1 ORDER BY position",
-        )?;
-        let rows = st.query_map([playlist_id], |r| r.get::<_, i64>(0))?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
-    rewrite(&tx, playlist_id, &remaining)?;
+    compact(&tx, playlist_id)?;
     tx.commit()?;
-    Ok(())
+    Ok(true)
 }
 
-pub fn reorder(conn: &mut Connection, playlist_id: i64, from: i64, to: i64) -> Result<(), DbError> {
-    by_hand(conn, playlist_id)?;
-    let mut order = positions(conn, playlist_id)?;
-    let Some(idx) = order.iter().position(|p| *p == from) else {
-        return Ok(()); // nothing at that position; nothing to do
-    };
-    let moved = order.remove(idx);
-    let dest = (to.max(0) as usize).min(order.len());
-    order.insert(dest, moved);
-
+/// Move one row of a hand list to `place` (#252, D197), found where it and
+/// its neighbours are now, in the transaction that moves it: just before the
+/// row it was dropped above, or, where that row has gone or the drop was at
+/// the bottom, just after the row above the line. Rows hidden on a drive that
+/// is out keep their places (D143). Returns whether anything moved.
+pub fn move_item(
+    conn: &mut Connection,
+    playlist_id: i64,
+    item: i64,
+    media_id: i64,
+    place: Place,
+) -> Result<bool, DbError> {
     let tx = conn.transaction()?;
-    rewrite(&tx, playlist_id, &order)?;
+    by_hand(&tx, playlist_id)?;
+    // (row, track, position), in order.
+    let mut order: Vec<(i64, i64, i64)> = {
+        let mut st = tx.prepare(
+            "SELECT rowid, media_id, position FROM playlist_items
+             WHERE playlist_id = ?1 ORDER BY position",
+        )?;
+        let rows = st.query_map([playlist_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let Some(from) = order.iter().position(|r| r.0 == item && r.1 == media_id) else {
+        return Ok(false);
+    };
+    let moved = order.remove(from);
+    let find = |row: Option<i64>| row.and_then(|row| order.iter().position(|r| r.0 == row));
+    let to = match (find(place.before), find(place.after)) {
+        (Some(b), _) => b,
+        (None, Some(a)) => a + 1,
+        (None, None) => return Ok(false),
+    };
+    if to == from {
+        return Ok(false);
+    }
+    order.insert(to, moved);
+    let old: Vec<i64> = order.iter().map(|r| r.2).collect();
+    rewrite(&tx, playlist_id, &old)?;
     tx.commit()?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -580,8 +631,12 @@ mod tests {
         // No hand edits, and the list is as it was.
         let why = add(&conn, id, beach).unwrap_err().to_string();
         assert!(why.contains("smart playlist"), "{why}");
-        assert!(remove(&mut conn, id, 0).is_err());
-        assert!(reorder(&mut conn, id, 0, 1).is_err());
+        assert!(remove_item(&mut conn, id, 1, beach).is_err());
+        let place = Place {
+            before: None,
+            after: Some(2),
+        };
+        assert!(move_item(&mut conn, id, 1, beach, place).is_err());
         assert_eq!(titles(&conn), ["Beach"]);
 
         // The rule changes; a hand list has none to change; a bad rule is refused.
@@ -803,70 +858,236 @@ mod tests {
         assert_eq!(titles(&conn, pid).len(), 3);
     }
 
-    /// The collision case: moving an item downward makes every intervening row
-    /// want a position another row still occupies. A naive UPDATE sequence hits
-    /// the unique constraint here.
+    /// Each row of a hand list as a window holds it: (row, track), in order.
+    fn rows(conn: &Connection, pid: i64) -> Vec<(i64, i64)> {
+        items(conn, pid)
+            .unwrap()
+            .into_iter()
+            .map(|m| (m.item.unwrap(), m.id))
+            .collect()
+    }
+
+    fn at(before: Option<(i64, i64)>, after: Option<(i64, i64)>) -> Place {
+        Place {
+            before: before.map(|r| r.0),
+            after: after.map(|r| r.0),
+        }
+    }
+
+    /// Move row `r` of list `pid` to `place`.
+    fn mv(conn: &mut Connection, pid: i64, r: (i64, i64), place: Place) -> bool {
+        move_item(conn, pid, r.0, r.1, place).unwrap()
+    }
+
+    /// Take row `r` out of list `pid`.
+    fn rm(conn: &mut Connection, pid: i64, r: (i64, i64)) -> bool {
+        remove_item(conn, pid, r.0, r.1).unwrap()
+    }
+
+    fn tracks(conn: &Connection, pid: i64) -> Vec<String> {
+        titles(conn, pid)
+            .into_iter()
+            .map(|t| t.replace("track ", ""))
+            .collect()
+    }
+
+    /// #252: drag A below C, then Delete before the redraw. The window still
+    /// holds A's row, and that is what goes, not B, which now has A's place.
     #[test]
-    fn reorder_downward_does_not_collide() {
+    fn a_delete_straight_after_a_move_takes_the_row_that_moved() {
         let (mut conn, pid) = fixture(5);
-        reorder(&mut conn, pid, 0, 3).unwrap();
-        assert_eq!(
-            titles(&conn, pid),
-            ["track 1", "track 2", "track 3", "track 0", "track 4"]
-        );
-        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2, 3, 4]);
+        let r = rows(&conn, pid);
+        assert!(mv(&mut conn, pid, r[0], at(Some(r[3]), Some(r[2]))));
+        assert_eq!(tracks(&conn, pid), ["1", "2", "0", "3", "4"]);
+        assert!(rm(&mut conn, pid, r[0]));
+        assert_eq!(tracks(&conn, pid), ["1", "2", "3", "4"]);
+        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2, 3]);
     }
 
+    /// #252: Delete twice on C. The second names C again, which has gone.
     #[test]
-    fn reorder_upward_does_not_collide() {
+    fn a_second_delete_of_the_same_row_is_nothing() {
         let (mut conn, pid) = fixture(5);
-        reorder(&mut conn, pid, 4, 1).unwrap();
-        assert_eq!(
-            titles(&conn, pid),
-            ["track 0", "track 4", "track 1", "track 2", "track 3"]
-        );
-        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2, 3, 4]);
+        let r = rows(&conn, pid);
+        assert!(rm(&mut conn, pid, r[2]));
+        assert!(!rm(&mut conn, pid, r[2]), "not D, which took C's place");
+        assert_eq!(tracks(&conn, pid), ["0", "1", "3", "4"]);
+        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2, 3]);
     }
 
+    /// #252: remove B, then drag D to the top before the redraw. D moves,
+    /// not E, which now has D's old place.
     #[test]
-    fn remove_closes_the_gap() {
-        let (mut conn, pid) = fixture(4);
-        remove(&mut conn, pid, 1).unwrap();
-        assert_eq!(titles(&conn, pid), ["track 0", "track 2", "track 3"]);
-        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2]);
+    fn a_move_straight_after_a_removal_moves_the_row_that_was_dragged() {
+        let (mut conn, pid) = fixture(5);
+        let r = rows(&conn, pid);
+        assert!(rm(&mut conn, pid, r[1]));
+        assert!(mv(&mut conn, pid, r[3], at(Some(r[0]), None)));
+        assert_eq!(tracks(&conn, pid), ["3", "0", "2", "4"]);
     }
 
-    /// The same track twice is legal, which is why `rewrite` identifies rows by
-    /// parked position rather than by media_id.
+    /// A drop made just above a row removed a moment ago lands after the row
+    /// above the line; with neither row left, nothing moves.
+    #[test]
+    fn a_drop_beside_a_row_that_has_gone_lands_beside_the_one_still_there() {
+        let (mut conn, pid) = fixture(5);
+        let r = rows(&conn, pid);
+        assert!(rm(&mut conn, pid, r[1]));
+        assert!(mv(&mut conn, pid, r[4], at(Some(r[1]), Some(r[0]))));
+        assert_eq!(tracks(&conn, pid), ["0", "4", "2", "3"]);
+        assert!(!mv(&mut conn, pid, r[2], at(Some(r[1]), Some((999, 0)))));
+        assert_eq!(tracks(&conn, pid), ["0", "4", "2", "3"]);
+    }
+
+    /// The same track twice is legal (#114), which is why `rewrite` identifies
+    /// rows by parked position and an edit names the row, never the track.
     #[test]
     fn handles_the_same_track_twice() {
         let (mut conn, pid) = fixture(2);
-        let first: i64 = conn
-            .query_row(
-                "SELECT media_id FROM playlist_items WHERE position = 0",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
+        let first = rows(&conn, pid)[0].1;
         add(&conn, pid, first).unwrap();
-        assert_eq!(titles(&conn, pid), ["track 0", "track 1", "track 0"]);
-        reorder(&mut conn, pid, 2, 0).unwrap();
-        assert_eq!(titles(&conn, pid), ["track 0", "track 0", "track 1"]);
+        assert_eq!(tracks(&conn, pid), ["0", "1", "0"]);
+        let r = rows(&conn, pid);
+        assert_ne!(r[0].0, r[2].0, "each copy is its own row");
+        // The lower copy to the top: the upper one stays where it was.
+        assert!(mv(&mut conn, pid, r[2], at(Some(r[0]), None)));
+        assert_eq!(rows(&conn, pid), [r[2], r[0], r[1]]);
         assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2]);
+        // And that copy goes, not the first of the track's rows.
+        assert!(rm(&mut conn, pid, r[2]));
+        assert_eq!(rows(&conn, pid), [r[0], r[1]]);
+    }
+
+    /// An edit lands only on its own list's row of its own track: a row id
+    /// SQLite hands out again, or one from another list, is nothing.
+    #[test]
+    fn an_edit_touches_only_its_own_lists_row_of_its_own_track() {
+        let (mut conn, pid) = fixture(3);
+        let other = create(&conn, "other").unwrap();
+        let r = rows(&conn, pid);
+        add(&conn, other, r[0].1).unwrap();
+        add(&conn, other, r[1].1).unwrap();
+        let o = rows(&conn, other);
+        let (mine, theirs) = (tracks(&conn, pid), tracks(&conn, other));
+        assert!(!rm(&mut conn, other, r[0]), "another list's row");
+        assert!(!rm(&mut conn, pid, (r[0].0, r[1].1)), "the wrong track");
+        assert!(!mv(&mut conn, pid, (r[0].0, r[1].1), at(None, Some(r[2]))));
+        assert!(!mv(&mut conn, pid, r[0], at(Some(o[1]), None)));
+        assert!(!mv(&mut conn, pid, r[0], at(Some(r[0]), None)), "itself");
+        assert_eq!((tracks(&conn, pid), tracks(&conn, other)), (mine, theirs));
+    }
+
+    /// D143: rows hidden on a drive that is out are not in the window, so a
+    /// drop names the showing rows either side of it, and the hidden ones
+    /// keep their places. A B C D with B hidden: the window shows A C D.
+    #[test]
+    fn a_move_lands_beside_its_neighbours_and_a_hidden_row_keeps_its_place() {
+        let cases = [
+            (0, Some(3), Some(2), ["1", "2", "0", "3"]),
+            (3, Some(0), None, ["3", "0", "1", "2"]),
+            (0, None, Some(3), ["1", "2", "3", "0"]),
+        ];
+        for (moved, before, after, want) in cases {
+            let (mut conn, pid) = fixture(4);
+            let r = rows(&conn, pid);
+            assert!(mv(
+                &mut conn,
+                pid,
+                r[moved],
+                at(before.map(|i| r[i]), after.map(|i| r[i]))
+            ));
+            assert_eq!(tracks(&conn, pid), want);
+        }
+        // D hidden: A dropped at the bottom of A B C lands after C, D last.
+        let (mut conn, pid) = fixture(4);
+        let r = rows(&conn, pid);
+        assert!(mv(&mut conn, pid, r[0], at(None, Some(r[2]))));
+        assert_eq!(tracks(&conn, pid), ["1", "2", "0", "3"]);
+    }
+
+    /// The collision case: moving a row makes every row between want a
+    /// position another row still occupies. A naive UPDATE sequence hits
+    /// the unique constraint here.
+    #[test]
+    fn a_move_either_way_does_not_collide() {
+        let (mut conn, pid) = fixture(5);
+        let r = rows(&conn, pid);
+        assert!(mv(&mut conn, pid, r[0], at(Some(r[4]), Some(r[3]))));
+        assert_eq!(tracks(&conn, pid), ["1", "2", "3", "0", "4"]);
+        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2, 3, 4]);
+        let (mut conn, pid) = fixture(5);
+        let r = rows(&conn, pid);
+        assert!(mv(&mut conn, pid, r[4], at(Some(r[1]), Some(r[0]))));
+        assert_eq!(tracks(&conn, pid), ["0", "4", "1", "2", "3"]);
+        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2, 3, 4]);
     }
 
     #[test]
-    fn reorder_of_missing_position_is_a_noop() {
-        let (mut conn, pid) = fixture(3);
-        reorder(&mut conn, pid, 99, 0).unwrap();
-        assert_eq!(titles(&conn, pid), ["track 0", "track 1", "track 2"]);
+    fn a_removal_closes_the_gap() {
+        let (mut conn, pid) = fixture(4);
+        let r = rows(&conn, pid);
+        assert!(rm(&mut conn, pid, r[1]));
+        assert_eq!(tracks(&conn, pid), ["0", "2", "3"]);
+        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2]);
     }
 
+    /// A row or a place that is not there is nothing to do: a stale edit
+    /// never lands on a neighbour.
     #[test]
-    fn reorder_clamps_out_of_range_destination() {
+    fn a_row_or_place_that_is_gone_is_nothing() {
         let (mut conn, pid) = fixture(3);
-        reorder(&mut conn, pid, 0, 99).unwrap();
-        assert_eq!(titles(&conn, pid), ["track 1", "track 2", "track 0"]);
-        assert_eq!(positions(&conn, pid).unwrap(), [0, 1, 2]);
+        let r = rows(&conn, pid);
+        assert!(!mv(&mut conn, pid, (999, r[0].1), at(None, Some(r[2]))));
+        assert!(!mv(
+            &mut conn,
+            pid,
+            r[0],
+            at(Some((999, 0)), Some((998, 0)))
+        ));
+        assert!(
+            !mv(&mut conn, pid, r[0], at(Some(r[1]), None)),
+            "just below itself"
+        );
+        assert!(!rm(&mut conn, pid, (999, r[0].1)));
+        assert_eq!(tracks(&conn, pid), ["0", "1", "2"]);
+    }
+
+    /// A row keeps its id through a move and through the compaction a track
+    /// leaving the library makes; the library and a smart list have none.
+    #[test]
+    fn a_row_keeps_its_id_through_moves_and_compaction() {
+        let (mut conn, pid) = fixture(4);
+        let r = rows(&conn, pid);
+        let ids: std::collections::BTreeSet<i64> = r.iter().map(|x| x.0).collect();
+        assert_eq!(ids.len(), 4);
+        assert!(mv(&mut conn, pid, r[0], at(None, Some(r[3]))));
+        crate::library::remove(&mut conn, r[1].1).unwrap();
+        assert_eq!(rows(&conn, pid), [r[2], r[3], r[0]]);
+        assert!(list_media(&conn).unwrap().iter().all(|m| m.item.is_none()));
+        let rule = smart::Rule::parse(r#"{"v":1}"#).unwrap();
+        let s = create_smart(&conn, "all", &rule).unwrap();
+        let smart_rows = items(&conn, s).unwrap();
+        assert!(!smart_rows.is_empty() && smart_rows.iter().all(|m| m.item.is_none()));
+    }
+
+    /// A drop at the top sends no `after`, and one at the bottom no `before`.
+    #[test]
+    fn a_place_reads_as_the_window_sends_it() {
+        let p: Place = serde_json::from_str(r#"{"before":7,"after":null}"#).unwrap();
+        assert_eq!(
+            p,
+            Place {
+                before: Some(7),
+                after: None
+            }
+        );
+        let p: Place = serde_json::from_str(r#"{"after":3}"#).unwrap();
+        assert_eq!(
+            p,
+            Place {
+                before: None,
+                after: Some(3)
+            }
+        );
     }
 }

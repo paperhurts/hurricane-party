@@ -9,21 +9,25 @@
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Classic from "./Classic.svelte";
+  import { between, placeFor, rowKey } from "../lib/rows";
 
+  /** `item`: the row's own id in a hand list (#252, D197), which may hold a track twice. */
   type Item = {
     id: number;
     title: string;
     uploader: string | null;
     duration_s: number | null;
     kind: string;
-    position: number | null;
+    item: number | null;
   };
   /** `smart`: a list that fills itself from a rule, played and never edited by hand (#165). */
   type Queue = { name: string; listId: number | null; smart?: boolean; items: Item[] };
 
   let queue = $state<Queue>({ name: "", listId: null, items: [] });
   let nowId = $state<number | null>(null);
-  let selected = $state<number | null>(null);
+  // The row picked, by its key, so of a track in the list twice the copy
+  // clicked is the one REM and Delete take (#252).
+  let selectedKey = $state<string | null>(null);
 
   // The play order's switches as the library holds them (#115). The library
   // owns the order (D74); these buttons only ask it to change, and show what
@@ -35,10 +39,11 @@
   // A standing Play starts on the row picked here (#116, D97), so the library
   // hears of every pick: every press and every arrow key, not only a change
   // of selection. A click on the row already selected, after Stop, is still
-  // the person pointing at it, and a change-only report never said so.
-  function pick(id: number | null) {
-    selected = id;
-    emitTo("library", "queue:select", id).catch(() => {});
+  // the person pointing at it, and a change-only report never said so. The
+  // library hears the track, which is what the play order walks (D97).
+  function pick(t: Item) {
+    selectedKey = rowKey(t);
+    emitTo("library", "queue:select", t.id).catch(() => {});
   }
   // $state, so the effects below hear a new list when the rows are rebuilt.
   let rowsEl = $state<HTMLDivElement | undefined>();
@@ -73,11 +78,11 @@
   let nowLine = $derived(
     now ? (now.uploader ? `${now.uploader} — ${now.title}` : now.title) : queue.name || "Library",
   );
-  let selectedItem = $derived(queue.items.find((t) => t.id === selected) ?? null);
+  let selectedItem = $derived(queue.items.find((t) => rowKey(t) === selectedKey) ?? null);
   // Only a playlist made by hand has rows to remove; the library is not a
   // list, and a smart playlist's rule decides its rows (#165).
   let handList = $derived(queue.listId != null && !queue.smart);
-  let canRemove = $derived(handList && selectedItem?.position != null);
+  let canRemove = $derived(handList && selectedItem?.item != null);
 
   $effect(() => {
     const subs = [
@@ -130,9 +135,13 @@
     emitTo("library", "queue:play", t.id).catch(() => {});
   }
 
+  // By the list drawn, the row and its track, never a position: until the
+  // library's answer is drawn the positions here are the old ones, and a
+  // second edit by position hit whichever row had slid into the place (#252).
   function remove() {
-    if (!canRemove || !selectedItem) return;
-    emitTo("library", "queue:remove", selectedItem.position).catch(() => {});
+    const t = selectedItem;
+    if (!canRemove || !t || t.item == null || queue.listId == null) return;
+    emitTo("library", "queue:remove", { listId: queue.listId, item: t.item, id: t.id }).catch(() => {});
   }
 
   // ADD: a folder, scanned into the library; and when a real playlist is
@@ -204,31 +213,38 @@
   // group on the first click reorders windows through Win32, and WebView2
   // does not produce a dblclick across that (see Classic.svelte).
   let lastTapAt = 0;
-  let lastTapId = -1;
+  let lastTapKey = "";
 
   // Drag-to-reorder, on a real playlist: the lifted row and the insertion
   // index (0..n) it would land at. A press that moves a few pixels becomes
   // a drag; one that does not stays a click, so double-click still works.
-  let dragId = $state<number | null>(null);
+  let dragKey = $state<string | null>(null);
   let dropAt = $state<number | null>(null);
 
   function rowDown(e: PointerEvent, t: Item) {
     if (e.button !== 0) return;
     const now = Date.now();
-    const dbl = t.id === lastTapId && now - lastTapAt < 400;
+    const key = rowKey(t);
+    const dbl = key === lastTapKey && now - lastTapAt < 400;
     lastTapAt = dbl ? 0 : now;
-    lastTapId = dbl ? -1 : t.id;
-    pick(t.id);
+    lastTapKey = dbl ? "" : key;
+    pick(t);
     rowsEl?.focus();
     if (dbl) {
       play(t);
       return;
     }
-    if (!handList || t.position == null) return;
+    if (!handList || t.item == null || queue.listId == null) return;
 
     const row = e.currentTarget as HTMLElement;
     const startY = e.clientY;
-    const i = queue.items.indexOf(t);
+    // The list and the row as drawn now, and the rows either side of where
+    // it would land: names, not places, so a redraw mid-drag cannot move
+    // another row (#252).
+    const listId = queue.listId;
+    const item = t.item;
+    let above: number | null = null;
+    let below: number | null = item;
     let dragging = false;
     // Capture at the press, not at the threshold: the rows are ten pixels
     // tall, so the pointer has usually left the pressed row before it has
@@ -252,7 +268,7 @@
       if (!dragging) {
         if (Math.abs(ev.clientY - startY) < 4) return;
         dragging = true;
-        dragId = t.id;
+        dragKey = rowKey(t);
       }
       const rows = Array.from(rowsEl?.querySelectorAll<HTMLElement>(".row[data-idx]") ?? []);
       let at = rows.length;
@@ -264,6 +280,10 @@
         }
       }
       dropAt = at;
+      ({ above, below } = between(
+        rows.map((r) => (r.dataset.item ? Number(r.dataset.item) : null)),
+        at,
+      ));
     };
     const detach = () => {
       root.removeEventListener("pointermove", onMove);
@@ -279,7 +299,7 @@
       } catch {
         // The capture is gone already; nothing to release.
       }
-      dragId = null;
+      dragKey = null;
       dropAt = null;
     };
     const onCancel = (ev: PointerEvent) => {
@@ -294,12 +314,10 @@
       if (ev.pointerId !== e.pointerId) return;
       detach();
       if (!dragging) return;
-      const at = dropAt ?? i;
-      dragId = null;
+      dragKey = null;
       dropAt = null;
-      // The row leaves first, so a target below it shifts up by one.
-      const dest = at > i ? at - 1 : at;
-      if (dest !== i) emitTo("library", "queue:move", { from: t.position, to: dest }).catch(() => {});
+      const place = placeFor(item, above, below);
+      if (place) emitTo("library", "queue:move", { listId, item, id: t.id, place }).catch(() => {});
     };
     root.addEventListener("pointermove", onMove);
     root.addEventListener("pointerup", onUp);
@@ -338,11 +356,11 @@
   function onKey(e: KeyboardEvent) {
     const items = queue.items;
     if (items.length === 0) return;
-    const i = items.findIndex((t) => t.id === selected);
+    const i = items.findIndex((t) => rowKey(t) === selectedKey);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const j = i < 0 ? 0 : Math.min(items.length - 1, Math.max(0, i + (e.key === "ArrowDown" ? 1 : -1)));
-      pick(items[j].id);
+      pick(items[j]);
       rowsEl?.querySelector<HTMLElement>(".row.sel")?.scrollIntoView({ block: "nearest" });
     } else if (e.key === "Enter" && selectedItem) {
       e.preventDefault();
@@ -376,17 +394,18 @@
     onkeydown={onKey}
     onscroll={(e) => (rowsTop = e.currentTarget.scrollTop)}
   >
-    {#each queue.items as t, i (t.id + ":" + (t.position ?? "l"))}
+    {#each queue.items as t, i (rowKey(t))}
       <div
         class="row"
         class:now={t.id === nowId}
-        class:sel={t.id === selected}
-        class:lifted={dragId === t.id}
-        class:drop-before={dragId != null && dropAt === i}
-        class:drop-after={dragId != null && dropAt === queue.items.length && i === queue.items.length - 1}
+        class:sel={rowKey(t) === selectedKey}
+        class:lifted={dragKey === rowKey(t)}
+        class:drop-before={dragKey != null && dropAt === i}
+        class:drop-after={dragKey != null && dropAt === queue.items.length && i === queue.items.length - 1}
         data-idx={i}
+        data-item={t.item}
         role="option"
-        aria-selected={t.id === selected}
+        aria-selected={rowKey(t) === selectedKey}
         tabindex="-1"
         onpointerdown={(e) => rowDown(e, t)}
         title={t.title}
