@@ -80,12 +80,13 @@ windows = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
-# Linux, under XWayland (D181, D182). Both are already in the tree under tao
-# and tauri, at these versions, so naming them adds nothing to the build: gtk
-# for the size request a non-resizable window needs, x11-dl for the window
-# calls in platform/x11_impl.rs.
+# Linux, under XWayland (D181, D182). All three are already in the tree under
+# tao and tauri, at these versions, so naming them adds nothing to the build:
+# gtk for the size request a non-resizable window needs, x11-dl for the window
+# calls in platform/x11_impl.rs, libc for its processes, folders and drives.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+libc = "0.2"
 x11-dl = "2.21"
 
 # Warnings are errors everywhere this crate compiles: cargo build, cargo test,
