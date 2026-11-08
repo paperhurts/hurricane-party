@@ -3462,8 +3462,9 @@ pub fn set_double(app: &AppHandle, on: bool) {
     let (old_zoom, new_zoom) = if on { (1.0, 2.0) } else { (2.0, 1.0) };
     // D188: each window re-derived from the scale its size is in (D190), and
     // to the one it will be drawn at once grown or shrunk and kept in reach:
-    // a stack doubled on the seam at the foot of a display grows down, is
-    // lifted back up, and may land mostly on the other display. The scale
+    // a stack doubled at the foot of a display grows down and is lifted
+    // back up, and one that grew over a seam is kept on its own display
+    // (D200). The scale
     // under each window's top-left corner, as before, was neither. One push
     // (D191): what Windows makes of it, `reconcile` follows.
     let now = os_scales(app, &CLASSIC);
@@ -3529,9 +3530,81 @@ fn rezoom_settled(
             &|id, _| t.get(&id).copied().unwrap_or(s.scale),
             platform::platform().confines_to_work_area(),
         );
+        let l = keep_on_home_display(&s.layout, &l, &g, &s.monitors);
         let l = lift_onto_displays(&s.layout, &l, &g, &s.monitors, &|_| true);
         (l, (g, u))
     })
+}
+
+/// D200: a re-zoom keeps a group on the display it was on.
+///
+/// The owner's 1x to 2x in DISPLAY1's bottom-right corner, 5 px over the
+/// seam: the stack grew right from Main's corner, was judged mostly on
+/// DISPLAY2, took its 150 % and came out 825 wide astride the seam. So a
+/// group's home is the display holding the most of it before the re-zoom,
+/// and only where one display holds more than any other: a group split
+/// evenly across a seam has none and is left to D189. When the re-zoom
+/// carries more of the group off its home than was off it before, and the
+/// group fits in the home's work area, it is moved rigidly by the least
+/// that puts it wholly inside that area, so it is judged at the home's
+/// scale and no bond opens. A group too big for its home is left to D189.
+pub fn keep_on_home_display(
+    before: &Layout,
+    after: &Layout,
+    graph: &WindowGraph,
+    monitors: &[MonitorInfo],
+) -> Layout {
+    let overlap = |r: &Rect, n: &Rect| -> i64 {
+        let w = (r.right().min(n.right()) - r.x.max(n.x)).max(0) as i64;
+        let h = (r.bottom().min(n.bottom()) - r.y.max(n.y)).max(0) as i64;
+        w * h
+    };
+    // The share of the group's area off `home`, as a fraction, so a group
+    // that only grew in place reads the same as before.
+    let off = |l: &Layout, comp: &[WindowId], home: &Rect| -> f64 {
+        let (mut all, mut on) = (0i64, 0i64);
+        for r in comp.iter().filter_map(|id| l.get(id)) {
+            all += r.w as i64 * r.h as i64;
+            on += overlap(r, home);
+        }
+        if all == 0 {
+            0.0
+        } else {
+            (all - on) as f64 / all as f64
+        }
+    };
+    let mut out = after.clone();
+    let ids: Vec<WindowId> = after.keys().copied().collect();
+    for comp in graph.components(&ids) {
+        let held: Vec<i64> = monitors
+            .iter()
+            .map(|m| {
+                comp.iter()
+                    .filter_map(|id| before.get(id))
+                    .map(|r| overlap(r, &m.rect))
+                    .sum()
+            })
+            .collect();
+        let Some(&most) = held.iter().max() else {
+            continue;
+        };
+        if most == 0 || held.iter().filter(|a| **a == most).count() > 1 {
+            continue;
+        }
+        let home = monitors[held.iter().position(|a| *a == most).unwrap()];
+        if off(after, &comp, &home.rect) <= off(before, &comp, &home.rect) {
+            continue;
+        }
+        let Some(bounds) = bond::bounds(after, &comp) else {
+            continue;
+        };
+        if bounds.w > home.work.w || bounds.h > home.work.h {
+            continue;
+        }
+        let (dx, dy) = contain_translation(bounds, home.work);
+        bond::translate_group(&mut out, &comp, dx, dy);
+    }
+    out
 }
 
 /// D189: a group that a re-zoom grew off the displays is lifted back on.
@@ -6034,8 +6107,70 @@ mod tests {
         let (t, out, (g2, _)) = rezoom_settled(&s, &now, &now, 1.0, 2.0);
         assert!(t.values().all(|s| *s == 1.0), "{t:?}");
         assert_eq!(out[&PLAYLIST].bottom(), 1080, "lifted, not shoved right");
-        assert_eq!(out[&MAIN].x, s.layout[&MAIN].x);
+        // D200: and moved left, wholly onto DISPLAY1, rather than 150 px over
+        // the seam onto DISPLAY2.
+        assert_eq!(out[&MAIN].x, 2560 - 550);
         assert!(bond::violations(&g2, &out).is_empty());
+    }
+
+    #[test]
+    fn a_stack_doubled_in_a_corner_by_the_seam_stays_on_its_display() {
+        // D200, the owner's hand test: 1x, DISPLAY1's bottom-right corner,
+        // 5 px over the seam. Doubled, it used to land mostly on DISPLAY2
+        // and come out 825 wide at 150 % astride the seam.
+        let (mut l, g) = initial_layout(1.0, 1.0);
+        let m = l[&MAIN];
+        bond::translate_group(&mut l, &CLASSIC, 2290 - m.x, 1080 - 3 * 116 - m.y);
+        let s = WmState {
+            layout: l,
+            graph: g,
+            monitors: desk(),
+            scale: 1.0,
+            ..Default::default()
+        };
+        let now: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
+        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &now, 1.0, 2.0);
+        assert!(t.values().all(|s| *s == 1.0), "{t:?}");
+        for id in CLASSIC {
+            assert_eq!(out[&id].w, 550, "{id:?}");
+            assert!(out[&id].right() <= 2560, "{id:?} over the seam");
+        }
+        assert_eq!(out[&PLAYLIST].bottom(), 1080);
+        assert!(bond::violations(&g2, &out).is_empty());
+        // Back to 1x it stays where it is: shrinking takes nothing further
+        // off DISPLAY1.
+        let back = WmState {
+            layout: out.clone(),
+            graph: g2,
+            monitors: desk(),
+            scale: 1.0,
+            double: true,
+            ..Default::default()
+        };
+        let (_, small, _) = rezoom_settled(&back, &now, &now, 2.0, 1.0);
+        assert_eq!(small[&MAIN].x, out[&MAIN].x);
+    }
+
+    #[test]
+    fn a_group_split_evenly_over_a_seam_has_no_home() {
+        // D200 leaves a stack the person split across the seam to D189.
+        let ms = vec![mon(0, 0, 1000, 1000, 1.0), mon(1000, 0, 1000, 1000, 1.0)];
+        let mut before = Layout::new();
+        let mut after = Layout::new();
+        for (i, id) in CLASSIC.iter().enumerate() {
+            before.insert(*id, Rect::new(900, 100 + 116 * i as Px, 200, 116));
+            after.insert(*id, Rect::new(900, 100 + 232 * i as Px, 400, 232));
+        }
+        let g = stacked().graph;
+        assert_eq!(keep_on_home_display(&before, &after, &g, &ms), after);
+        // 10 px further onto the left display, it has a home there.
+        let shift = |l: &Layout| {
+            let mut l = l.clone();
+            bond::translate_group(&mut l, &CLASSIC, -10, 0);
+            l
+        };
+        let out = keep_on_home_display(&shift(&before), &shift(&after), &g, &ms);
+        assert_eq!(out[&MAIN].right(), 1000);
     }
 
     #[test]
