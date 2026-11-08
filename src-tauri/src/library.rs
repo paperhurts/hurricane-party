@@ -4,7 +4,7 @@
 //!
 //!   - **`remove`**: the row goes, the file stays. Its playlist memberships go
 //!     with it (the schema cascades) and each playlist closes the gap, so
-//!     positions stay dense the way `playlist::remove` keeps them. Adding the
+//!     positions stay dense the way `playlist::remove_item` keeps them. Adding the
 //!     folder or the URL again brings the row back, which is why there is no
 //!     undo.
 //!   - **`delete_file`**: the file goes. A separate call, made after the row is
@@ -332,8 +332,8 @@ mod tests {
 
         // The other rows are untouched (D80: one row, one identity).
         assert_eq!(titles(&conn), ["track 0", "track 2"]);
-        // The playlist lost the member and stayed dense, as playlist::remove
-        // would have left it.
+        // The playlist lost the member and stayed dense, as
+        // playlist::remove_item would have left it.
         assert_eq!(list_titles(&conn, pid), ["track 0", "track 2"]);
         assert_eq!(positions(&conn, pid), [0, 1]);
     }

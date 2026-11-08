@@ -102,6 +102,15 @@ pub fn is_resizable(id: WindowId) -> bool {
     id == PLAYLIST
 }
 
+/// D199: a window that can resize right now. A shaded one cannot: its strip
+/// is the height the shade gave it, as the corner grip already holds
+/// (`resize_start`), so a seam beside it is a move handle (D35). A splitter
+/// there used to hold the strip to the playlist's minimum on its first frame,
+/// growing it up and pushing everything above it off the top of the screen.
+fn can_resize(state: &WmState, id: WindowId) -> bool {
+    is_resizable(id) && !state.shaded.contains(&id)
+}
+
 // ---- monitors ---------------------------------------------------------------
 
 /// One display, in physical virtual-desktop coordinates.
@@ -728,6 +737,9 @@ fn own_built(app: &AppHandle) {
                 .iter()
                 .filter_map(|id| Some((handle(*id), *s.drawn_at.get(id)?)))
                 .collect(),
+            // The launch float is `register`'s and `confirm_layout`'s, once
+            // D58 has dropped the bonds the OS disagrees with (D196).
+            topmost: Vec::new(),
         }
     }; // D54: the lock is gone before any window call.
     apply_ownership(&plan);
@@ -786,6 +798,10 @@ pub fn show_classic_windows(app: &AppHandle) -> tauri::Result<()> {
             win.show()?;
         }
     }
+    // D196: shown, floated again. `register` floated a shaded Main's group
+    // while the windows were hidden, and the show rewrites their extended
+    // style. On X11 the handles are not read yet; `confirm_layout` floats.
+    refloat(app);
     // D58 needs the OS's answer, and on X11 there is none until the windows
     // are mapped, which is now, and asynchronously (D182). `register` left
     // the check for this moment; it runs off the main thread, which has to
@@ -854,23 +870,28 @@ fn confirm_layout(app: &AppHandle) {
             }
             s.layout.insert(*id, *got);
         }
-        let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
-            .into_iter()
-            .map(|(b, why)| {
-                eprintln!(
-                    "wm: dropping bond {:?}-{:?}, the OS disagrees: {why}",
-                    b.a, b.b
-                );
-                b.pair()
-            })
-            .collect();
-        for (a, b) in stale {
-            s.graph.break_bond(a, b);
-        }
+        drop_disagreeing(&mut s);
         plan_ownership(&s, Some(MAIN))
     };
     apply_ownership(&plan);
     emit_state(app);
+}
+
+/// D58: drop every bond the layout the OS reported does not bear out.
+fn drop_disagreeing(s: &mut WmState) {
+    let stale: Vec<(WindowId, WindowId)> = bond::violations(&s.graph, &s.layout)
+        .into_iter()
+        .map(|(b, why)| {
+            eprintln!(
+                "wm: dropping bond {:?}-{:?}, the OS disagrees: {why}",
+                b.a, b.b
+            );
+            b.pair()
+        })
+        .collect();
+    for (a, b) in stale {
+        s.graph.break_bond(a, b);
+    }
 }
 
 /// Read the windows back out of the OS and seed the state from what is actually
@@ -957,23 +978,8 @@ pub fn register(app: &AppHandle) -> tauri::Result<()> {
             }
         }
         s.layout = layout;
-        let violations = if unanswered {
-            Vec::new()
-        } else {
-            bond::violations(&s.graph, &s.layout)
-        };
-        let stale: Vec<(WindowId, WindowId)> = violations
-            .into_iter()
-            .map(|(b, why)| {
-                eprintln!(
-                    "wm: dropping bond {:?}-{:?}, the OS disagrees: {why}",
-                    b.a, b.b
-                );
-                b.pair()
-            })
-            .collect();
-        for (a, b) in stale {
-            s.graph.break_bond(a, b);
+        if !unanswered {
+            drop_disagreeing(&mut s);
         }
         plan_ownership(&s, Some(MAIN))
     }; // D54: lock dropped here, before a single OS call.
@@ -1002,6 +1008,9 @@ pub struct OwnPlan {
     /// read-back judges against and puts a window back to (D193). The root
     /// is put at the scale the window is at, not this.
     pub scales: Vec<(NativeWindow, f64)>,
+    /// Every classic window that has a handle, and whether it floats (D61):
+    /// applied on every apply, after the owners and before the raise (D196).
+    pub topmost: Vec<(NativeWindow, bool)>,
 }
 
 /// D41 + D42. Give every connected component its own hidden root, then force the
@@ -1028,6 +1037,9 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
 /// them. With nothing touched every group is raised, there being no one
 /// group to pick.
 pub fn plan_ownership_for(state: &WmState, active: Option<WindowId>, every_group: bool) -> OwnPlan {
+    // Only before `register` has read the roots. On X11 they are three NONE
+    // handles, not none (D182): filtering those out here would silently stop
+    // every float on Linux (D196).
     if state.roots.is_empty() {
         return OwnPlan::default();
     }
@@ -1078,6 +1090,7 @@ pub fn plan_ownership_for(state: &WmState, active: Option<WindowId>, every_group
             .iter()
             .filter_map(|id| Some((state.handle(*id), *state.drawn_at.get(id)?)))
             .collect(),
+        topmost: floats(state),
     }
 }
 
@@ -1125,6 +1138,7 @@ pub trait OwnerOps {
     fn scale(&self, w: NativeWindow) -> Option<f64>;
     fn put(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) -> bool;
     fn deliver(&self, w: NativeWindow);
+    fn float(&self, w: NativeWindow, on: bool);
 }
 
 impl<T: platform::WindowPlatform + ?Sized> OwnerOps for T {
@@ -1145,6 +1159,9 @@ impl<T: platform::WindowPlatform + ?Sized> OwnerOps for T {
     }
     fn deliver(&self, w: NativeWindow) {
         self.pump(w);
+    }
+    fn float(&self, w: NativeWindow, on: bool) {
+        self.set_topmost(w, on);
     }
 }
 
@@ -1185,6 +1202,19 @@ fn apply_ownership_on<P: OwnerOps + ?Sized>(p: &P, plan: &OwnPlan) {
                 land(p, w, *r, now, to, &plan.monitors);
             }
         }
+    }
+    // D196: Main's group floats while Main is shaded (D61), on every apply
+    // and not only where an owner changed: on X11 no owner ever changes, and
+    // at a Windows launch `own_built` set them all. After the owners, so a
+    // window leaving the group is under its own root when it is sunk. Before
+    // the raise, because HWND_TOPMOST lifts a window to the top of the
+    // topmost band: after it, it would undo the touched-window-last order
+    // (D193). The raise re-stacks every window straight after, so a float
+    // re-asserted on a click changes nothing in the z-order. On X11 a window
+    // this process never floated is not sunk at all, since Mutter raises a
+    // window on any change of state (x11_impl's `FLOATED`).
+    for (w, on) in &plan.topmost {
+        p.float(*w, *on);
     }
     for w in &plan.raise {
         p.lift(*w);
@@ -2013,7 +2043,10 @@ pub fn edges_for(state: &WmState, id: WindowId) -> Edges {
         if !b.touches(id) {
             continue;
         }
-        let live = Some(bond::splitter_is_live(is_resizable(b.a), is_resizable(b.b)));
+        let live = Some(bond::splitter_is_live(
+            can_resize(state, b.a),
+            can_resize(state, b.b),
+        ));
         match (b.edge, b.a == id) {
             (Edge::Right, true) => e.right = live,
             (Edge::Right, false) => e.left = live,
@@ -2122,7 +2155,7 @@ pub fn splitter_start(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
     let Some(b) = seam_on(&s, id, edge) else {
         return false;
     };
-    if !bond::splitter_is_live(is_resizable(b.a), is_resizable(b.b)) {
+    if !bond::splitter_is_live(can_resize(&s, b.a), can_resize(&s, b.b)) {
         return false;
     }
     begin_gesture(&mut s);
@@ -2352,22 +2385,27 @@ pub fn resize_end(app: &AppHandle) {
 /// The forcing raise afterwards is D42: ownership is applied lazily, so without
 /// it the z-order stays stale-but-plausible until the next click.
 pub fn demagnetize(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
-    let (broke, plan) = {
+    let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
-        let Some(b) = seam_on(&s, id, edge) else {
-            return false;
-        };
-        let broke = s.graph.break_bond(b.a, b.b);
-        let plan = plan_ownership(&s, Some(id));
-        (broke, plan)
+        break_seam(&mut s, id, edge)
+    }; // D54: lock dropped before any OS call.
+    let Some(plan) = plan else {
+        return false;
     };
-    if broke {
-        apply_ownership(&plan);
-        emit_state(app);
-        save_now(app);
-    }
-    broke
+    apply_ownership(&plan);
+    emit_state(app);
+    save_now(app);
+    true
+}
+
+/// Break the bond on `id`'s `edge`, and plan the ownership the two sides
+/// now need; None where there was no bond there to break.
+fn break_seam(s: &mut WmState, id: WindowId, edge: Edge) -> Option<OwnPlan> {
+    let b = seam_on(s, id, edge)?;
+    s.graph
+        .break_bond(b.a, b.b)
+        .then(|| plan_ownership(s, Some(id)))
 }
 
 // ---- windowshade -------------------------------------------------------------
@@ -2453,57 +2491,111 @@ pub fn topmost_set(state: &WmState) -> Vec<WindowId> {
     }
 }
 
+/// D196: `topmost_set` as the ownership plan carries it: every classic window
+/// that has a handle, and whether it floats, so an apply sinks a window that
+/// left the group as well as floating the ones in it. A window with no handle
+/// yet (X11 before `confirm_layout`) is left out.
+fn floats(state: &WmState) -> Vec<(NativeWindow, bool)> {
+    let on = topmost_set(state);
+    CLASSIC
+        .iter()
+        .map(|id| (state.handle(*id), on.contains(id)))
+        .filter(|(w, _)| !w.is_none())
+        .collect()
+}
+
+/// D196: the floats alone, for windows just shown again: a window shown again
+/// can only have lost one, and on Mutter a change of state also raises the
+/// window, so nothing is sunk, owned or raised.
+fn refloat_plan(state: &WmState) -> OwnPlan {
+    OwnPlan {
+        topmost: floats(state).into_iter().filter(|(_, on)| *on).collect(),
+        ..Default::default()
+    }
+}
+
+/// D196: float again what a show may have dropped: Windows rewrites a window's
+/// extended style as tao shows it, and EWMH has a window manager forget a
+/// withdrawn window's state.
+fn refloat(app: &AppHandle) {
+    let plan = refloat_plan(&app.state::<Wm>().0.lock().unwrap());
+    apply_ownership(&plan); // D54: the lock is gone.
+}
+
 /// Toggle windowshade on one window (D60).
 pub fn toggle_shade(app: &AppHandle, id: WindowId) {
-    let (layout, moved, topmost) = {
+    let confine = platform::platform().confines_to_work_area();
+    let (layout, moved, plan) = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
-
-        let shaded = !s.shaded.contains(&id);
-        if shaded {
-            // Remember the height to come back to before it is overwritten.
-            if let Some(h) = s.layout.get(&id).map(|r| r.h) {
-                s.unshaded_h.insert(id, h);
-            }
-            s.shaded.insert(id);
-        } else {
-            s.shaded.remove(&id);
-        }
-
-        let h = height_for(&s, id, shaded);
-        let graph = s.graph.clone();
-        let mut layout = s.layout.clone();
-        apply_shade(&mut layout, &graph, id, h);
-
-        // Everything in the component may have moved, plus the window itself.
-        let moved = s.graph.component(id);
-        // D182: a group that unshades past the work area's edge comes back
-        // inside it whole, rather than the window manager pushing one window.
-        if platform::platform().confines_to_work_area() {
-            let (dx, dy) = confine_clamp(&layout, &moved, &s.monitors);
-            bond::translate_group(&mut layout, &moved, dx, dy);
-        }
-        s.layout = layout.clone();
-        (layout, moved, topmost_set(&s))
+        shade(&mut s, id, confine)
     }; // D54: lock dropped before any OS call.
 
     push_to_os(app, &layout, &moved);
-
-    let p = platform::platform();
-    let handles: Vec<(NativeWindow, bool)> = {
-        let state = app.state::<Wm>();
-        let s = state.0.lock().unwrap();
-        CLASSIC
-            .iter()
-            .map(|id| (s.handle(*id), topmost.contains(id)))
-            .collect()
-    };
-    for (w, on) in handles {
-        p.set_topmost(w, on);
-    }
+    // D61 through the ownership plan, as every other change of group (D196).
+    apply_ownership(&plan);
 
     emit_state(app);
     save_now(app);
+}
+
+/// The shade toggled on `id`: the layout to push, the windows that moved,
+/// and the plan that floats or sinks Main's group (D61, D196).
+fn shade(s: &mut WmState, id: WindowId, confine: bool) -> (Layout, Vec<WindowId>, OwnPlan) {
+    let shaded = !s.shaded.contains(&id);
+    if shaded {
+        // Remember the height to come back to before it is overwritten.
+        if let Some(h) = s.layout.get(&id).map(|r| r.h) {
+            s.unshaded_h.insert(id, h);
+        }
+        s.shaded.insert(id);
+    } else {
+        s.shaded.remove(&id);
+    }
+
+    let h = height_for(s, id, shaded);
+    let graph = s.graph.clone();
+    let mut layout = s.layout.clone();
+    apply_shade(&mut layout, &graph, id, h);
+
+    // Everything in the component may have moved, plus the window itself.
+    let moved = s.graph.component(id);
+    let (dx, dy) = shade_clamp(
+        &s.layout,
+        &layout,
+        &moved,
+        &s.monitors,
+        s.zoom(),
+        shaded,
+        confine,
+    );
+    bond::translate_group(&mut layout, &moved, dx, dy);
+    s.layout = layout.clone();
+    (layout, moved, plan_ownership(s, Some(id)))
+}
+
+/// Where a shade toggle leaves the group it changed. An unshade grows the
+/// group down, so near the foot of a display it would grow past the work
+/// area. D182: where the window manager confines windows, the group comes
+/// back inside it whole, rather than the window manager pushing one window.
+/// D198: elsewhere, a group that was wholly inside the work area before an
+/// unshade is wholly inside it after, rising as far as it must; one already
+/// partly outside, which Windows allows, keeps every title bar within reach
+/// (D88) and is otherwise left where it was put.
+fn shade_clamp(
+    before: &Layout,
+    after: &Layout,
+    group: &[WindowId],
+    monitors: &[MonitorInfo],
+    zoom: f64,
+    shaded: bool,
+    confine: bool,
+) -> (Px, Px) {
+    if confine || (!shaded && confine_clamp(before, group, monitors) == (0, 0)) {
+        confine_clamp(after, group, monitors)
+    } else {
+        reach_clamp(after, group, monitors, zoom)
+    }
 }
 
 // ---- focus ------------------------------------------------------------------
@@ -2783,8 +2875,11 @@ fn settle(app: &AppHandle, ids: Vec<WindowId>) {
     std::thread::spawn(move || settle_now(&app, &ids));
 }
 
-/// `settle`, on the calling thread, which must not be the main thread.
+/// `settle`, on the calling thread, which must not be the main thread. The
+/// windows settled were shown again, so a shaded Main's group is floated
+/// again after (D196).
 fn settle_now(app: &AppHandle, ids: &[WindowId]) {
+    let mut settled = false;
     for _ in 0..40 {
         let (layout, handles) = {
             let state = app.state::<Wm>();
@@ -2811,12 +2906,16 @@ fn settle_now(app: &AppHandle, ids: &[WindowId]) {
             .map(|(id, _)| *id)
             .collect();
         if off.is_empty() {
-            return;
+            settled = true;
+            break;
         }
         push_to_os(app, &layout, &off);
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    eprintln!("wm: the windows did not settle where the model has them");
+    if !settled {
+        eprintln!("wm: the windows did not settle where the model has them");
+    }
+    refloat(app);
 }
 
 /// The windows Main's minimise takes with it: its component, Main last.
@@ -3380,8 +3479,9 @@ pub fn set_double(app: &AppHandle, on: bool) {
     let (old_zoom, new_zoom) = if on { (1.0, 2.0) } else { (2.0, 1.0) };
     // D188: each window re-derived from the scale its size is in (D190), and
     // to the one it will be drawn at once grown or shrunk and kept in reach:
-    // a stack doubled on the seam at the foot of a display grows down, is
-    // lifted back up, and may land mostly on the other display. The scale
+    // a stack doubled at the foot of a display grows down and is lifted
+    // back up, and one that grew over a seam is kept on its own display
+    // (D200). The scale
     // under each window's top-left corner, as before, was neither. One push
     // (D191): what Windows makes of it, `reconcile` follows.
     let now = os_scales(app, &CLASSIC);
@@ -3447,9 +3547,81 @@ fn rezoom_settled(
             &|id, _| t.get(&id).copied().unwrap_or(s.scale),
             platform::platform().confines_to_work_area(),
         );
+        let l = keep_on_home_display(&s.layout, &l, &g, &s.monitors);
         let l = lift_onto_displays(&s.layout, &l, &g, &s.monitors, &|_| true);
         (l, (g, u))
     })
+}
+
+/// D200: a re-zoom keeps a group on the display it was on.
+///
+/// The owner's 1x to 2x in DISPLAY1's bottom-right corner, 5 px over the
+/// seam: the stack grew right from Main's corner, was judged mostly on
+/// DISPLAY2, took its 150 % and came out 825 wide astride the seam. So a
+/// group's home is the display holding the most of it before the re-zoom,
+/// and only where one display holds more than any other: a group split
+/// evenly across a seam has none and is left to D189. When the re-zoom
+/// carries more of the group off its home than was off it before, and the
+/// group fits in the home's work area, it is moved rigidly by the least
+/// that puts it wholly inside that area, so it is judged at the home's
+/// scale and no bond opens. A group too big for its home is left to D189.
+pub fn keep_on_home_display(
+    before: &Layout,
+    after: &Layout,
+    graph: &WindowGraph,
+    monitors: &[MonitorInfo],
+) -> Layout {
+    let overlap = |r: &Rect, n: &Rect| -> i64 {
+        let w = (r.right().min(n.right()) - r.x.max(n.x)).max(0) as i64;
+        let h = (r.bottom().min(n.bottom()) - r.y.max(n.y)).max(0) as i64;
+        w * h
+    };
+    // The share of the group's area off `home`, as a fraction, so a group
+    // that only grew in place reads the same as before.
+    let off = |l: &Layout, comp: &[WindowId], home: &Rect| -> f64 {
+        let (mut all, mut on) = (0i64, 0i64);
+        for r in comp.iter().filter_map(|id| l.get(id)) {
+            all += r.w as i64 * r.h as i64;
+            on += overlap(r, home);
+        }
+        if all == 0 {
+            0.0
+        } else {
+            (all - on) as f64 / all as f64
+        }
+    };
+    let mut out = after.clone();
+    let ids: Vec<WindowId> = after.keys().copied().collect();
+    for comp in graph.components(&ids) {
+        let held: Vec<i64> = monitors
+            .iter()
+            .map(|m| {
+                comp.iter()
+                    .filter_map(|id| before.get(id))
+                    .map(|r| overlap(r, &m.rect))
+                    .sum()
+            })
+            .collect();
+        let Some(&most) = held.iter().max() else {
+            continue;
+        };
+        if most == 0 || held.iter().filter(|a| **a == most).count() > 1 {
+            continue;
+        }
+        let home = monitors[held.iter().position(|a| *a == most).unwrap()];
+        if off(after, &comp, &home.rect) <= off(before, &comp, &home.rect) {
+            continue;
+        }
+        let Some(bounds) = bond::bounds(after, &comp) else {
+            continue;
+        };
+        if bounds.w > home.work.w || bounds.h > home.work.h {
+            continue;
+        }
+        let (dx, dy) = contain_translation(bounds, home.work);
+        bond::translate_group(&mut out, &comp, dx, dy);
+    }
+    out
 }
 
 /// D189: a group that a re-zoom grew off the displays is lifted back on.
@@ -4534,6 +4706,15 @@ mod tests {
         scale: std::cell::RefCell<BTreeMap<NativeWindow, f64>>,
         held: std::cell::RefCell<BTreeMap<NativeWindow, f64>>,
         owner: std::cell::RefCell<BTreeMap<NativeWindow, NativeWindow>>,
+        /// The owners, floats and raises, in the order they were made (D196).
+        log: std::cell::RefCell<Vec<Call>>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Call {
+        Own(NativeWindow, NativeWindow),
+        Float(NativeWindow, bool),
+        Lift(NativeWindow),
     }
 
     impl OwnerOps for HeldBack {
@@ -4545,13 +4726,16 @@ mod tests {
                 .unwrap_or(NativeWindow::NONE)
         }
         fn own(&self, w: NativeWindow, owner: NativeWindow) {
+            self.log.borrow_mut().push(Call::Own(w, owner));
             self.owner.borrow_mut().insert(w, owner);
             let given = self.scale.borrow().get(&owner).copied();
             if let Some(s) = given {
                 self.scale.borrow_mut().insert(w, s);
             }
         }
-        fn lift(&self, _w: NativeWindow) {}
+        fn lift(&self, w: NativeWindow) {
+            self.log.borrow_mut().push(Call::Lift(w));
+        }
         fn scale(&self, w: NativeWindow) -> Option<f64> {
             self.scale.borrow().get(&w).copied()
         }
@@ -4565,6 +4749,9 @@ mod tests {
             if let Some(s) = held {
                 self.scale.borrow_mut().insert(w, s);
             }
+        }
+        fn float(&self, w: NativeWindow, on: bool) {
+            self.log.borrow_mut().push(Call::Float(w, on));
         }
     }
 
@@ -4583,6 +4770,7 @@ mod tests {
             monitors: plan_monitors,
             rects: vec![(pl, Rect::new(2600, 464, 825, 609))],
             scales: vec![(pl, 1.5)],
+            topmost: vec![],
         };
         (fake, plan)
     }
@@ -5130,6 +5318,21 @@ mod tests {
     }
 
     #[test]
+    fn a_shaded_playlists_seams_are_move_handles() {
+        // D199, found by hand: a double-click on a shaded playlist's strip
+        // that landed on the EQ seam started a splitter, whose minimum grew
+        // the strip up to 232 px and lifted Main and the EQ off the screen.
+        let mut s = stacked();
+        assert_eq!(edges_for(&s, PLAYLIST).top, Some(true));
+        s.shaded.insert(PLAYLIST);
+        assert_eq!(edges_for(&s, PLAYLIST).top, Some(false));
+        assert_eq!(edges_for(&s, EQ).bottom, Some(false));
+        // Expanded again, the seam is a splitter again.
+        s.shaded.remove(&PLAYLIST);
+        assert_eq!(edges_for(&s, EQ).bottom, Some(true));
+    }
+
+    #[test]
     fn an_unbonded_window_has_no_seams() {
         let mut s = stacked();
         s.graph = WindowGraph::new();
@@ -5429,6 +5632,213 @@ mod tests {
         s.shaded.insert(EQ);
         s.shaded.insert(PLAYLIST);
         assert!(topmost_set(&s).is_empty());
+    }
+
+    #[test]
+    fn a_window_docked_into_a_shaded_mains_group_floats_with_it() {
+        // #253, the re-dock (D196): the playlist dragged under the EQ of a
+        // shaded Main's group floats with it, through the plan the release
+        // applies. The owner first, then the floats, then the raise, the
+        // grabbed playlist last (D193).
+        let mut s = state_with(&[(MAIN, EQ)]);
+        s.shaded.insert(MAIN);
+        let mut away = s.layout.clone();
+        away.insert(PLAYLIST, s.layout[&PLAYLIST].translated(30, 0));
+        let drag = DragState {
+            moving: vec![PLAYLIST],
+            origin_layout: away,
+            origin_cursor: (0, 0),
+            origin_unshaded: BTreeMap::new(),
+            origin_scales: BTreeMap::new(),
+            grabbed: PLAYLIST,
+        };
+        let plan = finish_drag(&mut s, &drag);
+        assert_eq!(
+            plan.topmost,
+            vec![(nw(10), true), (nw(11), true), (nw(12), true)]
+        );
+        let fake = HeldBack::default();
+        fake.owner
+            .borrow_mut()
+            .extend([(nw(10), nw(90)), (nw(11), nw(90)), (nw(12), nw(91))]);
+        apply_ownership_on(&fake, &plan);
+        assert_eq!(
+            *fake.log.borrow(),
+            vec![
+                Call::Own(nw(12), nw(90)),
+                Call::Float(nw(10), true),
+                Call::Float(nw(11), true),
+                Call::Float(nw(12), true),
+                Call::Lift(nw(10)),
+                Call::Lift(nw(11)),
+                Call::Lift(nw(12)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_window_demagnetised_out_of_a_shaded_mains_group_is_sunk() {
+        // #253, the demagnetise (D196): the playlist that leaves stops
+        // floating; Main and the EQ go on.
+        let mut s = stacked();
+        s.shaded.insert(MAIN);
+        let plan = break_seam(&mut s, EQ, Edge::Bottom).unwrap();
+        assert_eq!(
+            plan.topmost,
+            vec![(nw(10), true), (nw(11), true), (nw(12), false)]
+        );
+        let fake = HeldBack::default();
+        fake.owner
+            .borrow_mut()
+            .extend([(nw(10), nw(90)), (nw(11), nw(90)), (nw(12), nw(90))]);
+        apply_ownership_on(&fake, &plan);
+        // The playlist that left is lifted beneath the group only where a
+        // raise stays within the app; on X11 it would come up over other
+        // apps, so it is not lifted at all (D201).
+        let mut want = vec![
+            Call::Own(nw(12), nw(91)),
+            Call::Float(nw(10), true),
+            Call::Float(nw(11), true),
+            Call::Float(nw(12), false),
+        ];
+        if !platform::platform().raises_over_other_apps() {
+            want.push(Call::Lift(nw(12)));
+        }
+        want.extend([Call::Lift(nw(10)), Call::Lift(nw(11))]);
+        assert_eq!(*fake.log.borrow(), want);
+        // No bond on Main's top: nothing to break, nothing to apply.
+        assert!(break_seam(&mut s, MAIN, Edge::Top).is_none());
+    }
+
+    #[test]
+    fn a_shaded_main_floats_what_the_os_check_leaves_of_its_group() {
+        // #253, the relaunch (D196): the launch plan floats Main's group as
+        // D58's check leaves it (`register` on Windows, `confirm_layout` on
+        // X11), never the seeded graph.
+        let mut s = stacked();
+        s.shaded.insert(MAIN);
+        drop_disagreeing(&mut s);
+        assert_eq!(
+            plan_ownership(&s, Some(MAIN)).topmost,
+            vec![(nw(10), true), (nw(11), true), (nw(12), true)]
+        );
+        // The OS put the playlist 7 px below the EQ: that bond goes, and the
+        // playlist does not float.
+        let mut s = stacked();
+        s.shaded.insert(MAIN);
+        let moved = s.layout[&PLAYLIST].translated(0, 7);
+        s.layout.insert(PLAYLIST, moved);
+        drop_disagreeing(&mut s);
+        assert_eq!(
+            plan_ownership(&s, Some(MAIN)).topmost,
+            vec![(nw(10), true), (nw(11), true), (nw(12), false)]
+        );
+    }
+
+    #[test]
+    fn a_window_system_without_owners_still_floats_the_group() {
+        // X11 (D182): no owner ever changes and the roots are NONE, so a
+        // float made only where an owner changed would never run on Linux.
+        let mut s = stacked();
+        s.shaded.insert(MAIN);
+        s.roots = vec![NativeWindow::NONE; 3];
+        let fake = HeldBack::default();
+        apply_ownership_on(&fake, &plan_ownership(&s, Some(MAIN)));
+        assert_eq!(
+            *fake.log.borrow(),
+            vec![
+                Call::Float(nw(10), true),
+                Call::Float(nw(11), true),
+                Call::Float(nw(12), true),
+                Call::Lift(nw(11)),
+                Call::Lift(nw(12)),
+                Call::Lift(nw(10)),
+            ]
+        );
+    }
+
+    #[test]
+    fn expanding_main_sinks_every_window() {
+        // The shade toggle goes through the same plan (D196), and every plan
+        // names every window, so an apply sinks a float no longer due.
+        let mut s = stacked();
+        let all = |on| vec![(nw(10), on), (nw(11), on), (nw(12), on)];
+        assert_eq!(shade(&mut s, MAIN, false).2.topmost, all(true));
+        assert_eq!(shade(&mut s, MAIN, false).2.topmost, all(false));
+        assert_eq!(plan_ownership(&stacked(), Some(EQ)).topmost, all(false));
+        let mut s = stacked();
+        assert_eq!(shade(&mut s, EQ, false).2.topmost, all(false));
+    }
+
+    #[test]
+    fn a_group_unshaded_at_the_foot_of_the_screen_rises_to_stay_on_it() {
+        // D198, found by hand on Windows: Main shaded at the bottom of the
+        // display and expanded there grew the EQ and the playlist off it.
+        let mut s = stacked();
+        s.monitors = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        let (shaded, _, _) = shade(&mut s, MAIN, false);
+        assert_eq!(shaded[&MAIN].y, 0, "a shade inside the area moves nothing");
+        // The shaded stack's foot on the taskbar.
+        let foot = bond::bounds(&s.layout, &CLASSIC).unwrap().bottom();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1032 - foot);
+        let (open, _, _) = shade(&mut s, MAIN, false);
+        assert_eq!(open[&PLAYLIST].bottom(), 1032);
+        assert_eq!(open[&MAIN].y, 1032 - 3 * 116);
+        assert!(CLASSIC.iter().all(|id| open[id].x == 0));
+        assert!(bond::violations(&s.graph, &open).is_empty());
+    }
+
+    #[test]
+    fn a_group_already_hanging_off_the_screen_keeps_its_bars_in_reach() {
+        // D198: Windows lets a group hang past the work area, and an unshade
+        // does not tidy it away; it only keeps every title bar in reach (D88).
+        let mut s = stacked();
+        s.monitors = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        shade(&mut s, MAIN, false);
+        let foot = bond::bounds(&s.layout, &CLASSIC).unwrap().bottom();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1032 + 50 - foot);
+        let (open, _, _) = shade(&mut s, MAIN, false);
+        assert_eq!(open[&PLAYLIST].y, 1032 - 14);
+        assert!(open[&PLAYLIST].bottom() > 1032);
+        // Where the window manager confines windows, it comes inside whole.
+        let mut s = stacked();
+        s.monitors = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        shade(&mut s, MAIN, true);
+        let foot = bond::bounds(&s.layout, &CLASSIC).unwrap().bottom();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1032 + 50 - foot);
+        let (open, _, _) = shade(&mut s, MAIN, true);
+        assert_eq!(open[&PLAYLIST].bottom(), 1032);
+    }
+
+    #[test]
+    fn a_window_without_a_handle_is_not_floated() {
+        // X11 between `register` and `confirm_layout`: no handles yet, so the
+        // float waits for the ones `confirm_layout` reads (D196).
+        let mut s = stacked();
+        s.shaded.insert(MAIN);
+        s.handles = vec![NativeWindow::NONE; 3];
+        assert!(floats(&s).is_empty());
+        assert!(plan_ownership(&s, Some(MAIN)).topmost.is_empty());
+        assert_eq!(refloat_plan(&s), OwnPlan::default());
+    }
+
+    #[test]
+    fn a_window_shown_again_is_only_ever_floated() {
+        // D196: after a show, the floats alone: no sink, which on Mutter is a
+        // raise over the focused app, and no owners or raise off the main
+        // thread.
+        let mut s = stacked();
+        s.shaded.insert(MAIN);
+        s.graph.break_bond(EQ, PLAYLIST);
+        assert_eq!(
+            refloat_plan(&s),
+            OwnPlan {
+                topmost: vec![(nw(10), true), (nw(11), true)],
+                ..Default::default()
+            }
+        );
+        s.shaded.remove(&MAIN);
+        assert_eq!(refloat_plan(&s), OwnPlan::default());
     }
 
     // ---- rescue (D57) -------------------------------------------------------
@@ -5745,8 +6155,70 @@ mod tests {
         let (t, out, (g2, _)) = rezoom_settled(&s, &now, &now, 1.0, 2.0);
         assert!(t.values().all(|s| *s == 1.0), "{t:?}");
         assert_eq!(out[&PLAYLIST].bottom(), 1080, "lifted, not shoved right");
-        assert_eq!(out[&MAIN].x, s.layout[&MAIN].x);
+        // D200: and moved left, wholly onto DISPLAY1, rather than 150 px over
+        // the seam onto DISPLAY2.
+        assert_eq!(out[&MAIN].x, 2560 - 550);
         assert!(bond::violations(&g2, &out).is_empty());
+    }
+
+    #[test]
+    fn a_stack_doubled_in_a_corner_by_the_seam_stays_on_its_display() {
+        // D200, the owner's hand test: 1x, DISPLAY1's bottom-right corner,
+        // 5 px over the seam. Doubled, it used to land mostly on DISPLAY2
+        // and come out 825 wide at 150 % astride the seam.
+        let (mut l, g) = initial_layout(1.0, 1.0);
+        let m = l[&MAIN];
+        bond::translate_group(&mut l, &CLASSIC, 2290 - m.x, 1080 - 3 * 116 - m.y);
+        let s = WmState {
+            layout: l,
+            graph: g,
+            monitors: desk(),
+            scale: 1.0,
+            ..Default::default()
+        };
+        let now: BTreeMap<WindowId, f64> = CLASSIC.iter().map(|id| (*id, 1.0)).collect();
+        let (t, out, (g2, _)) = rezoom_settled(&s, &now, &now, 1.0, 2.0);
+        assert!(t.values().all(|s| *s == 1.0), "{t:?}");
+        for id in CLASSIC {
+            assert_eq!(out[&id].w, 550, "{id:?}");
+            assert!(out[&id].right() <= 2560, "{id:?} over the seam");
+        }
+        assert_eq!(out[&PLAYLIST].bottom(), 1080);
+        assert!(bond::violations(&g2, &out).is_empty());
+        // Back to 1x it stays where it is: shrinking takes nothing further
+        // off DISPLAY1.
+        let back = WmState {
+            layout: out.clone(),
+            graph: g2,
+            monitors: desk(),
+            scale: 1.0,
+            double: true,
+            ..Default::default()
+        };
+        let (_, small, _) = rezoom_settled(&back, &now, &now, 2.0, 1.0);
+        assert_eq!(small[&MAIN].x, out[&MAIN].x);
+    }
+
+    #[test]
+    fn a_group_split_evenly_over_a_seam_has_no_home() {
+        // D200 leaves a stack the person split across the seam to D189.
+        let ms = vec![mon(0, 0, 1000, 1000, 1.0), mon(1000, 0, 1000, 1000, 1.0)];
+        let mut before = Layout::new();
+        let mut after = Layout::new();
+        for (i, id) in CLASSIC.iter().enumerate() {
+            before.insert(*id, Rect::new(900, 100 + 116 * i as Px, 200, 116));
+            after.insert(*id, Rect::new(900, 100 + 232 * i as Px, 400, 232));
+        }
+        let g = stacked().graph;
+        assert_eq!(keep_on_home_display(&before, &after, &g, &ms), after);
+        // 10 px further onto the left display, it has a home there.
+        let shift = |l: &Layout| {
+            let mut l = l.clone();
+            bond::translate_group(&mut l, &CLASSIC, -10, 0);
+            l
+        };
+        let out = keep_on_home_display(&shift(&before), &shift(&after), &g, &ms);
+        assert_eq!(out[&MAIN].right(), 1000);
     }
 
     #[test]
