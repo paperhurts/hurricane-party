@@ -370,22 +370,37 @@ pub fn ensure_root(conn: &Connection, label: &str, path: &str) -> Result<i64, Db
 /// and every file in it two rows (#78). Everything that stores a root goes
 /// through here first. Plain string work, no platform gate: the prefix never
 /// occurs elsewhere, so stripping it is a no-op there.
+///
+/// A POSIX path loses any trailing `/` too, as `canonicalize` gives it: a
+/// stick's root followed to a new mount was once stored as `/mnt/stick/`, and
+/// the next scan of `/mnt/stick` became a second root beside it. Only a path
+/// starting with `/` is touched, so a Windows path, `E:\` included, is not.
 pub fn plain_path(s: &str) -> String {
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")
     } else if let Some(rest) = s.strip_prefix(r"\\?\") {
         rest.to_string()
+    } else if s.starts_with('/') {
+        match s.trim_end_matches('/') {
+            "" => "/".to_string(),
+            t => t.to_string(),
+        }
     } else {
         s.to_string()
     }
 }
 
-/// Fold roots stored in verbatim form into their plain twins. Run on open.
+/// Fold roots stored in a form a scan would not store into their plain
+/// twins. Run on open.
 ///
-/// A verbatim root with no twin is simply renamed. One with a twin gives it
-/// every row the twin does not already have; the rest are the same file
+/// A root with no twin is simply renamed. A verbatim root with a twin gives
+/// it every row the twin does not already have; the rest are the same file
 /// twice, so the copy's playlist entries and history move to the survivor and
-/// the copy goes. Returns how many roots were touched.
+/// the copy goes. A root stored with a trailing `/` was put there by `follow`
+/// (D194), and its twin by a rescan after it, so it is folded the way
+/// `follow` folds one: the twin into the root that was followed, which keeps
+/// the rows its downloads, checks and EQ wrote on, then takes the plain path.
+/// Returns how many roots were touched.
 pub fn normalize_roots(conn: &mut Connection) -> Result<usize, DbError> {
     let roots: Vec<(i64, String)> = {
         let mut st = conn.prepare("SELECT id, path FROM library_roots ORDER BY id")?;
@@ -406,14 +421,18 @@ pub fn normalize_roots(conn: &mut Connection) -> Result<usize, DbError> {
                 |r| r.get(0),
             )
             .optional()?;
+        let followed = path.starts_with('/');
         match twin {
-            None => {
+            Some(twin) if !followed => fold_root(&tx, *id, twin)?,
+            twin => {
+                if let Some(twin) = twin {
+                    fold_root(&tx, twin, *id)?;
+                }
                 tx.execute(
                     "UPDATE library_roots SET path = ?1 WHERE id = ?2",
                     rusqlite::params![plain, id],
                 )?;
             }
-            Some(twin) => fold_root(&tx, *id, twin)?,
         }
         touched += 1;
     }
@@ -663,11 +682,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_path_strips_the_verbatim_prefix_and_nothing_else() {
+    fn plain_path_strips_the_verbatim_prefix_and_a_posix_trailing_slash() {
         assert_eq!(plain_path(r"\\?\C:\dev\mp3"), r"C:\dev\mp3");
         assert_eq!(plain_path(r"\\?\UNC\nas\music"), r"\\nas\music");
         assert_eq!(plain_path(r"C:\dev\mp3"), r"C:\dev\mp3");
+        assert_eq!(plain_path(r"E:\"), r"E:\");
         assert_eq!(plain_path("/home/x/music"), "/home/x/music");
+        assert_eq!(plain_path("/mnt/stick/"), "/mnt/stick");
+        assert_eq!(plain_path("/mnt/stick//"), "/mnt/stick");
+        assert_eq!(plain_path("/"), "/");
     }
 
     #[test]
@@ -960,5 +983,52 @@ mod tests {
             .filter_map(|r| r.ok())
             .collect();
         assert_eq!(members, [keep, only_verbatim]);
+    }
+
+    /// The shape a Linux follow left (D194): the stick's root followed to
+    /// `/mnt/stick/`, then a rescan of it stored `/mnt/stick` as a second
+    /// root with every file again. The followed root keeps its rows, which
+    /// the playlist names, takes the one the rescan alone found, and the
+    /// plain path.
+    #[test]
+    fn a_followed_root_with_a_trailing_slash_takes_its_rescanned_twin_in() {
+        let mut conn = fresh();
+        root(&conn, 3, "/mnt/stick/");
+        root(&conn, 4, "/mnt/stick");
+        let keep = track(&conn, 3, "both.mp3");
+        let dup = track(&conn, 4, "both.mp3");
+        let only_rescan = track(&conn, 4, "only-in-4.mp3");
+        let pid = crate::playlist::create(&conn, "p").unwrap();
+        crate::playlist::add(&conn, pid, keep).unwrap();
+        crate::playlist::add(&conn, pid, dup).unwrap();
+
+        assert_eq!(normalize_roots(&mut conn).unwrap(), 1);
+
+        let roots: Vec<(i64, String)> = conn
+            .prepare("SELECT id, path FROM library_roots")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(roots, [(3, "/mnt/stick".to_string())]);
+        let mut rows: Vec<(i64, i64)> = conn
+            .prepare("SELECT id, root_id FROM media")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        rows.sort();
+        assert_eq!(rows, [(keep, 3), (only_rescan, 3)]);
+        let members: Vec<i64> = conn
+            .prepare("SELECT media_id FROM playlist_items WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([pid], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(members, [keep, keep]);
+        assert_eq!(normalize_roots(&mut conn).unwrap(), 0);
     }
 }

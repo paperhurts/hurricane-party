@@ -2124,10 +2124,12 @@ pub fn run() {
 
             // #78: a root the scanner stored in Windows' verbatim form is the
             // same folder the download pipeline stored plain, and it doubled
-            // every row. Fold them before anything reads the library.
+            // every row; and a root a Linux follow stored with a trailing `/`
+            // is the same folder its next rescan stored without one (D194).
+            // Fold them before anything reads the library.
             match db::normalize_roots(&mut conn) {
                 Ok(0) => {}
-                Ok(n) => eprintln!("folded {n} verbatim library root(s) into their plain form"),
+                Ok(n) => eprintln!("put {n} library root(s) into their plain form"),
                 Err(e) => eprintln!("root normalization failed: {e}"),
             }
 
