@@ -11,7 +11,7 @@
   import Oscilloscope from "./Oscilloscope.svelte";
   import Kaleidoscope from "./Kaleidoscope.svelte";
   import { untrack } from "svelte";
-  import { AudioGraph } from "../lib/audio";
+  import { AudioGraph, clampVolume } from "../lib/audio";
   import { sourceFromAnalyser, VizCapture, type Demand } from "../lib/vizstream";
   import { loadEq, type EqState } from "../lib/eq";
   import { kaleidoscopeFor, rampWorn, viscolor, visualizerFor } from "../lib/theme";
@@ -142,7 +142,7 @@
   // gesture starts suspended, and resume() is the same call either way.
   function ensureGraph() {
     if (!graph) {
-      graph = new AudioGraph(audio);
+      graph = new AudioGraph(audio, vol);
       graph.applyEq(eq);
       analyser = graph.analyser;
       viz.source = sourceFromAnalyser(graph.stream);
@@ -236,8 +236,11 @@
   }
 
   function setVol(frac: number) {
-    vol = Math.min(1, Math.max(0, frac));
-    audio.volume = vol;
+    vol = clampVolume(frac);
+    // The graph's gain, not the element's volume, which WebKitGTK does not
+    // apply through the graph (#267). Before the first play there is no
+    // graph, and `ensureGraph` builds it at `vol`.
+    graph?.setVolume(vol);
     push();
   }
 
