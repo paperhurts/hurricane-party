@@ -18,8 +18,8 @@ The fastest way in is the example: [`examples/viz_bars.py`](../examples/viz_bars
 | Platform | Control channel |
 |---|---|
 | Windows | `\\.\pipe\hurricane-party` |
-| macOS | `~/Library/Caches/hurricane-party.sock` (a Unix domain socket, when the player runs there, #187) |
-| Linux | `$XDG_RUNTIME_DIR/hurricane-party.sock` (likewise) |
+| Linux | `$XDG_RUNTIME_DIR/hurricane-party.sock`, a Unix domain socket (#187). Without `$XDG_RUNTIME_DIR`, in a folder of the user's own in the temp folder, `hurricane-party-<uid>`. Only the user's own programs are let in |
+| macOS | `~/Library/Caches/hurricane-party.sock` (likewise, when the player runs there, #187) |
 
 **Local only, by design** (D9, D11, D29). The pipe is not a network port, and the player opens no connection for any of this. A rig on another machine (a Raspberry Pi behind an LED strip, say) is fed by a program the person runs on the player's machine, which reads the viz stream and forwards it however it likes. That relay is theirs; the player stays offline.
 
@@ -114,7 +114,7 @@ An **event** is a line with an `event` field and no `id`, sent when something ch
 
 Every field is optional. A value out of range is refused by name, never clamped: a frame shaped differently from what a rig asked for is worse than an error it can read.
 
-`stream` is a pipe of this subscriber's own, `\\.\pipe\hurricane-party-viz-` and four hex digits. It exists before the reply is sent, and the client has ten seconds to open it. **The subscription belongs to that pipe, not to the control connection:** close the control connection and the frames keep coming; close the viz pipe and the subscription ends. Several subscribers at different sizes and rates are fine. What the frames hold is under [Viz channel](#viz-channel).
+`stream` is a pipe of this subscriber's own, `\\.\pipe\hurricane-party-viz-` and four hex digits; on Linux a socket beside the control one, `$XDG_RUNTIME_DIR/hurricane-party-viz-7f3a.sock`. Open whatever `stream` says. It exists before the reply is sent, and the client has ten seconds to open it. **The subscription belongs to that pipe, not to the control connection:** close the control connection and the frames keep coming; close the viz pipe and the subscription ends. Several subscribers at different sizes and rates are fine. What the frames hold is under [Viz channel](#viz-channel).
 
 ### Layout
 

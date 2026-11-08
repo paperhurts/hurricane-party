@@ -75,7 +75,7 @@ Say what you want. The session builds it and lands it.
 
 Any session, any model. There is no planning session and no execution session; a session is disposable and the branch and PR carry everything.
 
-**Gates:** `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on each crate (the app, `hp-control`, `hp-companion`), then `pnpm check`. Warnings are errors in every crate (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI (`.github/workflows/ci.yml`) agree by construction. A shipping exe comes from the `release-exe` workflow on demand.
+**Gates:** `cargo fmt --check`, `cargo clippy --all-targets`, and `cargo test` on each crate (the app, `hp-control`, `hp-companion`), then `pnpm check`, `pnpm test` and `pnpm build`. Warnings are errors in every crate (`[lints]` in each `Cargo.toml`) and the compiler is pinned by `rust-toolchain.toml`, so the local run and CI (`.github/workflows/ci.yml`) agree by construction. A shipping exe comes from the `release-exe` workflow on demand.
 
 **Issues** are the list of work that isn't happening yet. An issue body is the spec; there is no brief format to fill in first. Work that's happening now doesn't need an issue; the PR is enough.
 

@@ -47,8 +47,7 @@ pub const MIN_BANDS: u8 = 8;
 pub const MAX_BANDS: u8 = 128;
 
 /// The name of subscriber `id`'s pipe. A Windows name, ungated for the same
-/// reason as `PIPE_NAME`; the POSIX paths in control-api.md land when a port
-/// does.
+/// reason as `PIPE_NAME`; `socket_path` places it where there are sockets.
 pub fn pipe_name(id: u32) -> String {
     format!(r"\\.\pipe\hurricane-party-viz-{id:04x}")
 }

@@ -358,22 +358,29 @@ pub fn spawn_server(app: AppHandle, broadcaster: Broadcaster) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     tauri::async_runtime::spawn(async move {
-        loop {
-            // A fresh instance per connection: create it *before* accepting so
-            // there is never a window where a client finds no pipe listening.
-            let listener = match pipe::listen(hp_control::PIPE_NAME, pipe::ListenOptions::default())
-            {
-                Ok(l) => l,
+        // Tried again every few seconds while another player holds the
+        // name, and said once, not on every try.
+        let mut said = None;
+        let mut listener = loop {
+            match pipe::listen(hp_control::PIPE_NAME, pipe::ListenOptions::default()) {
+                Ok(l) => break l,
                 Err(e) => {
-                    eprintln!("hp-control: can't create pipe: {e}");
+                    let e = e.to_string();
+                    if said.as_ref() != Some(&e) {
+                        eprintln!("hp-control: can't create pipe: {e}");
+                        said = Some(e);
+                    }
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
                 }
-            };
+            }
+        };
+        loop {
             let server = match listener.accept().await {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("hp-control: accept failed: {e}");
+                    // A failure that repeats (out of file handles) must not spin.
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     continue;
                 }
             };

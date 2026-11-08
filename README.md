@@ -78,6 +78,7 @@ pnpm tauri dev                                              # run it
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\dev.ps1   # the same, after freeing port 1420 and a stray exe (#11)
 pnpm check                                                  # svelte-check + tsc
 pnpm test                                                   # vitest: the frontend's pure logic (skins, importer, palette, play order, analyser)
+pnpm build                                                  # the frontend's production bundle, as the release build makes it
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\shot.ps1 -Match main   # screenshot a running window into .sid/
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\keyout.ps1 -In art.jpg -Out icon.png   # flat background -> transparent square PNG, then: pnpm tauri icon icon.png
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sheet.ps1 -In frames -Out pack -Frame 64   # pose PNGs -> companion sprite sheet + manifest (docs/companion-art.md)
