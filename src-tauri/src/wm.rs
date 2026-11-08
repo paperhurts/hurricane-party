@@ -1212,14 +1212,27 @@ fn apply_ownership_on<P: OwnerOps + ?Sized>(p: &P, plan: &OwnPlan) {
 /// boundary makes Windows send `WM_DPICHANGED`, and tao responds by rescaling
 /// the window to preserve its *logical* size — so doing it the other way round
 /// leaves the window 1.5x too big on the far side of the seam.
+///
+/// D202: where the desktop has one scale (X11) no move crosses a scale, and
+/// there the size goes first. Mutter confines each window to the work area
+/// as it is placed (D182), so a playlist moved down at its old, taller size
+/// was clamped up past the EQ, and the shrink after it kept it there. Sized
+/// first, at its old place, a window the window manager clamps in between
+/// is put where the layout has it by the move after.
 pub fn push_to_os(app: &AppHandle, layout: &Layout, ids: &[WindowId]) {
+    let size_first = platform::platform().one_scale();
     for id in ids {
         let (Some(r), Some(win)) = (layout.get(id), app.get_webview_window(label_of(*id))) else {
             continue;
         };
-        let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
+        if !size_first {
+            let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
+        }
         platform::hold_size(&win, r.w as u32, r.h as u32);
         let _ = win.set_size(PhysicalSize::new(r.w as u32, r.h as u32));
+        if size_first {
+            let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
+        }
     }
 }
 
