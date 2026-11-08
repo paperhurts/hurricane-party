@@ -143,6 +143,12 @@ pub trait WindowPlatform: Send + Sync {
         false
     }
 
+    /// D202: after the toolkit has been asked to put a window at a rect, ask
+    /// the window system for the whole rect in one request, where the
+    /// toolkit's move and resize reach it apart and the window manager judges
+    /// each on its own. Nothing where they arrive as one.
+    fn settle_rect(&self, _w: NativeWindow, _x: i32, _y: i32, _cx: i32, _cy: i32) {}
+
     /// D192: deliver a change of scale the window system has waiting for this
     /// window now, rather than whenever the UI thread next pumps messages.
     /// On the UI thread only: at launch, and when a window's owner is set

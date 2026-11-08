@@ -1213,26 +1213,21 @@ fn apply_ownership_on<P: OwnerOps + ?Sized>(p: &P, plan: &OwnPlan) {
 /// the window to preserve its *logical* size — so doing it the other way round
 /// leaves the window 1.5x too big on the far side of the seam.
 ///
-/// D202: where the desktop has one scale (X11) no move crosses a scale, and
-/// there the size goes first. Mutter confines each window to the work area
-/// as it is placed (D182), so a playlist moved down at its old, taller size
-/// was clamped up past the EQ, and the shrink after it kept it there. Sized
-/// first, at its old place, a window the window manager clamps in between
-/// is put where the layout has it by the move after.
+/// D202: then the whole rect once more, in one request where the platform
+/// has one (`settle_rect`). On X11 GTK sends the move at once and the resize
+/// later, and Mutter confines each request to the work area on its own
+/// (D182), so a playlist moved down at its old, taller size was clamped up
+/// over the EQ, and the shrink after kept it there.
 pub fn push_to_os(app: &AppHandle, layout: &Layout, ids: &[WindowId]) {
-    let size_first = platform::platform().one_scale();
+    let p = platform::platform();
     for id in ids {
         let (Some(r), Some(win)) = (layout.get(id), app.get_webview_window(label_of(*id))) else {
             continue;
         };
-        if !size_first {
-            let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
-        }
+        let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
         platform::hold_size(&win, r.w as u32, r.h as u32);
         let _ = win.set_size(PhysicalSize::new(r.w as u32, r.h as u32));
-        if size_first {
-            let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
-        }
+        p.settle_rect(platform::handle_of(&win), r.x, r.y, r.w, r.h);
     }
 }
 

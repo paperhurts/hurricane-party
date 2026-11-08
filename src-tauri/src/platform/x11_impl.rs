@@ -14,7 +14,7 @@
 use super::stub::StubPlatform;
 use super::{DiskSpace, NativeWindow, TreeEvent, TreeWatch, Volume, WindowPlatform};
 use std::ffi::CString;
-use std::os::raw::{c_long, c_uchar, c_ulong};
+use std::os::raw::{c_long, c_uchar, c_uint, c_ulong};
 use std::ptr;
 use std::sync::Mutex;
 use x11_dl::xlib;
@@ -169,6 +169,21 @@ impl WindowPlatform for X11Platform {
     /// `XRaiseWindow`. Mutter honours it from the app that has the focus,
     /// which is the app the person just clicked, so raising each member on a
     /// click brings the whole group up together (D182).
+    /// `XMoveResizeWindow`: Mutter confines the rect it is asked for as one,
+    /// so a window shrinking as it moves down is judged where it lands. GTK
+    /// sends the move at once and the resize later, and the move at the old
+    /// size was clamped up (D202). GTK's own resize, when it comes, asks for
+    /// the same size.
+    fn settle_rect(&self, w: NativeWindow, x: i32, y: i32, cx: i32, cy: i32) {
+        if w.is_none() || cx <= 0 || cy <= 0 {
+            return;
+        }
+        with_x(|xl, d| unsafe {
+            (xl.XMoveResizeWindow)(d, w.0 as c_ulong, x, y, cx as c_uint, cy as c_uint);
+            (xl.XFlush)(d);
+        });
+    }
+
     fn raise_no_activate(&self, w: NativeWindow) {
         if w.is_none() {
             return;
