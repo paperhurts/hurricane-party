@@ -1660,7 +1660,7 @@ pub fn drag_end(app: &AppHandle, release: bool) {
     if release {
         drag_move(app);
     }
-    let (plan, fitted) = {
+    let plan = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
         let Some(drag) = s.drag.take() else {
@@ -1676,49 +1676,12 @@ pub fn drag_end(app: &AppHandle, release: bool) {
             return;
         };
 
-        let plan = finish_drag(&mut s, &drag);
-        let confine = platform::platform().confines_to_work_area();
-        (
-            plan,
-            if confine {
-                fit_docked(&mut s, drag.grabbed)
-            } else {
-                None
-            },
-        )
+        finish_drag(&mut s, &drag)
     };
-    if let Some((layout, moved)) = fitted {
-        push_to_os(app, &layout, &moved);
-    }
     apply_ownership(&plan);
     emit_state(app);
     save_now(app);
     reconcile_later(app);
-}
-
-/// D202: a dock that made the grabbed window's group taller than the work
-/// area, where windows are confined: the playlist gives up the height, the
-/// group is clamped inside as D182 asks, and the layout to push and the
-/// windows it moved are returned. None when nothing had to change.
-fn fit_docked(s: &mut WmState, grabbed: WindowId) -> Option<(Layout, Vec<WindowId>)> {
-    let group = s.graph.component(grabbed);
-    let mut layout = s.layout.clone();
-    let scale = playlist_scale(s);
-    if !fit_playlist(
-        &mut layout,
-        &s.graph,
-        &group,
-        &s.shaded,
-        &s.monitors,
-        s.zoom(),
-        scale,
-    ) {
-        return None;
-    }
-    let (dx, dy) = confine_clamp(&layout, &group, &s.monitors);
-    bond::translate_group(&mut layout, &group, dx, dy);
-    s.layout = layout.clone();
-    Some((layout, group))
 }
 
 /// D191: may the gesture for press `seq` in window `id` start? Not once its
@@ -6156,22 +6119,6 @@ mod tests {
         shade(&mut w, MAIN, false);
         let (layout, _, _) = shade(&mut w, MAIN, false);
         assert_eq!(layout[&PLAYLIST].h, 812);
-    }
-
-    /// D202: a dock that leaves the group too tall, the playlist docked
-    /// under the EQ: on the release the playlist is fitted, the group is
-    /// clamped inside, and the state holds what is pushed.
-    #[test]
-    fn a_dock_that_leaves_a_group_too_tall_fits_it_on_the_release() {
-        let mut s = too_tall();
-        let (layout, moved) = fit_docked(&mut s, PLAYLIST).unwrap();
-        assert_eq!(layout, s.layout);
-        assert_eq!(moved.len(), 3);
-        let b = bond::bounds(&layout, &CLASSIC).unwrap();
-        assert!(b.y >= 32 && b.bottom() <= 1080, "{b:?}");
-        assert!(bond::violations(&s.graph, &layout).is_empty());
-        // A group that fits is nothing to do.
-        assert!(fit_docked(&mut s, MAIN).is_none());
     }
 
     #[test]
