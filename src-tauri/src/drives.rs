@@ -112,9 +112,18 @@ pub fn whereabouts(root: &Known, mounts: &[PathBuf]) -> Option<String> {
         return None;
     }
     let rel = root.volume_rel.as_deref()?;
+    // A root at the top of its drive has an empty `rel`, and joining "" adds
+    // a separator: `/mnt/stick/` on Linux, which is not the `/mnt/stick` a
+    // scan of that folder stores, so the next scan made it a second root.
     let mut found = mounts
         .iter()
-        .map(|m| m.join(rel))
+        .map(|m| {
+            if rel.is_empty() {
+                m.clone()
+            } else {
+                m.join(rel)
+            }
+        })
         .filter(|p| p.is_dir())
         .map(|p| db::plain_path(&p.to_string_lossy()));
     let first = found.next()?;
@@ -337,6 +346,22 @@ mod tests {
             .map(|m| m.id)
             .collect();
         assert_eq!(members, [first, first]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A root that is the whole stick (`/run/media/me/STICK`, or `E:\`) is
+    /// followed to the new mount as a scan of it would store it, so a rescan
+    /// finds the same root rather than making a second one beside it.
+    #[test]
+    fn a_root_at_the_top_of_its_drive_follows_as_a_scan_would_store_it() {
+        let base = scratch("top");
+        std::fs::create_dir_all(base.join("F")).unwrap();
+        let conn = library();
+        root(&conn, 1, &base.join("E").to_string_lossy());
+        conn.execute("UPDATE library_roots SET volume = 'X', volume_rel = ''", [])
+            .unwrap();
+        let to = whereabouts(&one(&conn, 1), &[base.join("F")]).unwrap();
+        assert_eq!(to, db::plain_path(&base.join("F").to_string_lossy()));
         let _ = std::fs::remove_dir_all(&base);
     }
 }
