@@ -1023,6 +1023,20 @@ pub struct OwnPlan {
 /// none of it can lift a window above another application's foreground window
 /// without stealing focus, which we will not do.
 pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
+    plan_ownership_for(
+        state,
+        active,
+        !platform::platform().raises_over_other_apps(),
+    )
+}
+
+/// [`plan_ownership`] with the platform's answer given: `every_group` raises
+/// the groups the person did not touch as well, beneath the touched one.
+/// Where a raise lifts a window over other apps (X11, D201) only the touched
+/// group is raised, so a window put apart from it stays where it was behind
+/// them. With nothing touched every group is raised, there being no one
+/// group to pick.
+pub fn plan_ownership_for(state: &WmState, active: Option<WindowId>, every_group: bool) -> OwnPlan {
     // Only before `register` has read the roots. On X11 they are three NONE
     // handles, not none (D182): filtering those out here would silently stop
     // every float on Linux (D196).
@@ -1042,6 +1056,9 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
     }
 
     let mut order: Vec<&Vec<WindowId>> = comps.iter().collect();
+    if let (Some(a), false) = (active, every_group) {
+        order.retain(|c| c.contains(&a));
+    }
     if let Some(a) = active {
         // Stable sort, false before true: the active component ends up last, so
         // it is raised last and therefore sits on top.
@@ -4811,13 +4828,42 @@ mod tests {
 
     #[test]
     fn every_window_is_raised_exactly_once() {
+        // Where a raise stays within the app (Windows, D42), every group.
         let s = state_with(&[(MAIN, EQ)]);
-        let plan = plan_ownership(&s, Some(MAIN));
+        let plan = plan_ownership_for(&s, Some(MAIN), true);
         let mut seen = plan.raise.clone();
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), plan.raise.len());
         assert_eq!(plan.raise.len(), CLASSIC.len());
+    }
+
+    /// D201, #266: on X11 a raise from the focused app lifts a window over
+    /// every other app, so a click on Main brought a playlist the person had
+    /// demagnetised up over the app they were working in. Only the touched
+    /// group is raised there, the touched window last.
+    #[test]
+    fn where_a_raise_lifts_over_other_apps_only_the_touched_group_is_raised() {
+        let s = state_with(&[(MAIN, EQ)]);
+        assert_eq!(
+            plan_ownership_for(&s, Some(MAIN), false).raise,
+            [nw(11), nw(10)]
+        );
+        assert_eq!(
+            plan_ownership_for(&s, Some(PLAYLIST), false).raise,
+            [nw(12)]
+        );
+        // The owners and the floats are every window's still: only the
+        // raise is narrowed.
+        assert_eq!(
+            plan_ownership_for(&s, Some(PLAYLIST), false).owners,
+            plan_ownership_for(&s, Some(PLAYLIST), true).owners
+        );
+        // Nothing touched: no one group to pick, so every window.
+        assert_eq!(
+            plan_ownership_for(&s, None, false).raise.len(),
+            CLASSIC.len()
+        );
     }
 
     #[test]
@@ -5646,18 +5692,20 @@ mod tests {
             .borrow_mut()
             .extend([(nw(10), nw(90)), (nw(11), nw(90)), (nw(12), nw(90))]);
         apply_ownership_on(&fake, &plan);
-        assert_eq!(
-            *fake.log.borrow(),
-            vec![
-                Call::Own(nw(12), nw(91)),
-                Call::Float(nw(10), true),
-                Call::Float(nw(11), true),
-                Call::Float(nw(12), false),
-                Call::Lift(nw(12)),
-                Call::Lift(nw(10)),
-                Call::Lift(nw(11)),
-            ]
-        );
+        // The playlist that left is lifted beneath the group only where a
+        // raise stays within the app; on X11 it would come up over other
+        // apps, so it is not lifted at all (D201).
+        let mut want = vec![
+            Call::Own(nw(12), nw(91)),
+            Call::Float(nw(10), true),
+            Call::Float(nw(11), true),
+            Call::Float(nw(12), false),
+        ];
+        if !platform::platform().raises_over_other_apps() {
+            want.push(Call::Lift(nw(12)));
+        }
+        want.extend([Call::Lift(nw(10)), Call::Lift(nw(11))]);
+        assert_eq!(*fake.log.borrow(), want);
         // No bond on Main's top: nothing to break, nothing to apply.
         assert!(break_seam(&mut s, MAIN, Edge::Top).is_none());
     }

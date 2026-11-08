@@ -163,6 +163,17 @@ pub trait WindowPlatform: Send + Sync {
         true
     }
 
+    /// D201: does raising a window from the focused app lift it over other
+    /// applications' windows? Then only the group the person touched is
+    /// raised, since lifting the others would bring a window they had put
+    /// apart from it up over whatever they were working in. Windows keeps
+    /// each group under its own hidden root (D41) and raises every window to
+    /// force the order D42 asks for, and a group apart stays behind another
+    /// app there (#257's hand test).
+    fn raises_over_other_apps(&self) -> bool {
+        false
+    }
+
     /// D185: must the player's media come over loopback HTTP rather than the
     /// asset protocol? WebKitGTK plays through GStreamer, which cannot fetch
     /// from a custom scheme; WebView2 can.
