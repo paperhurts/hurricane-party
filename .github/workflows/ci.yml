@@ -11,7 +11,10 @@
 # There is no Tauri build here: the three sidecars are 230 MB and gitignored,
 # and tauri-build only checks that each bundle.externalBin path exists before
 # copying it, so zero-byte stand-ins are enough to compile and run the tests.
-# The shipping exe is a separate, on-demand workflow: release-exe.yml.
+# The shipping exe is a separate, on-demand workflow: release-exe.yml. Its
+# first step, the frontend's production build, does run here: svelte-check
+# and tsc read the types, and only Vite resolves every import and asset the
+# way the bundle needs them.
 name: checks
 
 on:
@@ -97,6 +100,11 @@ jobs:
       - name: vitest
         if: ${{ !cancelled() }}
         run: pnpm test
+      # What tauri build runs first (beforeBuildCommand), so a bundle Vite
+      # cannot make fails on the pull request, not at release.
+      - name: vite build
+        if: ${{ !cancelled() }}
+        run: pnpm build
 
   linux:
     runs-on: ubuntu-24.04

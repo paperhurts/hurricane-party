@@ -24,6 +24,8 @@ Issue: $ARGUMENTS (when omitted, the number in the branch name `<type>/<n>-...`,
        cargo test --manifest-path crates/hp-control/Cargo.toml
        cargo test --manifest-path crates/hp-companion/Cargo.toml
        pnpm check
+       pnpm test
+       pnpm build
 
    Warnings are errors in every crate and the compiler is pinned, so this list is exactly what CI runs. A docs-only diff skips the Rust gates.
 3. **Commit** in the repo's voice: `<area>: <what> (#n)`, the why in the body. End the message with the `Co-Authored-By` line only: no `Claude-Session:` trailer, no session URL, no machine paths or personal data. The repo is public.
