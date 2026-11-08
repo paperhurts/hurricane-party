@@ -3,8 +3,16 @@
 // hand-rolled DSP. It lives in the classic Main window, which owns playback;
 // every other window is a remote.
 //
-//   <audio> -> source -> preamp -> lowshelf -> peaking x8 -> highshelf
-//           -> trim -> stream -> analyser -> destination
+//   <audio> -> source -> volume -> preamp -> lowshelf -> peaking x8
+//           -> highshelf -> trim -> stream -> analyser -> destination
+//
+// The volume is a gain of the graph's own, not the element's `volume`
+// (#267): WebKitGTK, the webview on Linux, does not apply an element's
+// volume to what its MediaElementAudioSourceNode passes on, so there the
+// slider did nothing (measured on 2.52: the same level at 1, 0.1 and 0).
+// WebView2 applies it at the source, which is where this node sits, so on
+// Windows the sound and the analysers are what they were. The element
+// stays at 1.
 //
 // The order is the architecture doc's "Equalizer spec" (D21). The trim sits
 // after the filters so it can pay for their boost; the analysers sit after
@@ -30,12 +38,18 @@ const RAMP_S = 0.02;
  */
 const IDLE_MS = 2000;
 
+/** A volume as the slider means it: 0..1, and silence for anything not a number. */
+export function clampVolume(v: number): number {
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+}
+
 export class AudioGraph {
   readonly ctx: AudioContext;
   readonly analyser: AnalyserNode;
   /** The viz channel's unsmoothed tap; see the constructor. */
   readonly stream: AnalyserNode;
   private readonly source: MediaElementAudioSourceNode;
+  private readonly volume: GainNode;
   private readonly preamp: GainNode;
   private readonly filters: BiquadFilterNode[];
   private readonly trim: GainNode;
@@ -44,10 +58,14 @@ export class AudioGraph {
   /** A suspend in flight: `resume()` must queue behind it, not skip it. */
   private suspending = false;
 
-  constructor(el: HTMLMediaElement) {
+  /** `volume` is the slider's 0..1, in place before the first sound. */
+  constructor(el: HTMLMediaElement, volume = 1) {
     this.ctx = new AudioContext();
     this.source = this.ctx.createMediaElementSource(el);
+    el.volume = 1;
 
+    this.volume = this.ctx.createGain();
+    this.volume.gain.value = clampVolume(volume);
     this.preamp = this.ctx.createGain();
     this.filters = BANDS.map((hz, i) => {
       const f = this.ctx.createBiquadFilter();
@@ -78,7 +96,14 @@ export class AudioGraph {
     this.stream.maxDecibels = this.analyser.maxDecibels;
 
     let node: AudioNode = this.source;
-    for (const next of [this.preamp, ...this.filters, this.trim, this.stream, this.analyser]) {
+    for (const next of [
+      this.volume,
+      this.preamp,
+      ...this.filters,
+      this.trim,
+      this.stream,
+      this.analyser,
+    ]) {
       node.connect(next);
       node = next;
     }
@@ -121,6 +146,11 @@ export class AudioGraph {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
+  }
+
+  /** The slider's 0..1, ramped like the EQ so a drag does not zipper. */
+  setVolume(v: number): void {
+    this.volume.gain.setTargetAtTime(clampVolume(v), this.ctx.currentTime, RAMP_S);
   }
 
   /** Push an EQ state into the chain. Off means every stage at unity. */
