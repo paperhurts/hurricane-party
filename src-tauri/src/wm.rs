@@ -102,6 +102,15 @@ pub fn is_resizable(id: WindowId) -> bool {
     id == PLAYLIST
 }
 
+/// D199: a window that can resize right now. A shaded one cannot: its strip
+/// is the height the shade gave it, as the corner grip already holds
+/// (`resize_start`), so a seam beside it is a move handle (D35). A splitter
+/// there used to hold the strip to the playlist's minimum on its first frame,
+/// growing it up and pushing everything above it off the top of the screen.
+fn can_resize(state: &WmState, id: WindowId) -> bool {
+    is_resizable(id) && !state.shaded.contains(&id)
+}
+
 // ---- monitors ---------------------------------------------------------------
 
 /// One display, in physical virtual-desktop coordinates.
@@ -2017,7 +2026,10 @@ pub fn edges_for(state: &WmState, id: WindowId) -> Edges {
         if !b.touches(id) {
             continue;
         }
-        let live = Some(bond::splitter_is_live(is_resizable(b.a), is_resizable(b.b)));
+        let live = Some(bond::splitter_is_live(
+            can_resize(state, b.a),
+            can_resize(state, b.b),
+        ));
         match (b.edge, b.a == id) {
             (Edge::Right, true) => e.right = live,
             (Edge::Right, false) => e.left = live,
@@ -2126,7 +2138,7 @@ pub fn splitter_start(app: &AppHandle, id: WindowId, edge: Edge) -> bool {
     let Some(b) = seam_on(&s, id, edge) else {
         return false;
     };
-    if !bond::splitter_is_live(is_resizable(b.a), is_resizable(b.b)) {
+    if !bond::splitter_is_live(can_resize(&s, b.a), can_resize(&s, b.b)) {
         return false;
     }
     begin_gesture(&mut s);
@@ -5183,6 +5195,21 @@ mod tests {
         // a splitter, so it is offered as a move handle and never as a resize.
         let s = stacked();
         assert_eq!(edges_for(&s, MAIN).bottom, Some(false));
+        assert_eq!(edges_for(&s, EQ).bottom, Some(true));
+    }
+
+    #[test]
+    fn a_shaded_playlists_seams_are_move_handles() {
+        // D199, found by hand: a double-click on a shaded playlist's strip
+        // that landed on the EQ seam started a splitter, whose minimum grew
+        // the strip up to 232 px and lifted Main and the EQ off the screen.
+        let mut s = stacked();
+        assert_eq!(edges_for(&s, PLAYLIST).top, Some(true));
+        s.shaded.insert(PLAYLIST);
+        assert_eq!(edges_for(&s, PLAYLIST).top, Some(false));
+        assert_eq!(edges_for(&s, EQ).bottom, Some(false));
+        // Expanded again, the seam is a splitter again.
+        s.shaded.remove(&PLAYLIST);
         assert_eq!(edges_for(&s, EQ).bottom, Some(true));
     }
 
