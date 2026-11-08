@@ -1014,6 +1014,20 @@ pub struct OwnPlan {
 /// none of it can lift a window above another application's foreground window
 /// without stealing focus, which we will not do.
 pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
+    plan_ownership_for(
+        state,
+        active,
+        !platform::platform().raises_over_other_apps(),
+    )
+}
+
+/// [`plan_ownership`] with the platform's answer given: `every_group` raises
+/// the groups the person did not touch as well, beneath the touched one.
+/// Where a raise lifts a window over other apps (X11, D201) only the touched
+/// group is raised, so a window put apart from it stays where it was behind
+/// them. With nothing touched every group is raised, there being no one
+/// group to pick.
+pub fn plan_ownership_for(state: &WmState, active: Option<WindowId>, every_group: bool) -> OwnPlan {
     if state.roots.is_empty() {
         return OwnPlan::default();
     }
@@ -1030,6 +1044,9 @@ pub fn plan_ownership(state: &WmState, active: Option<WindowId>) -> OwnPlan {
     }
 
     let mut order: Vec<&Vec<WindowId>> = comps.iter().collect();
+    if let (Some(a), false) = (active, every_group) {
+        order.retain(|c| c.contains(&a));
+    }
     if let Some(a) = active {
         // Stable sort, false before true: the active component ends up last, so
         // it is raised last and therefore sits on top.
@@ -4623,13 +4640,42 @@ mod tests {
 
     #[test]
     fn every_window_is_raised_exactly_once() {
+        // Where a raise stays within the app (Windows, D42), every group.
         let s = state_with(&[(MAIN, EQ)]);
-        let plan = plan_ownership(&s, Some(MAIN));
+        let plan = plan_ownership_for(&s, Some(MAIN), true);
         let mut seen = plan.raise.clone();
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), plan.raise.len());
         assert_eq!(plan.raise.len(), CLASSIC.len());
+    }
+
+    /// D201, #266: on X11 a raise from the focused app lifts a window over
+    /// every other app, so a click on Main brought a playlist the person had
+    /// demagnetised up over the app they were working in. Only the touched
+    /// group is raised there, the touched window last.
+    #[test]
+    fn where_a_raise_lifts_over_other_apps_only_the_touched_group_is_raised() {
+        let s = state_with(&[(MAIN, EQ)]);
+        assert_eq!(
+            plan_ownership_for(&s, Some(MAIN), false).raise,
+            [nw(11), nw(10)]
+        );
+        assert_eq!(
+            plan_ownership_for(&s, Some(PLAYLIST), false).raise,
+            [nw(12)]
+        );
+        // The owners and the floats are every window's still: only the
+        // raise is narrowed.
+        assert_eq!(
+            plan_ownership_for(&s, Some(PLAYLIST), false).owners,
+            plan_ownership_for(&s, Some(PLAYLIST), true).owners
+        );
+        // Nothing touched: no one group to pick, so every window.
+        assert_eq!(
+            plan_ownership_for(&s, None, false).raise.len(),
+            CLASSIC.len()
+        );
     }
 
     #[test]

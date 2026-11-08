@@ -272,6 +272,13 @@ impl WindowPlatform for X11Platform {
         false
     }
 
+    /// Mutter honours `XRaiseWindow` from the focused app over every other
+    /// app's windows, and no hidden root ties a group together (D182), so a
+    /// raise of another group lifts it over them too (D201).
+    fn raises_over_other_apps(&self) -> bool {
+        true
+    }
+
     /// WebKitGTK's GStreamer cannot play from the asset protocol (D185).
     fn media_over_loopback(&self) -> bool {
         true
