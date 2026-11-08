@@ -263,6 +263,14 @@ pub trait WindowPlatform: Send + Sync {
     /// and optical drives are not asked, since asking a mapped drive whose
     /// server has gone can take a long time and a disc is not a root.
     fn mounts_of(&self, id: &str) -> Vec<std::path::PathBuf>;
+
+    /// #275: is a root's folder there, on the drive it was marked with
+    /// (`volume`, the id `volume_of` gave)? Where a drive's folder goes with
+    /// the drive (a Windows drive letter), the folder being there is enough.
+    fn root_here(&self, path: &std::path::Path, volume: Option<&str>) -> bool {
+        let _ = volume;
+        path.is_dir()
+    }
 }
 
 /// A drive, by the id that follows it between letters (D143).

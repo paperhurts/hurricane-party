@@ -349,7 +349,7 @@ pub struct Root {
 
 pub fn list_roots(conn: &rusqlite::Connection) -> Result<Vec<Root>, DbError> {
     let mut st = conn.prepare(
-        "SELECT r.id, r.label, r.path,
+        "SELECT r.id, r.label, r.path, r.volume,
                 (SELECT COUNT(*) FROM media m WHERE m.root_id = r.id) AS count,
                 (SELECT COALESCE(SUM(filesize), 0) FROM media m
                   WHERE m.root_id = r.id AND filesize > 0) AS bytes
@@ -357,10 +357,12 @@ pub fn list_roots(conn: &rusqlite::Connection) -> Result<Vec<Root>, DbError> {
     )?;
     let rows = st.query_map([], |r| {
         let path: String = r.get("path")?;
+        let volume: Option<String> = r.get("volume")?;
         Ok(Root {
             id: r.get("id")?,
             label: r.get("label")?,
-            present: PathBuf::from(&path).is_dir(),
+            // #275: there on its own drive, as the drive watch judges it.
+            present: crate::drives::here(&path, volume.as_deref()),
             path,
             count: r.get("count")?,
             bytes: r.get("bytes")?,

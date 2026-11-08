@@ -350,10 +350,16 @@ pub fn now() -> i64 {
 }
 
 /// Ensure a row for the default library root and return its id.
+///
+/// A root met again here is a folder being scanned or downloaded into, so it
+/// is there: it forgets the drive it was marked with, and the drive watch
+/// marks the one it is on now (#275). Otherwise a stick formatted afresh, a
+/// new id at the old mount point, would be judged not there for good.
 pub fn ensure_root(conn: &Connection, label: &str, path: &str) -> Result<i64, DbError> {
     conn.execute(
         "INSERT INTO library_roots (label, path, last_seen_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT(path) DO UPDATE SET last_seen_at = excluded.last_seen_at",
+         ON CONFLICT(path) DO UPDATE SET last_seen_at = excluded.last_seen_at,
+                                         volume = NULL, volume_rel = NULL",
         rusqlite::params![label, path, now()],
     )?;
     Ok(conn.query_row(
@@ -916,6 +922,29 @@ mod tests {
         )
         .unwrap();
         conn.last_insert_rowid()
+    }
+
+    /// #275: a root scanned or downloaded into again forgets the drive it
+    /// was marked with, so the drive watch marks the one it is on now; a
+    /// stick formatted afresh at the old mount point is not lost for good.
+    #[test]
+    fn a_root_met_again_forgets_its_drive() {
+        let conn = fresh();
+        let id = ensure_root(&conn, "stick", "/mnt/stick").unwrap();
+        conn.execute(
+            "UPDATE library_roots SET volume = 'OLD-0001', volume_rel = '' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        assert_eq!(ensure_root(&conn, "stick", "/mnt/stick").unwrap(), id);
+        let (v, rel): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT volume, volume_rel FROM library_roots WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((v, rel), (None, None));
     }
 
     #[test]
