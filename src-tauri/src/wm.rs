@@ -1646,7 +1646,7 @@ pub fn drag_end(app: &AppHandle, release: bool) {
     if release {
         drag_move(app);
     }
-    let plan = {
+    let (plan, fitted) = {
         let state = app.state::<Wm>();
         let mut s = state.0.lock().unwrap();
         let Some(drag) = s.drag.take() else {
@@ -1662,12 +1662,49 @@ pub fn drag_end(app: &AppHandle, release: bool) {
             return;
         };
 
-        finish_drag(&mut s, &drag)
+        let plan = finish_drag(&mut s, &drag);
+        let confine = platform::platform().confines_to_work_area();
+        (
+            plan,
+            if confine {
+                fit_docked(&mut s, drag.grabbed)
+            } else {
+                None
+            },
+        )
     };
+    if let Some((layout, moved)) = fitted {
+        push_to_os(app, &layout, &moved);
+    }
     apply_ownership(&plan);
     emit_state(app);
     save_now(app);
     reconcile_later(app);
+}
+
+/// D202: a dock that made the grabbed window's group taller than the work
+/// area, where windows are confined: the playlist gives up the height, the
+/// group is clamped inside as D182 asks, and the layout to push and the
+/// windows it moved are returned. None when nothing had to change.
+fn fit_docked(s: &mut WmState, grabbed: WindowId) -> Option<(Layout, Vec<WindowId>)> {
+    let group = s.graph.component(grabbed);
+    let mut layout = s.layout.clone();
+    let scale = playlist_scale(s);
+    if !fit_playlist(
+        &mut layout,
+        &s.graph,
+        &group,
+        &s.shaded,
+        &s.monitors,
+        s.zoom(),
+        scale,
+    ) {
+        return None;
+    }
+    let (dx, dy) = confine_clamp(&layout, &group, &s.monitors);
+    bond::translate_group(&mut layout, &group, dx, dy);
+    s.layout = layout.clone();
+    Some((layout, group))
 }
 
 /// D191: may the gesture for press `seq` in window `id` start? Not once its
@@ -2543,6 +2580,20 @@ fn shade(s: &mut WmState, id: WindowId, confine: bool) -> (Layout, Vec<WindowId>
 
     // Everything in the component may have moved, plus the window itself.
     let moved = s.graph.component(id);
+    // D202: an unshade that makes the group taller than the work area takes
+    // it out of the playlist, where windows are confined.
+    if confine && !shaded {
+        let scale = playlist_scale(s);
+        fit_playlist(
+            &mut layout,
+            &graph,
+            &moved,
+            &s.shaded,
+            &s.monitors,
+            s.zoom(),
+            scale,
+        );
+    }
     let (dx, dy) = shade_clamp(
         &s.layout,
         &layout,
@@ -3901,6 +3952,71 @@ pub fn reach_layout(
     zoom: f64,
 ) -> Layout {
     keep_layout_in_reach(layout, graph, monitors, zoom, false)
+}
+
+/// D202, #265: where the window manager confines windows, a group taller
+/// than its work area cannot be clamped inside it whole, and Mutter then
+/// pushes one window up over another, leaving the layout and the screen
+/// apart. So an expanded playlist in the group gives up height, in its
+/// steps (D30) and never below its minimum, until the group fits, and the
+/// windows bonded below it come up with it (`apply_shade`'s walk). A
+/// shrink is kept only if the group got shorter: a playlist beside a taller
+/// stack keeps its size. A shaded playlist has no height to give. Whatever
+/// is still too tall is left to `confine_clamp`, as before. True when the
+/// playlist was shrunk. `scale` is the one the playlist's size is in.
+pub fn fit_playlist(
+    layout: &mut Layout,
+    graph: &WindowGraph,
+    group: &[WindowId],
+    shaded: &BTreeSet<WindowId>,
+    monitors: &[MonitorInfo],
+    zoom: f64,
+    scale: f64,
+) -> bool {
+    if !group.contains(&PLAYLIST) || shaded.contains(&PLAYLIST) {
+        return false;
+    }
+    let (Some(bounds), Some(r)) = (bond::bounds(layout, group), layout.get(&PLAYLIST).copied())
+    else {
+        return false;
+    };
+    let Some(m) = nearest_monitor(monitors, bounds) else {
+        return false;
+    };
+    let works: Vec<Rect> = monitors.iter().map(|m| m.work).collect();
+    let excess = bounds.h - merged_rect_for(&works, m.work, bounds).h;
+    if excess <= 0 {
+        return false;
+    }
+    let (base, step) = (CHROME_H * zoom, PLAYLIST_STEP_H * zoom);
+    let mut n = (((r.h as f64 / scale) - base) / step).round().max(0.0) as i32;
+    while n > 0 && bond::d40::stepped(base, step, n, scale) > r.h - excess {
+        n -= 1;
+    }
+    let h = bond::d40::stepped(base, step, n, scale);
+    if h >= r.h {
+        return false;
+    }
+    let mut fitted = layout.clone();
+    apply_shade(&mut fitted, graph, PLAYLIST, h);
+    match bond::bounds(&fitted, group) {
+        Some(after) if after.h < bounds.h => {
+            *layout = fitted;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The scale the playlist's size is in, as `height_for` reads it.
+fn playlist_scale(s: &WmState) -> f64 {
+    let corner = s
+        .layout
+        .get(&PLAYLIST)
+        .and_then(|r| monitor_at(&s.monitors, r.x, r.y))
+        .map(|m| m.scale)
+        .unwrap_or(s.scale);
+    derived_scale(s, PLAYLIST, corner)
 }
 
 /// D182: the rigid translation that keeps every member of a group wholly
@@ -5907,6 +6023,141 @@ mod tests {
         assert!(CLASSIC.iter().all(|id| out[id].x == 67));
         assert!(bond::violations(&s.graph, &out).is_empty());
         assert_eq!(keep_layout_in_reach(&l, &s.graph, &ms, 1.0, false), l);
+    }
+
+    /// #265's desk: the 2x stack with its playlist 10 steps tall (812 px),
+    /// its top on the work area's, 1276 px against a work area 1048 tall.
+    fn too_tall() -> WmState {
+        let (mut layout, graph) = initial_layout(1.0, 2.0);
+        let pl = layout[&PLAYLIST];
+        layout.insert(PLAYLIST, Rect { h: 812, ..pl });
+        let (dx, dy) = (1370 - layout[&MAIN].x, 32 - layout[&MAIN].y);
+        bond::translate_group(&mut layout, &CLASSIC, dx, dy);
+        WmState {
+            layout,
+            graph,
+            monitors: gnome(),
+            scale: 1.0,
+            double: true,
+            ..Default::default()
+        }
+    }
+
+    /// D202, #265: the playlist gives up whole steps until the group fits,
+    /// and nothing it was bonded to opens.
+    #[test]
+    fn a_group_too_tall_for_the_work_area_takes_it_out_of_the_playlist() {
+        let s = too_tall();
+        let mut l = s.layout.clone();
+        assert!(fit_playlist(
+            &mut l,
+            &s.graph,
+            &CLASSIC,
+            &s.shaded,
+            &s.monitors,
+            2.0,
+            1.0
+        ));
+        // 1276 - 1048 = 228 over; 812 - 228 = 584, and the step at 2x is 58
+        // from 232, so 232 + 6 * 58 = 580 is the tallest that fits.
+        assert_eq!(l[&PLAYLIST].h, 580);
+        assert_eq!(l[&PLAYLIST].y, s.layout[&PLAYLIST].y);
+        let b = bond::bounds(&l, &CLASSIC).unwrap();
+        assert!(b.bottom() <= 1080, "{b:?}");
+        assert!(bond::violations(&s.graph, &l).is_empty());
+        // Fitting again changes nothing.
+        let again = l.clone();
+        assert!(!fit_playlist(
+            &mut l,
+            &s.graph,
+            &CLASSIC,
+            &s.shaded,
+            &s.monitors,
+            2.0,
+            1.0
+        ));
+        assert_eq!(l, again);
+    }
+
+    #[test]
+    fn a_shaded_playlist_or_a_group_that_fits_is_left_alone() {
+        let s = too_tall();
+        let mut shaded = BTreeSet::new();
+        shaded.insert(PLAYLIST);
+        let mut l = s.layout.clone();
+        assert!(!fit_playlist(
+            &mut l,
+            &s.graph,
+            &CLASSIC,
+            &shaded,
+            &s.monitors,
+            2.0,
+            1.0
+        ));
+        assert_eq!(l, s.layout);
+        // Without the playlist in the group, nothing to give.
+        assert!(!fit_playlist(
+            &mut l,
+            &s.graph,
+            &[MAIN, EQ],
+            &s.shaded,
+            &s.monitors,
+            2.0,
+            1.0
+        ));
+        // A playlist of 290 fits: 232 + 232 + 290.
+        let pl = l[&PLAYLIST];
+        l.insert(PLAYLIST, Rect { h: 290, ..pl });
+        let fits = l.clone();
+        assert!(!fit_playlist(
+            &mut l,
+            &s.graph,
+            &CLASSIC,
+            &s.shaded,
+            &s.monitors,
+            2.0,
+            1.0
+        ));
+        assert_eq!(l, fits);
+    }
+
+    /// The hand test of #265: Main shaded with the stack at the foot of the
+    /// work area, then expanded. Where windows are confined, the stack comes
+    /// up inside whole with the playlist shorter, where Mutter had pushed
+    /// the playlist over the EQ.
+    #[test]
+    fn an_unshade_that_would_be_too_tall_comes_inside_with_a_shorter_playlist() {
+        let mut s = too_tall();
+        shade(&mut s, MAIN, true);
+        let b = bond::bounds(&s.layout, &CLASSIC).unwrap();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1080 - b.bottom());
+        let (layout, _, _) = shade(&mut s, MAIN, true);
+        let b = bond::bounds(&layout, &CLASSIC).unwrap();
+        assert!(b.y >= 32 && b.bottom() <= 1080, "{b:?}");
+        assert_eq!(layout[&PLAYLIST].h, 580);
+        assert!(bond::violations(&s.graph, &layout).is_empty());
+        // Where windows are not confined (Windows), the unshade leaves the
+        // playlist its size, as D198 has it.
+        let mut w = too_tall();
+        shade(&mut w, MAIN, false);
+        let (layout, _, _) = shade(&mut w, MAIN, false);
+        assert_eq!(layout[&PLAYLIST].h, 812);
+    }
+
+    /// D202: a dock that leaves the group too tall, the playlist docked
+    /// under the EQ: on the release the playlist is fitted, the group is
+    /// clamped inside, and the state holds what is pushed.
+    #[test]
+    fn a_dock_that_leaves_a_group_too_tall_fits_it_on_the_release() {
+        let mut s = too_tall();
+        let (layout, moved) = fit_docked(&mut s, PLAYLIST).unwrap();
+        assert_eq!(layout, s.layout);
+        assert_eq!(moved.len(), 3);
+        let b = bond::bounds(&layout, &CLASSIC).unwrap();
+        assert!(b.y >= 32 && b.bottom() <= 1080, "{b:?}");
+        assert!(bond::violations(&s.graph, &layout).is_empty());
+        // A group that fits is nothing to do.
+        assert!(fit_docked(&mut s, MAIN).is_none());
     }
 
     #[test]
