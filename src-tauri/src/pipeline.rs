@@ -1441,6 +1441,12 @@ type ProgressLine = (u64, Option<u64>, Option<f64>, Option<u64>, String);
 
 /// One `--progress-template` line. Pipe-delimited and parsed positionally —
 /// never scrape the human-readable bar (D4), which changes between releases.
+///
+/// The sixth field, after the status, is yt-dlp's estimate of the total,
+/// used only where the exact total is not known (#269): a download in
+/// fragments, which a long YouTube video often is, has only the estimate,
+/// and without it the bar pulsed for the whole run. Never less than what is
+/// already done, since an estimate can be passed near the end.
 fn parse_progress(line: &str) -> Option<ProgressLine> {
     let rest = line.strip_prefix("HPPROG|")?;
     let f: Vec<&str> = rest.split('|').collect();
@@ -1449,9 +1455,11 @@ fn parse_progress(line: &str) -> Option<ProgressLine> {
     }
     // yt-dlp emits "NA" for anything it doesn't know yet.
     let num = |s: &str| s.trim().parse::<f64>().ok();
+    let done = num(f[0]).unwrap_or(0.0) as u64;
+    let estimate = f.get(5).and_then(|s| num(s)).map(|v| (v as u64).max(done));
     Some((
-        num(f[0]).unwrap_or(0.0) as u64,
-        num(f[1]).map(|v| v as u64),
+        done,
+        num(f[1]).map(|v| v as u64).or(estimate),
         num(f[2]),
         num(f[3]).map(|v| v as u64),
         f[4].trim().to_string(),
@@ -1512,7 +1520,8 @@ async fn download_media(
         "--newline".into(),  // without this every progress line concatenates
         "--progress-template".into(),
         "download:HPPROG|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|\
-         %(progress.speed)s|%(progress.eta)s|%(progress.status)s"
+         %(progress.speed)s|%(progress.eta)s|%(progress.status)s|\
+         %(progress.total_bytes_estimate)s"
             .into(),
         "--merge-output-format".into(),
         "mp4".into(),
@@ -2942,6 +2951,26 @@ mod tests {
         assert_eq!(total, None, "unknown total must not become 0");
         assert_eq!(speed, None);
         assert_eq!(eta, None);
+        // With the estimate unknown too, still unknown.
+        let (_, total, ..) = parse_progress("HPPROG|4096|NA|NA|NA|downloading|NA").unwrap();
+        assert_eq!(total, None);
+    }
+
+    /// #269: a download in fragments knows only an estimate of its total,
+    /// and without it the bar pulsed for the whole run. The exact total wins
+    /// where there is one, and an estimate already passed is the bytes done.
+    #[test]
+    fn the_estimate_stands_in_for_an_unknown_total() {
+        let at = |line: &str| parse_progress(line).unwrap().1;
+        assert_eq!(
+            at("HPPROG|246933796|NA|1.5e6|NA|downloading|1210000000.5"),
+            Some(1_210_000_000)
+        );
+        assert_eq!(
+            at("HPPROG|1024|223779|52318.4|3|downloading|300000"),
+            Some(223_779)
+        );
+        assert_eq!(at("HPPROG|5000|NA|NA|NA|downloading|4000"), Some(5000));
     }
 
     /// #162: the id a download's name carries, and nothing for a file the
