@@ -9,7 +9,8 @@
   import { alertsStale, issued, readout, type RadarStatus } from "./lib/radar";
   import { estimate, meter, pressure, sayAudio, sayPressure, size, tipsOver, type StorageStatus } from "./lib/storage";
   import { endedId, isRepeat, nextRepeat, type Repeat, shuffled, startId, stepId } from "./lib/playorder";
-  import { onDrive, outRoots, placeAmong, sayOut } from "./lib/drives";
+  import { onDrive, outRoots, sayOut } from "./lib/drives";
+  import { between, placeFor, type Place } from "./lib/rows";
   import { draftOf, fold, nameFor, ruleFromFind, ruleOf, sayRule, type Draft, type Rule } from "./lib/smart";
   // The library's empty state (#62): the surfer, boombox on his shoulder,
   // riding the warning flag. The art is the one place a literal colour is
@@ -44,6 +45,8 @@
     root_id: number;
     path: string;
     position: number | null;
+    /** The row's own id in a hand list, what an edit names (#252, D197). */
+    item: number | null;
     /** What the last integrity check made of it (#164, D142). */
     integrity: string | null;
   };
@@ -124,9 +127,9 @@
   let ceilingEditing = $state(false);
   let ceilingGb = $state<number | null>(null);
   let storageMeter = $derived(storage ? meter(storage) : null);
-  // Drag-to-reorder within a playlist: the lifted row, and the insertion
-  // index in `shown` (0..n) it would land at.
-  let dragId = $state<number | null>(null);
+  // Drag-to-reorder within a playlist: the lifted row, by its own id, and
+  // the insertion index in `shown` (0..n) it would land at.
+  let dragItem = $state<number | null>(null);
   let dropAt = $state<number | null>(null);
   let rowsEl: HTMLUListElement;
   // Which row's "+" menu is open, by track id. One at a time.
@@ -634,7 +637,7 @@
       // once on mount, in case the first broadcast went out before it had a
       // listener, and sends its clicks back here so the audio/video branch
       // stays in one place.
-      listen("queue:hello", announceQueue),
+      listen("queue:hello", () => announceQueue(true)),
       // The playlist window's SEL (D124): make the list showing here the
       // queue, without playing anything. What is playing keeps playing; the
       // playlist window shows the new list, and Next walks it.
@@ -647,12 +650,16 @@
         if (t) play(t, true);
       }),
       // The playlist window edits the list it shows, which is the queue, not
-      // whatever the library happens to be showing (D120).
-      listen<number>("queue:remove", (e) => removeFrom(queueListId, e.payload)),
-      // `to` is an index among the rows that window shows, which leaves out
-      // the ones on a drive that is out (D143).
-      listen<{ from: number; to: number }>("queue:move", (e) =>
-        moveIn(queueListId, e.payload.from, placeIn(queueWhole, queue, e.payload.from, e.payload.to)),
+      // whatever the library happens to be showing (D120); and it names that
+      // list, the row and its track, so an edit made before its last one was
+      // drawn back lands on the row pointed at or nowhere (#252, D197).
+      listen<{ listId: number; item: number; id: number }>("queue:remove", (e) =>
+        removeRow(e.payload.listId, e.payload.item, e.payload.id),
+      ),
+      // A drop names the showing rows either side of it, so the ones on a
+      // drive that is out keep their places (D143).
+      listen<{ listId: number; item: number; id: number; place: Place }>("queue:move", (e) =>
+        moveRow(e.payload.listId, e.payload.item, e.payload.id, e.payload.place),
       ),
     ];
     // The DB is the source of truth for progress, and it's written throttled
@@ -903,8 +910,17 @@
     listPick = new SvelteSet(keep);
   }
 
-  /** Broadcast the play queue, as the playlist window sees it (D120). */
-  function announceQueue() {
+  // The last `queue:set` sent, as sent. Plain, not $state: the effect below
+  // must not hear itself.
+  let queueSent = "";
+
+  /**
+   * Broadcast the play queue, as the playlist window sees it (D120); only
+   * when it differs from the last one sent, unless a window asks (D67). A
+   * refresh assigns the playlists and the roots before it reads the new
+   * order, and each of those re-ran this with the order from before (#252).
+   */
+  function announceQueue(force = false) {
     const name =
       queueListId == null ? "Library" : (playlists.find((p) => p.id === queueListId)?.name ?? "Playlist");
     const items = queue.map((t) => ({
@@ -913,12 +929,17 @@
       uploader: t.uploader,
       duration_s: t.duration_s,
       kind: t.kind,
-      position: t.position,
+      item: t.item,
     }));
     // A smart queue is played and never edited by hand (#165): the playlist
     // window turns REM and its drag off for it.
     const smart = playlists.find((p) => p.id === queueListId)?.smart ?? false;
-    emit("queue:set", { name, listId: queueListId, smart, items }).catch(() => {});
+    // Built whole before the check, so the effect still tracks all of it.
+    const payload = { name, listId: queueListId, smart, items };
+    const json = JSON.stringify(payload);
+    if (!force && json === queueSent) return;
+    queueSent = json;
+    emit("queue:set", payload).catch(() => {});
   }
 
   // Re-broadcast whenever the queue changes: a list switch, a scan, a
@@ -1123,11 +1144,18 @@
   // find the insertion index, and release asks Rust to move the row.
   function gripDown(e: PointerEvent, i: number) {
     if (e.button !== 0 || selectedList == null) return;
-    e.preventDefault();
     const t = shown[i];
+    if (t.item == null) return;
+    e.preventDefault();
+    // The list, the row, and the showing rows either side of where it would
+    // land, by name (#252, D197).
+    const listId = selectedList;
+    const item = t.item;
+    let above: number | null = null;
+    let below: number | null = item;
     const grip = e.currentTarget as HTMLElement;
     grip.setPointerCapture(e.pointerId);
-    dragId = t.id;
+    dragItem = item;
     dropAt = i;
 
     const onMove = (ev: PointerEvent) => {
@@ -1141,18 +1169,19 @@
         }
       }
       dropAt = at;
+      ({ above, below } = between(
+        rows.map((r) => (r.dataset.item ? Number(r.dataset.item) : null)),
+        at,
+      ));
     };
     const onUp = () => {
       grip.removeEventListener("pointermove", onMove);
       grip.removeEventListener("pointerup", onUp);
       grip.removeEventListener("pointercancel", onUp);
-      const at = dropAt ?? i;
-      dragId = null;
+      dragItem = null;
       dropAt = null;
-      // `at` is an index among the rows as they are; the row itself leaves
-      // first, so a target below it shifts up by one.
-      const dest = at > i ? at - 1 : at;
-      if (dest !== i) move(t.position!, dest);
+      const place = placeFor(item, above, below);
+      if (place) moveRow(listId, item, t.id, place);
     };
     grip.addEventListener("pointermove", onMove);
     grip.addEventListener("pointerup", onUp);
@@ -1164,32 +1193,24 @@
     refreshLibrary();
   }
 
-  // A refusal is said, not swallowed: Rust turns away a hand edit on a smart
+  // A row is named by its own id and its track, and Rust finds it where it
+  // is now, so a second edit made before the first is drawn back takes the
+  // row pointed at, never the one that slid into its place (#252, D197). A
+  // refusal is said, not swallowed: Rust turns away a hand edit on a smart
   // playlist (#165) whichever window asked.
-  async function removeFrom(listId: number | null, position: number) {
+  async function removeRow(listId: number | null, item: number, mediaId: number) {
     if (listId == null) return;
-    await invoke("remove_from_playlist", { playlistId: listId, position }).catch((e) => (notice = String(e)));
+    await invoke("remove_playlist_item", { playlistId: listId, item, mediaId }).catch((e) => (notice = String(e)));
     refreshLibrary();
   }
 
-  async function moveIn(listId: number | null, from: number, to: number) {
+  async function moveRow(listId: number | null, item: number, mediaId: number, place: Place) {
     if (listId == null) return;
-    await invoke("reorder_playlist", { playlistId: listId, from, to }).catch((e) => (notice = String(e)));
-    refreshLibrary();
-  }
-
-  // The library's own rows act on the list showing.
-  const removeAt = (position: number) => removeFrom(selectedList, position);
-  const move = (from: number, to: number) => moveIn(selectedList, from, placeIn(listItems, shown, from, to));
-
-  /** A drop among the rows showing, as a place in the whole list (D143). */
-  const placeIn = (all: MediaRow[], showing: MediaRow[], from: number, to: number) =>
-    placeAmong(
-      all.map((t) => t.position ?? -1),
-      showing.map((t) => t.position ?? -1),
-      from,
-      to,
+    await invoke("move_playlist_item", { playlistId: listId, item, mediaId, place }).catch(
+      (e) => (notice = String(e)),
     );
+    refreshLibrary();
+  }
 
   /** A row's own play button: play it, and make its list the queue (D120). */
   function playFromView(t: MediaRow) {
@@ -2115,10 +2136,11 @@
         <li
           class:current={current?.id === t.id}
           class:away={!here(t)}
-          class:lifted={dragId === t.id}
-          class:drop-before={dragId != null && dropAt === i}
-          class:drop-after={dragId != null && dropAt === visible.length && i === visible.length - 1}
+          class:lifted={dragItem != null && dragItem === t.item}
+          class:drop-before={dragItem != null && dropAt === i}
+          class:drop-after={dragItem != null && dropAt === visible.length && i === visible.length - 1}
           data-idx={i}
+          data-item={t.item}
         >
           {#if selectedSmart}
             <!-- Nobody arranged a smart playlist: its rule orders it (#165). -->
@@ -2194,7 +2216,11 @@
               {/if}
             </span>
           {:else if !selectedSmart}
-            <button class="mini" onclick={() => removeAt(t.position!)} title="Remove from this playlist">×</button>
+            <button
+              class="mini"
+              onclick={() => t.item != null && removeRow(selectedList, t.item, t.id)}
+              title="Remove from this playlist">×</button
+            >
           {/if}
         </li>
       {:else}
