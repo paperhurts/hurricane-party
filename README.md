@@ -52,6 +52,9 @@ cd src-tauri && cargo build --features tauri/custom-protocol
 GDK_BACKEND=x11 ./target/debug/hurricane-party
 ```
 
+For its icon in the dock and a place in the app grid, `tools/desktop-entry.sh` writes a
+`.desktop` file for this user that starts that build (`--remove` takes it away; #268).
+
 | Sidecar | Why | Decision |
 |---|---|---|
 | `yt-dlp` | The only extractor, ever | D2, D47 |
