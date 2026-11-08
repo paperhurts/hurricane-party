@@ -36,18 +36,37 @@ pub struct Known {
     pub present: bool,
 }
 
+/// Whether a root is there: its folder, on the drive it was marked with
+/// (`platform::root_here`). Where a drive letter goes with its drive
+/// (Windows) the folder is enough. On Linux a mount point is a folder that
+/// can outlive its drive, empty or as a dead mount, and #275 found a root
+/// held "there" by one: its tracks all missing, and its drive, mounted again
+/// somewhere else, never followed.
+pub fn here(path: &str, volume: Option<&str>) -> bool {
+    crate::platform::platform().root_here(Path::new(path), volume)
+}
+
 /// Every root, whether it is there, and what it remembers of its drive.
 pub fn known(conn: &Connection) -> Result<Vec<Known>, DbError> {
+    known_by(conn, &here)
+}
+
+/// `known`, with whether a root is there decided by `is_here`.
+pub fn known_by(
+    conn: &Connection,
+    is_here: &dyn Fn(&str, Option<&str>) -> bool,
+) -> Result<Vec<Known>, DbError> {
     let mut st =
         conn.prepare("SELECT id, label, path, volume, volume_rel FROM library_roots ORDER BY id")?;
     let rows = st.query_map([], |r| {
         let path: String = r.get(2)?;
+        let volume: Option<String> = r.get(3)?;
         Ok(Known {
             id: r.get(0)?,
             label: r.get(1)?,
-            present: Path::new(&path).is_dir(),
+            present: is_here(&path, volume.as_deref()),
             path,
-            volume: r.get(3)?,
+            volume,
             volume_rel: r.get(4)?,
         })
     })?;
@@ -164,6 +183,12 @@ pub fn follow(conn: &mut Connection, root: &Known, to: &str) -> Result<Moved, Db
 mod tests {
     use super::*;
 
+    /// Whether a root is there, as Windows judges it: its folder. These
+    /// tests mark roots with made-up drive ids, and are about the follow.
+    fn folder_only(path: &str, _volume: Option<&str>) -> bool {
+        Path::new(path).is_dir()
+    }
+
     fn library() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(db::schema_for_tests()).unwrap();
@@ -196,7 +221,7 @@ mod tests {
     }
 
     fn one(conn: &Connection, id: i64) -> Known {
-        known(conn)
+        known_by(conn, &folder_only)
             .unwrap()
             .into_iter()
             .find(|k| k.id == id)
@@ -328,7 +353,7 @@ mod tests {
         let to = whereabouts(&lost, &[base.join("F")]).unwrap();
         follow(&mut conn, &lost, &to).unwrap();
 
-        let roots = known(&conn).unwrap();
+        let roots = known_by(&conn, &folder_only).unwrap();
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0].id, 1);
         assert_eq!(roots[0].path, again);

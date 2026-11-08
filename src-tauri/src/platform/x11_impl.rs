@@ -380,11 +380,50 @@ impl WindowPlatform for X11Platform {
     fn mounts_of(&self, id: &str) -> Vec<std::path::PathBuf> {
         drives::mounts_of(id)
     }
+
+    /// A mount point is a folder, and outlives its drive: left empty when a
+    /// drive mounted by hand goes, or a dead mount whose every read fails
+    /// (#275). So a root marked with a drive is there only where its folder
+    /// can be read and is on that drive. Unmarked, it is its folder, as
+    /// before; a network share has no id, so is never read here.
+    fn root_here(&self, path: &std::path::Path, volume: Option<&str>) -> bool {
+        if !path.is_dir() {
+            return false;
+        }
+        let Some(id) = volume.filter(|v| !v.is_empty()) else {
+            return true;
+        };
+        std::fs::read_dir(path).is_ok() && drives::volume_of(path).is_some_and(|v| v.id == id)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #275: a root marked with a drive is there only on that drive. The
+    /// checkout is on a real drive with an id; the test folder is made in
+    /// its build folder for that.
+    #[test]
+    fn a_root_is_there_only_on_the_drive_it_was_marked_with() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/hp-root-here");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = X11Platform;
+        // Unmarked: its folder, as before.
+        assert!(p.root_here(&dir, None));
+        assert!(p.root_here(&dir, Some("")));
+        // Marked with the drive it is on.
+        if let Some(v) = drives::volume_of(&dir) {
+            assert!(p.root_here(&dir, Some(&v.id)));
+        }
+        // Marked with another: an empty mount point left by the drive that
+        // was there, or a folder of the same name on the system drive.
+        assert!(!p.root_here(&dir, Some("0000-0000")));
+        // Not there at all.
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!p.root_here(&dir, None));
+    }
 
     #[test]
     fn a_window_never_floated_is_not_told_to_sink() {
