@@ -653,7 +653,12 @@ body {
   gap: 1px;
 }
 .shade .sbars i {
+  /* A width as well as the basis: WebKitGTK sizes the row from its items'
+     content, which an empty <i> has none of, so with the basis alone the row
+     collapsed and the preset was drawn over the bars. Chromium sizes it from
+     the basis, which is why Windows never showed it. */
   flex: 0 0 3px;
+  width: 3px;
   background: var(--accent);
   opacity: 0.85;
   box-shadow: 0 0 3px color-mix(in srgb, var(--accent) 70%, transparent);
