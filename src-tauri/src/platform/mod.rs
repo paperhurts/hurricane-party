@@ -143,12 +143,6 @@ pub trait WindowPlatform: Send + Sync {
         false
     }
 
-    /// D202: after the toolkit has been asked to put a window at a rect, ask
-    /// the window system for the whole rect in one request, where the
-    /// toolkit's move and resize reach it apart and the window manager judges
-    /// each on its own. Nothing where they arrive as one.
-    fn settle_rect(&self, _w: NativeWindow, _x: i32, _y: i32, _cx: i32, _cy: i32) {}
-
     /// D192: deliver a change of scale the window system has waiting for this
     /// window now, rather than whenever the UI thread next pumps messages.
     /// On the UI thread only: at launch, and when a window's owner is set
@@ -368,6 +362,33 @@ pub fn hold_size(w: &tauri::WebviewWindow, width: u32, height: u32) {
 
 #[cfg(not(target_os = "linux"))]
 pub fn hold_size(_w: &tauri::WebviewWindow, _width: u32, _height: u32) {}
+
+/// D202: on X11 a window both moved and resized by one push is asked for the
+/// whole rect once more, in one request, once the main loop is idle: after
+/// tao's move and resize and GTK's layout pass, and on GTK's own connection,
+/// so it reaches X after them. tao's move goes out at the old size, and
+/// Mutter confines each request on its own (D182), so a playlist moved down
+/// as it shrank was clamped up over the EQ and the resize after kept it
+/// there. `gdk_window_move_resize` is one request, judged where it lands.
+#[cfg(target_os = "linux")]
+pub fn settle(w: &tauri::WebviewWindow, x: i32, y: i32, width: u32, height: u32) {
+    use gtk::prelude::WidgetExt;
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let logical = |px: f64| (px / scale).round() as i32;
+    let (lx, ly) = (logical(x as f64), logical(y as f64));
+    let (lw, lh) = (logical(width as f64), logical(height as f64));
+    let win = w.clone();
+    let _ = w.run_on_main_thread(move || {
+        gtk::glib::idle_add_local_once(move || {
+            if let Some(g) = win.gtk_window().ok().and_then(|g| g.window()) {
+                g.move_resize(lx, ly, lw, lh);
+            }
+        });
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn settle(_w: &tauri::WebviewWindow, _x: i32, _y: i32, _width: u32, _height: u32) {}
 
 /// A classic window's own rect, in physical pixels: where `set_position` puts
 /// it and what `set_size` makes it.
