@@ -2531,14 +2531,42 @@ fn shade(s: &mut WmState, id: WindowId, confine: bool) -> (Layout, Vec<WindowId>
 
     // Everything in the component may have moved, plus the window itself.
     let moved = s.graph.component(id);
-    // D182: a group that unshades past the work area's edge comes back
-    // inside it whole, rather than the window manager pushing one window.
-    if confine {
-        let (dx, dy) = confine_clamp(&layout, &moved, &s.monitors);
-        bond::translate_group(&mut layout, &moved, dx, dy);
-    }
+    let (dx, dy) = shade_clamp(
+        &s.layout,
+        &layout,
+        &moved,
+        &s.monitors,
+        s.zoom(),
+        shaded,
+        confine,
+    );
+    bond::translate_group(&mut layout, &moved, dx, dy);
     s.layout = layout.clone();
     (layout, moved, plan_ownership(s, Some(id)))
+}
+
+/// Where a shade toggle leaves the group it changed. An unshade grows the
+/// group down, so near the foot of a display it would grow past the work
+/// area. D182: where the window manager confines windows, the group comes
+/// back inside it whole, rather than the window manager pushing one window.
+/// D198: elsewhere, a group that was wholly inside the work area before an
+/// unshade is wholly inside it after, rising as far as it must; one already
+/// partly outside, which Windows allows, keeps every title bar within reach
+/// (D88) and is otherwise left where it was put.
+fn shade_clamp(
+    before: &Layout,
+    after: &Layout,
+    group: &[WindowId],
+    monitors: &[MonitorInfo],
+    zoom: f64,
+    shaded: bool,
+    confine: bool,
+) -> (Px, Px) {
+    if confine || (!shaded && confine_clamp(before, group, monitors) == (0, 0)) {
+        confine_clamp(after, group, monitors)
+    } else {
+        reach_clamp(after, group, monitors, zoom)
+    }
 }
 
 // ---- focus ------------------------------------------------------------------
@@ -5592,6 +5620,46 @@ mod tests {
         assert_eq!(plan_ownership(&stacked(), Some(EQ)).topmost, all(false));
         let mut s = stacked();
         assert_eq!(shade(&mut s, EQ, false).2.topmost, all(false));
+    }
+
+    #[test]
+    fn a_group_unshaded_at_the_foot_of_the_screen_rises_to_stay_on_it() {
+        // D198, found by hand on Windows: Main shaded at the bottom of the
+        // display and expanded there grew the EQ and the playlist off it.
+        let mut s = stacked();
+        s.monitors = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        let (shaded, _, _) = shade(&mut s, MAIN, false);
+        assert_eq!(shaded[&MAIN].y, 0, "a shade inside the area moves nothing");
+        // The shaded stack's foot on the taskbar.
+        let foot = bond::bounds(&s.layout, &CLASSIC).unwrap().bottom();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1032 - foot);
+        let (open, _, _) = shade(&mut s, MAIN, false);
+        assert_eq!(open[&PLAYLIST].bottom(), 1032);
+        assert_eq!(open[&MAIN].y, 1032 - 3 * 116);
+        assert!(CLASSIC.iter().all(|id| open[id].x == 0));
+        assert!(bond::violations(&s.graph, &open).is_empty());
+    }
+
+    #[test]
+    fn a_group_already_hanging_off_the_screen_keeps_its_bars_in_reach() {
+        // D198: Windows lets a group hang past the work area, and an unshade
+        // does not tidy it away; it only keeps every title bar in reach (D88).
+        let mut s = stacked();
+        s.monitors = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        shade(&mut s, MAIN, false);
+        let foot = bond::bounds(&s.layout, &CLASSIC).unwrap().bottom();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1032 + 50 - foot);
+        let (open, _, _) = shade(&mut s, MAIN, false);
+        assert_eq!(open[&PLAYLIST].y, 1032 - 14);
+        assert!(open[&PLAYLIST].bottom() > 1032);
+        // Where the window manager confines windows, it comes inside whole.
+        let mut s = stacked();
+        s.monitors = vec![mon_tb(0, 0, 1920, 1080, 1.0, 48)];
+        shade(&mut s, MAIN, true);
+        let foot = bond::bounds(&s.layout, &CLASSIC).unwrap().bottom();
+        bond::translate_group(&mut s.layout, &CLASSIC, 0, 1032 + 50 - foot);
+        let (open, _, _) = shade(&mut s, MAIN, true);
+        assert_eq!(open[&PLAYLIST].bottom(), 1032);
     }
 
     #[test]
